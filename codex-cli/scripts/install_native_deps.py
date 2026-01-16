@@ -49,21 +49,21 @@ BINARY_COMPONENTS = {
         dest_dir="realmx",
         binary_basename="realmx",
     ),
-    "codex-responses-api-proxy": BinaryComponent(
-        artifact_prefix="codex-responses-api-proxy",
-        dest_dir="codex-responses-api-proxy",
-        binary_basename="codex-responses-api-proxy",
+    "realmx-responses-api-proxy": BinaryComponent(
+        artifact_prefix="realmx-responses-api-proxy",
+        dest_dir="realmx-responses-api-proxy",
+        binary_basename="realmx-responses-api-proxy",
     ),
-    "codex-windows-sandbox-setup": BinaryComponent(
-        artifact_prefix="codex-windows-sandbox-setup",
+    "realmx-windows-sandbox-setup": BinaryComponent(
+        artifact_prefix="realmx-windows-sandbox-setup",
         dest_dir="realmx",
-        binary_basename="codex-windows-sandbox-setup",
+        binary_basename="realmx-windows-sandbox-setup",
         targets=WINDOWS_TARGETS,
     ),
-    "codex-command-runner": BinaryComponent(
-        artifact_prefix="codex-command-runner",
+    "realmx-command-runner": BinaryComponent(
+        artifact_prefix="realmx-command-runner",
         dest_dir="realmx",
-        binary_basename="codex-command-runner",
+        binary_basename="realmx-command-runner",
         targets=WINDOWS_TARGETS,
     ),
 }
@@ -135,8 +135,8 @@ def parse_args() -> argparse.Namespace:
         choices=tuple(list(BINARY_COMPONENTS) + ["rg"]),
         help=(
             "Limit installation to the specified components."
-            " May be repeated. Defaults to realmx, codex-windows-sandbox-setup,"
-            " codex-command-runner, and rg."
+            " May be repeated. Defaults to realmx, realmx-windows-sandbox-setup,"
+            " realmx-command-runner, and rg."
         ),
     )
     parser.add_argument(
@@ -160,8 +160,8 @@ def main() -> int:
 
     components = args.components or [
         "realmx",
-        "codex-windows-sandbox-setup",
-        "codex-command-runner",
+        "realmx-windows-sandbox-setup",
+        "realmx-command-runner",
         "rg",
     ]
 

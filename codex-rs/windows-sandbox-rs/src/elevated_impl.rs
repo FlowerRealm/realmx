@@ -110,17 +110,17 @@ mod windows_impl {
         }
     }
 
-    /// Locates `codex-command-runner.exe` next to the current binary.
+    /// Locates `realmx-command-runner.exe` next to the current binary.
     fn find_runner_exe() -> PathBuf {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                let candidate = dir.join("codex-command-runner.exe");
+                let candidate = dir.join("realmx-command-runner.exe");
                 if candidate.exists() {
                     return candidate;
                 }
             }
         }
-        PathBuf::from("codex-command-runner.exe")
+        PathBuf::from("realmx-command-runner.exe")
     }
 
     /// Generates a unique named-pipe path used to communicate with the runner process.
@@ -282,7 +282,7 @@ mod windows_impl {
         let runner_cmdline = runner_exe
             .to_str()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "codex-command-runner.exe".to_string());
+            .unwrap_or_else(|| "realmx-command-runner.exe".to_string());
         // Write request to a file under the sandbox base dir for the runner to read.
         // TODO(iceweasel) - use a different mechanism for invoking the runner.
         let base_tmp = sandbox_base.join("requests");

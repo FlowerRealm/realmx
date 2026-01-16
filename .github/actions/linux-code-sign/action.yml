@@ -30,7 +30,7 @@ runs:
           exit 1
         fi
 
-        for binary in realmx codex-responses-api-proxy; do
+        for binary in realmx realmx-responses-api-proxy; do
           artifact="${dest}/${binary}"
           if [[ ! -f "$artifact" ]]; then
             echo "Binary $artifact not found"

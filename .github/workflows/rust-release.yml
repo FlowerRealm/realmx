@@ -61,9 +61,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-xlarge
+          - runner: macos-latest
             target: aarch64-apple-darwin
-          - runner: macos-15-xlarge
+          - runner: macos-latest
             target: x86_64-apple-darwin
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
@@ -100,14 +100,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
 
-      - name: Cargo build
-        shell: bash
-        run: |
-          if [[ "${{ contains(matrix.target, 'windows') }}" == 'true' ]]; then
-            cargo build --target ${{ matrix.target }} --release --bin realmx --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-command-runner
-          else
-            cargo build --target ${{ matrix.target }} --release --bin realmx --bin codex-responses-api-proxy
-          fi
+	      - name: Cargo build
+	        shell: bash
+	        run: |
+	          if [[ "${{ contains(matrix.target, 'windows') }}" == 'true' ]]; then
+	            cargo build --target ${{ matrix.target }} --release --bin realmx --bin realmx-responses-api-proxy --bin realmx-windows-sandbox-setup --bin realmx-command-runner
+	          else
+	            cargo build --target ${{ matrix.target }} --release --bin realmx --bin realmx-responses-api-proxy
+	          fi
 
       - if: ${{ contains(matrix.target, 'linux') }}
         name: Cosign Linux artifacts
@@ -128,9 +128,9 @@ jobs:
           volname="Realmx (${target})"
           dmg_path="${release_dir}/realmx-${target}.dmg"
 
-          # Package the built artifacts in `${release_dir}` into a dmg.
-          realmx_binary_path="${release_dir}/realmx"
-          proxy_binary_path="${release_dir}/codex-responses-api-proxy"
+	          # Package the built artifacts in `${release_dir}` into a dmg.
+	          realmx_binary_path="${release_dir}/realmx"
+	          proxy_binary_path="${release_dir}/realmx-responses-api-proxy"
 
           rm -rf "$dmg_root"
           mkdir -p "$dmg_root"
@@ -144,8 +144,8 @@ jobs:
             exit 1
           fi
 
-          ditto "$realmx_binary_path" "${dmg_root}/realmx"
-          ditto "$proxy_binary_path" "${dmg_root}/codex-responses-api-proxy"
+	          ditto "$realmx_binary_path" "${dmg_root}/realmx"
+	          ditto "$proxy_binary_path" "${dmg_root}/realmx-responses-api-proxy"
 
           rm -f "$dmg_path"
           hdiutil create \
@@ -166,20 +166,20 @@ jobs:
           dest="dist/${{ matrix.target }}"
           mkdir -p "$dest"
 
-          if [[ "${{ matrix.runner }}" == windows* ]]; then
-            cp target/${{ matrix.target }}/release/realmx.exe "$dest/realmx-${{ matrix.target }}.exe"
-            cp target/${{ matrix.target }}/release/codex-responses-api-proxy.exe "$dest/codex-responses-api-proxy-${{ matrix.target }}.exe"
-            cp target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe "$dest/codex-windows-sandbox-setup-${{ matrix.target }}.exe"
-            cp target/${{ matrix.target }}/release/codex-command-runner.exe "$dest/codex-command-runner-${{ matrix.target }}.exe"
-          else
-            cp target/${{ matrix.target }}/release/realmx "$dest/realmx-${{ matrix.target }}"
-            cp target/${{ matrix.target }}/release/codex-responses-api-proxy "$dest/codex-responses-api-proxy-${{ matrix.target }}"
-          fi
+	          if [[ "${{ matrix.runner }}" == windows* ]]; then
+	            cp target/${{ matrix.target }}/release/realmx.exe "$dest/realmx-${{ matrix.target }}.exe"
+	            cp target/${{ matrix.target }}/release/realmx-responses-api-proxy.exe "$dest/realmx-responses-api-proxy-${{ matrix.target }}.exe"
+	            cp target/${{ matrix.target }}/release/realmx-windows-sandbox-setup.exe "$dest/realmx-windows-sandbox-setup-${{ matrix.target }}.exe"
+	            cp target/${{ matrix.target }}/release/realmx-command-runner.exe "$dest/realmx-command-runner-${{ matrix.target }}.exe"
+	          else
+	            cp target/${{ matrix.target }}/release/realmx "$dest/realmx-${{ matrix.target }}"
+	            cp target/${{ matrix.target }}/release/realmx-responses-api-proxy "$dest/realmx-responses-api-proxy-${{ matrix.target }}"
+	          fi
 
-          if [[ "${{ matrix.target }}" == *linux* ]]; then
-            cp target/${{ matrix.target }}/release/realmx.sigstore "$dest/realmx-${{ matrix.target }}.sigstore"
-            cp target/${{ matrix.target }}/release/codex-responses-api-proxy.sigstore "$dest/codex-responses-api-proxy-${{ matrix.target }}.sigstore"
-          fi
+	          if [[ "${{ matrix.target }}" == *linux* ]]; then
+	            cp target/${{ matrix.target }}/release/realmx.sigstore "$dest/realmx-${{ matrix.target }}.sigstore"
+	            cp target/${{ matrix.target }}/release/realmx-responses-api-proxy.sigstore "$dest/realmx-responses-api-proxy-${{ matrix.target }}.sigstore"
+	          fi
 
           if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
             cp target/${{ matrix.target }}/release/realmx-${{ matrix.target }}.dmg "$dest/realmx-${{ matrix.target }}.dmg"

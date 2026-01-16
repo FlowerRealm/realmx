@@ -21,13 +21,13 @@ PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
     "codex-sdk": [],
 }
 WINDOWS_ONLY_COMPONENTS: dict[str, list[str]] = {
-    "realmx": ["codex-windows-sandbox-setup", "codex-command-runner"],
+    "realmx": ["realmx-windows-sandbox-setup", "realmx-command-runner"],
 }
 COMPONENT_DEST_DIR: dict[str, str] = {
     "realmx": "realmx",
     "codex-responses-api-proxy": "codex-responses-api-proxy",
-    "codex-windows-sandbox-setup": "realmx",
-    "codex-command-runner": "realmx",
+    "realmx-windows-sandbox-setup": "realmx",
+    "realmx-command-runner": "realmx",
     "rg": "path",
 }
 
