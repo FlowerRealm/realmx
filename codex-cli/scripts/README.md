@@ -6,7 +6,7 @@ example, to stage the CLI, responses proxy, and SDK packages for version `0.6.0`
 ```bash
 ./scripts/stage_npm_packages.py \
   --release-version 0.6.0 \
-  --package codex \
+  --package realmx \
   --package codex-responses-api-proxy \
   --package codex-sdk
 ```

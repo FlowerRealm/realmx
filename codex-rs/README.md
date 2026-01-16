@@ -1,17 +1,17 @@
-# Codex CLI (Rust Implementation)
+# Realmx CLI (Rust Implementation)
 
-We provide Codex CLI as a standalone, native executable to ensure a zero-dependency install.
+We provide Realmx CLI as a standalone, native executable to ensure a zero-dependency install.
 
-## Installing Codex
+## Installing Realmx
 
-Today, the easiest way to install Codex is via `npm`:
+Today, the easiest way to install Realmx is via `npm`:
 
 ```shell
-npm i -g @openai/codex
-codex
+npm i -g @flowerrealm/realmx
+realmx
 ```
 
-You can also install via Homebrew (`brew install --cask codex`) or download a platform-specific release directly from our [GitHub Releases](https://github.com/openai/codex/releases).
+You can also download a platform-specific release directly from our [GitHub Releases](https://github.com/FlowerRealm/realmx/releases).
 
 ## Documentation quickstart
 

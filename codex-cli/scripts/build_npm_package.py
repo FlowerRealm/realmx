@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @openai/codex npm module."""
+"""Stage and optionally package the @flowerrealm/realmx npm module."""
 
 import argparse
 import json
@@ -16,29 +16,29 @@ RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / 
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
 
 PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
-    "codex": ["codex", "rg"],
+    "realmx": ["realmx", "rg"],
     "codex-responses-api-proxy": ["codex-responses-api-proxy"],
-    "codex-sdk": ["codex"],
+    "codex-sdk": [],
 }
 WINDOWS_ONLY_COMPONENTS: dict[str, list[str]] = {
-    "codex": ["codex-windows-sandbox-setup", "codex-command-runner"],
+    "realmx": ["codex-windows-sandbox-setup", "codex-command-runner"],
 }
 COMPONENT_DEST_DIR: dict[str, str] = {
-    "codex": "codex",
+    "realmx": "realmx",
     "codex-responses-api-proxy": "codex-responses-api-proxy",
-    "codex-windows-sandbox-setup": "codex",
-    "codex-command-runner": "codex",
+    "codex-windows-sandbox-setup": "realmx",
+    "codex-command-runner": "realmx",
     "rg": "path",
 }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build or stage the Codex CLI npm package.")
+    parser = argparse.ArgumentParser(description="Build or stage the Realmx CLI npm package.")
     parser.add_argument(
         "--package",
-        choices=("codex", "codex-responses-api-proxy", "codex-sdk"),
-        default="codex",
-        help="Which npm package to stage (default: codex).",
+        choices=("realmx", "codex-responses-api-proxy", "codex-sdk"),
+        default="realmx",
+        help="Which npm package to stage (default: realmx).",
     )
     parser.add_argument(
         "--version",
@@ -112,12 +112,12 @@ def main() -> int:
 
         if release_version:
             staging_dir_str = str(staging_dir)
-            if package == "codex":
+            if package == "realmx":
                 print(
                     f"Staged version {version} for release in {staging_dir_str}\n\n"
                     "Verify the CLI:\n"
-                    f"    node {staging_dir_str}/bin/codex.js --version\n"
-                    f"    node {staging_dir_str}/bin/codex.js --help\n\n"
+                    f"    node {staging_dir_str}/bin/realmx.js --version\n"
+                    f"    node {staging_dir_str}/bin/realmx.js --help\n\n"
                 )
             elif package == "codex-responses-api-proxy":
                 print(
@@ -160,10 +160,10 @@ def prepare_staging_dir(staging_dir: Path | None) -> tuple[Path, bool]:
 
 
 def stage_sources(staging_dir: Path, version: str, package: str) -> None:
-    if package == "codex":
+    if package == "realmx":
         bin_dir = staging_dir / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(CODEX_CLI_ROOT / "bin" / "codex.js", bin_dir / "codex.js")
+        shutil.copy2(CODEX_CLI_ROOT / "bin" / "realmx.js", bin_dir / "realmx.js")
         rg_manifest = CODEX_CLI_ROOT / "bin" / "rg"
         if rg_manifest.exists():
             shutil.copy2(rg_manifest, bin_dir / "rg")

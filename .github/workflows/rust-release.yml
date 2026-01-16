@@ -1,4 +1,4 @@
-# Release workflow for codex-rs.
+# Release workflow for realmx (codex-rs fork).
 # To release, follow a workflow like:
 # ```
 # git tag -a rust-v0.1.0 -m "Release 0.1.0"
@@ -104,9 +104,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ contains(matrix.target, 'windows') }}" == 'true' ]]; then
-            cargo build --target ${{ matrix.target }} --release --bin codex --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-command-runner
+            cargo build --target ${{ matrix.target }} --release --bin realmx --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-command-runner
           else
-            cargo build --target ${{ matrix.target }} --release --bin codex --bin codex-responses-api-proxy
+            cargo build --target ${{ matrix.target }} --release --bin realmx --bin codex-responses-api-proxy
           fi
 
       - if: ${{ contains(matrix.target, 'linux') }}
@@ -116,31 +116,6 @@ jobs:
           target: ${{ matrix.target }}
           artifacts-dir: ${{ github.workspace }}/codex-rs/target/${{ matrix.target }}/release
 
-      - if: ${{ contains(matrix.target, 'windows') }}
-        name: Sign Windows binaries with Azure Trusted Signing
-        uses: ./.github/actions/windows-code-sign
-        with:
-          target: ${{ matrix.target }}
-          client-id: ${{ secrets.AZURE_TRUSTED_SIGNING_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TRUSTED_SIGNING_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_TRUSTED_SIGNING_SUBSCRIPTION_ID }}
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-
-      - if: ${{ runner.os == 'macOS' }}
-        name: MacOS code signing (binaries)
-        uses: ./.github/actions/macos-code-sign
-        with:
-          target: ${{ matrix.target }}
-          sign-binaries: "true"
-          sign-dmg: "false"
-          apple-certificate: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          apple-notarization-key-p8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
-          apple-notarization-key-id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-          apple-notarization-issuer-id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-
       - if: ${{ runner.os == 'macOS' }}
         name: Build macOS dmg
         shell: bash
@@ -149,21 +124,19 @@ jobs:
 
           target="${{ matrix.target }}"
           release_dir="target/${target}/release"
-          dmg_root="${RUNNER_TEMP}/codex-dmg-root"
-          volname="Codex (${target})"
-          dmg_path="${release_dir}/codex-${target}.dmg"
+          dmg_root="${RUNNER_TEMP}/realmx-dmg-root"
+          volname="Realmx (${target})"
+          dmg_path="${release_dir}/realmx-${target}.dmg"
 
-          # The previous "MacOS code signing (binaries)" step signs + notarizes the
-          # built artifacts in `${release_dir}`. This step packages *those same*
-          # signed binaries into a dmg.
-          codex_binary_path="${release_dir}/codex"
+          # Package the built artifacts in `${release_dir}` into a dmg.
+          realmx_binary_path="${release_dir}/realmx"
           proxy_binary_path="${release_dir}/codex-responses-api-proxy"
 
           rm -rf "$dmg_root"
           mkdir -p "$dmg_root"
 
-          if [[ ! -f "$codex_binary_path" ]]; then
-            echo "Binary $codex_binary_path not found"
+          if [[ ! -f "$realmx_binary_path" ]]; then
+            echo "Binary $realmx_binary_path not found"
             exit 1
           fi
           if [[ ! -f "$proxy_binary_path" ]]; then
@@ -171,7 +144,7 @@ jobs:
             exit 1
           fi
 
-          ditto "$codex_binary_path" "${dmg_root}/codex"
+          ditto "$realmx_binary_path" "${dmg_root}/realmx"
           ditto "$proxy_binary_path" "${dmg_root}/codex-responses-api-proxy"
 
           rm -f "$dmg_path"
@@ -187,19 +160,6 @@ jobs:
             exit 1
           fi
 
-      - if: ${{ runner.os == 'macOS' }}
-        name: MacOS code signing (dmg)
-        uses: ./.github/actions/macos-code-sign
-        with:
-          target: ${{ matrix.target }}
-          sign-binaries: "false"
-          sign-dmg: "true"
-          apple-certificate: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          apple-notarization-key-p8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
-          apple-notarization-key-id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
-          apple-notarization-issuer-id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-
       - name: Stage artifacts
         shell: bash
         run: |
@@ -207,22 +167,22 @@ jobs:
           mkdir -p "$dest"
 
           if [[ "${{ matrix.runner }}" == windows* ]]; then
-            cp target/${{ matrix.target }}/release/codex.exe "$dest/codex-${{ matrix.target }}.exe"
+            cp target/${{ matrix.target }}/release/realmx.exe "$dest/realmx-${{ matrix.target }}.exe"
             cp target/${{ matrix.target }}/release/codex-responses-api-proxy.exe "$dest/codex-responses-api-proxy-${{ matrix.target }}.exe"
             cp target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe "$dest/codex-windows-sandbox-setup-${{ matrix.target }}.exe"
             cp target/${{ matrix.target }}/release/codex-command-runner.exe "$dest/codex-command-runner-${{ matrix.target }}.exe"
           else
-            cp target/${{ matrix.target }}/release/codex "$dest/codex-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/realmx "$dest/realmx-${{ matrix.target }}"
             cp target/${{ matrix.target }}/release/codex-responses-api-proxy "$dest/codex-responses-api-proxy-${{ matrix.target }}"
           fi
 
           if [[ "${{ matrix.target }}" == *linux* ]]; then
-            cp target/${{ matrix.target }}/release/codex.sigstore "$dest/codex-${{ matrix.target }}.sigstore"
+            cp target/${{ matrix.target }}/release/realmx.sigstore "$dest/realmx-${{ matrix.target }}.sigstore"
             cp target/${{ matrix.target }}/release/codex-responses-api-proxy.sigstore "$dest/codex-responses-api-proxy-${{ matrix.target }}.sigstore"
           fi
 
           if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
-            cp target/${{ matrix.target }}/release/codex-${{ matrix.target }}.dmg "$dest/codex-${{ matrix.target }}.dmg"
+            cp target/${{ matrix.target }}/release/realmx-${{ matrix.target }}.dmg "$dest/realmx-${{ matrix.target }}.dmg"
           fi
 
       - if: ${{ matrix.runner == 'windows-11-arm' }}
@@ -249,9 +209,9 @@ jobs:
           # For compatibility with environments that lack the `zstd` tool we
           # additionally create a `.tar.gz` for all platforms and `.zip` for
           # Windows alongside every single binary that we publish. The end result is:
-          #   codex-<target>.zst          (existing)
-          #   codex-<target>.tar.gz       (new)
-          #   codex-<target>.zip          (only for Windows)
+          #   realmx-<target>.zst          (existing)
+          #   realmx-<target>.tar.gz       (new)
+          #   realmx-<target>.zip          (only for Windows)
 
           # 1. Produce a .tar.gz for every file in the directory *before* we
           #    run `zstd --rm`, because that flag deletes the original files.
@@ -295,19 +255,9 @@ jobs:
           path: |
             codex-rs/dist/${{ matrix.target }}/*
 
-  shell-tool-mcp:
-    name: shell-tool-mcp
-    needs: tag-check
-    uses: ./.github/workflows/shell-tool-mcp.yml
-    with:
-      release-tag: ${{ github.ref_name }}
-      publish: true
-    secrets: inherit
-
   release:
     needs:
       - build
-      - shell-tool-mcp
     name: release
     runs-on: ubuntu-latest
     permissions:
@@ -349,14 +299,6 @@ jobs:
 
       - name: List
         run: ls -R dist/
-
-      # This is a temporary fix: we should modify shell-tool-mcp.yml so these
-      # files do not end up in dist/ in the first place.
-      - name: Delete entries from dist/ that should not go in the release
-        run: |
-          rm -rf dist/shell-tool-mcp*
-
-          ls -R dist/
 
       - name: Define release name
         id: release_name
@@ -406,9 +348,7 @@ jobs:
         run: |
           ./scripts/stage_npm_packages.py \
             --release-version "${{ steps.release_name.outputs.name }}" \
-            --package codex \
-            --package codex-responses-api-proxy \
-            --package codex-sdk
+            --package realmx
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -447,7 +387,7 @@ jobs:
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
-          scope: "@openai"
+          scope: "@flowerrealm"
 
       # Trusted publishing requires npm CLI version 11.5.1 or later.
       - name: Update npm
@@ -463,15 +403,7 @@ jobs:
           mkdir -p dist/npm
           gh release download "$tag" \
             --repo "${GITHUB_REPOSITORY}" \
-            --pattern "codex-npm-${version}.tgz" \
-            --dir dist/npm
-          gh release download "$tag" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --pattern "codex-responses-api-proxy-npm-${version}.tgz" \
-            --dir dist/npm
-          gh release download "$tag" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --pattern "codex-sdk-npm-${version}.tgz" \
+            --pattern "realmx-npm-${version}.tgz" \
             --dir dist/npm
 
       # No NODE_AUTH_TOKEN needed because we use OIDC.
@@ -487,9 +419,7 @@ jobs:
           fi
 
           tarballs=(
-            "codex-npm-${VERSION}.tgz"
-            "codex-responses-api-proxy-npm-${VERSION}.tgz"
-            "codex-sdk-npm-${VERSION}.tgz"
+            "realmx-npm-${VERSION}.tgz"
           )
 
           for tarball in "${tarballs[@]}"; do
@@ -497,6 +427,7 @@ jobs:
           done
 
   update-branch:
+    if: ${{ needs.release.outputs.npm_tag == 'alpha' }}
     name: Update latest-alpha-cli branch
     permissions:
       contents: write

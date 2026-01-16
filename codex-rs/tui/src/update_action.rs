@@ -1,11 +1,11 @@
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
-    /// Update via `npm install -g @openai/codex@latest`.
+    /// Update via `npm install -g @flowerrealm/realmx@latest`.
     NpmGlobalLatest,
-    /// Update via `bun install -g @openai/codex@latest`.
+    /// Update via `bun install -g @flowerrealm/realmx@latest`.
     BunGlobalLatest,
-    /// Update via `brew upgrade codex`.
+    /// Update via `brew upgrade realmx`.
     BrewUpgrade,
 }
 
@@ -13,9 +13,13 @@ impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "codex"]),
+            UpdateAction::NpmGlobalLatest => {
+                ("npm", &["install", "-g", "@flowerrealm/realmx@latest"])
+            }
+            UpdateAction::BunGlobalLatest => {
+                ("bun", &["install", "-g", "@flowerrealm/realmx@latest"])
+            }
+            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "realmx"]),
         }
     }
 
@@ -82,7 +86,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 true,
-                std::path::Path::new("/opt/homebrew/bin/codex"),
+                std::path::Path::new("/opt/homebrew/bin/realmx"),
                 false,
                 false
             ),
@@ -91,7 +95,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 true,
-                std::path::Path::new("/usr/local/bin/codex"),
+                std::path::Path::new("/usr/local/bin/realmx"),
                 false,
                 false
             ),
