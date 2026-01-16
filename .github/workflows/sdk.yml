@@ -26,8 +26,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.92
 
-      - name: build codex
-        run: cargo build --bin codex
+      - name: build realmx
+        run: cargo build --bin realmx
         working-directory: codex-rs
 
       - name: Install dependencies
