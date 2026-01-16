@@ -36,20 +36,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Use a rust-release version that includes all native binaries.
-          CODEX_VERSION=0.74.0
+          # Pull native binaries from the latest successful rust-release workflow run.
+          WORKFLOW_URL="$(
+            gh run list \
+              --workflow .github/workflows/rust-release.yml \
+              --json url,conclusion \
+              --jq 'map(select(.conclusion == "success")) | .[0].url'
+          )"
+          if [[ -z "${WORKFLOW_URL}" || "${WORKFLOW_URL}" == "null" ]]; then
+            echo "No successful rust-release workflow runs found; cannot stage npm package." >&2
+            exit 1
+          fi
+
+          # Use a CI-only version; we upload the tgz as an artifact and do not publish it.
+          REALMX_VERSION=0.0.0-dev
           OUTPUT_DIR="${RUNNER_TEMP}"
           python3 ./scripts/stage_npm_packages.py \
-            --release-version "$CODEX_VERSION" \
-            --package codex \
+            --release-version "$REALMX_VERSION" \
+            --workflow-url "$WORKFLOW_URL" \
+            --package realmx \
             --output-dir "$OUTPUT_DIR"
-          PACK_OUTPUT="${OUTPUT_DIR}/codex-npm-${CODEX_VERSION}.tgz"
+          PACK_OUTPUT="${OUTPUT_DIR}/realmx-npm-${REALMX_VERSION}.tgz"
           echo "pack_output=$PACK_OUTPUT" >> "$GITHUB_OUTPUT"
 
       - name: Upload staged npm package artifact
         uses: actions/upload-artifact@v6
         with:
-          name: codex-npm-staging
+          name: realmx-npm-staging
           path: ${{ steps.stage_npm_package.outputs.pack_output }}
 
       - name: Ensure root README.md contains only ASCII and certain Unicode code points

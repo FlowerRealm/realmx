@@ -175,7 +175,7 @@ def main() -> int:
     print(f"Downloading native artifacts from workflow {workflow_id}...")
 
     with _gha_group(f"Download native artifacts from workflow {workflow_id}"):
-        with tempfile.TemporaryDirectory(prefix="codex-native-artifacts-") as artifacts_dir_str:
+        with tempfile.TemporaryDirectory(prefix="realmx-native-artifacts-") as artifacts_dir_str:
             artifacts_dir = Path(artifacts_dir_str)
             _download_artifacts(workflow_url, workflow_id, artifacts_dir)
             install_binary_components(
