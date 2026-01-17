@@ -345,6 +345,10 @@ jobs:
       USE_SCCACHE: ${{ startsWith(matrix.runner, 'windows') && 'false' || 'true' }}
       CARGO_INCREMENTAL: "0"
       SCCACHE_CACHE_SIZE: 10G
+      # Keep shell error messages stable across locales so sandbox-denial
+      # detection and related tests behave consistently.
+      LC_ALL: C
+      LANG: C
 
     strategy:
       fail-fast: false
@@ -439,6 +443,14 @@ jobs:
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
         with:
           tool: nextest
+
+      - name: Build helper binaries (for tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --all-features --target ${{ matrix.target }} --profile ci-test -p codex-cli --bin realmx
+          cargo build --all-features --target ${{ matrix.target }} --profile ci-test -p codex-linux-sandbox --bin codex-linux-sandbox
+          cargo build --all-features --target ${{ matrix.target }} --profile ci-test -p codex-rmcp-client --bin test_stdio_server --bin test_streamable_http_server
 
       - name: tests
         id: test

@@ -11,6 +11,7 @@ use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::user_input::UserInput;
+use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -70,7 +71,7 @@ async fn build_codex_with_test_tool(server: &wiremock::MockServer) -> anyhow::Re
 fn assert_parallel_duration(actual: Duration) {
     // Allow headroom for runtime overhead while still differentiating from serial execution.
     assert!(
-        actual < Duration::from_millis(750),
+        actual < Duration::from_secs(2),
         "expected parallel execution to finish quickly, got {actual:?}"
     );
 }
@@ -80,6 +81,37 @@ fn assert_serial_duration(actual: Duration) {
         actual >= Duration::from_millis(500),
         "expected serial execution to take longer, got {actual:?}"
     );
+}
+
+fn assert_function_call_output_ok(mock: &ResponseMock, call_id: &str) {
+    let call_output = mock
+        .requests()
+        .into_iter()
+        .flat_map(|req| req.input())
+        .find(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+        })
+        .unwrap_or_else(|| panic!("function_call_output {call_id} item not found in requests"));
+
+    let output = call_output.get("output").cloned().unwrap_or(Value::Null);
+    match output {
+        Value::String(text) => {
+            assert!(
+                !text.contains("barrier wait timed out"),
+                "test_sync_tool output should not be a barrier timeout error: {text}"
+            );
+            assert!(
+                text.contains("ok"),
+                "unexpected test_sync_tool output: {text}"
+            );
+        }
+        Value::Object(obj) => {
+            assert_eq!(obj.get("content").and_then(Value::as_str), Some("ok"));
+            assert_eq!(obj.get("success").and_then(Value::as_bool), Some(true));
+        }
+        other => panic!("unexpected test_sync_tool output: {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -104,7 +136,7 @@ async fn read_file_tools_run_in_parallel() -> anyhow::Result<()> {
         "barrier": {
             "id": "parallel-test-sync",
             "participants": 2,
-            "timeout_ms": 1_000,
+            "timeout_ms": 5_000,
         }
     })
     .to_string();
@@ -130,7 +162,7 @@ async fn read_file_tools_run_in_parallel() -> anyhow::Result<()> {
         ev_assistant_message("msg-1", "done"),
         ev_completed("resp-2"),
     ]);
-    mount_sse_sequence(
+    let responses_mock = mount_sse_sequence(
         &server,
         vec![warmup_first, warmup_second, first_response, second_response],
     )
@@ -139,6 +171,8 @@ async fn read_file_tools_run_in_parallel() -> anyhow::Result<()> {
     run_turn(&test, "warm up parallel tool").await?;
 
     let duration = run_turn_and_measure(&test, "exercise sync tool").await?;
+    assert_function_call_output_ok(&responses_mock, "call-1");
+    assert_function_call_output_ok(&responses_mock, "call-2");
     assert_parallel_duration(duration);
 
     Ok(())

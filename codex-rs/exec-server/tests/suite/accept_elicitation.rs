@@ -79,8 +79,8 @@ prefix_rule(
     let linux_sandbox_exe_folder = TempDir::new()?;
     let codex_linux_sandbox_exe = if cfg!(target_os = "linux") {
         let codex_linux_sandbox_exe = linux_sandbox_exe_folder.path().join("codex-linux-sandbox");
-        let codex_cli = ensure_codex_cli()?;
-        symlink(&codex_cli, &codex_linux_sandbox_exe)?;
+        let realmx_cli = ensure_realmx_cli()?;
+        symlink(&realmx_cli, &codex_linux_sandbox_exe)?;
         Some(codex_linux_sandbox_exe)
     } else {
         None
@@ -143,29 +143,29 @@ prefix_rule(
     Ok(())
 }
 
-fn ensure_codex_cli() -> Result<PathBuf> {
-    let codex_cli = codex_utils_cargo_bin::cargo_bin("codex")?;
+fn ensure_realmx_cli() -> Result<PathBuf> {
+    let realmx_cli = codex_utils_cargo_bin::cargo_bin("realmx")?;
 
-    let metadata = codex_cli.metadata().with_context(|| {
+    let metadata = realmx_cli.metadata().with_context(|| {
         format!(
-            "failed to read metadata for codex binary at {}",
-            codex_cli.display()
+            "failed to read metadata for realmx binary at {}",
+            realmx_cli.display()
         )
     })?;
     ensure!(
         metadata.is_file(),
-        "expected codex binary at {} to be a file; run `cargo build -p codex-cli --bin codex` before this test",
-        codex_cli.display()
+        "expected realmx binary at {} to be a file; run `cargo build -p codex-cli --bin realmx` before this test",
+        realmx_cli.display()
     );
 
     let mode = metadata.permissions().mode();
     ensure!(
         mode & 0o111 != 0,
-        "codex binary at {} is not executable (mode {mode:o}); run `cargo build -p codex-cli --bin codex` before this test",
-        codex_cli.display()
+        "realmx binary at {} is not executable (mode {mode:o}); run `cargo build -p codex-cli --bin realmx` before this test",
+        realmx_cli.display()
     );
 
-    Ok(codex_cli)
+    Ok(realmx_cli)
 }
 
 async fn resolve_git_path(use_login_shell: bool) -> Result<String> {

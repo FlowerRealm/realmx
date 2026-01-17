@@ -109,6 +109,15 @@ impl SandboxManager {
             );
         }
 
+        // Ensure deterministic tool output across environments by forcing a stable locale inside
+        // the platform sandbox. This also ensures sandbox-denied heuristics remain reliable even
+        // when the user's locale is non-English.
+        if sandbox != SandboxType::None {
+            env.insert("LANG".to_string(), "C.UTF-8".to_string());
+            env.insert("LC_CTYPE".to_string(), "C.UTF-8".to_string());
+            env.insert("LC_ALL".to_string(), "C.UTF-8".to_string());
+        }
+
         let mut command = Vec::with_capacity(1 + spec.args.len());
         command.push(spec.program);
         command.append(&mut spec.args);
