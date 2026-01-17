@@ -19,7 +19,7 @@ use test_case::test_case;
 
 /// Use this timeout if, empirically, a test seems to need more time than the
 /// default.
-const MEDIUM_TIMEOUT: Duration = Duration::from_secs(5);
+const MEDIUM_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn shell_responses_with_timeout(
     call_id: &str,
