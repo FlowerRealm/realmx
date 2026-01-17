@@ -373,6 +373,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Disk usage before cleanup"
+          df -h
+          echo "::endgroup::"
+
+          # GitHub-hosted runners ship with large preinstalled SDKs that this
+          # repo doesn't need for Rust builds/tests. Removing them helps avoid
+          # "No space left on device" failures in large matrices.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          sudo apt-get clean || true
+
+          echo "::group::Disk usage after cleanup"
+          df -h
+          echo "::endgroup::"
+
       # Some integration tests rely on DotSlash being installed.
       # See https://github.com/openai/codex/pull/7617.
       - name: Install DotSlash
