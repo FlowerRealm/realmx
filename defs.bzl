@@ -13,6 +13,12 @@ PLATFORMS = [
     "windows_arm64",
 ]
 
+# Keep Bazel's compile-time version env vars aligned with the Cargo workspace
+# version so `env!("CARGO_PKG_VERSION")` is stable across build systems.
+#
+# NOTE: Update this when bumping `codex-rs/Cargo.toml`'s workspace version.
+WORKSPACE_VERSION = "0.0.1"
+
 def multiplatform_binaries(name, platforms = PLATFORMS):
     for platform in platforms:
         platform_data(
@@ -85,6 +91,7 @@ def codex_rust_crate(
 
     rustc_env = {
         "BAZEL_PACKAGE": native.package_name(),
+        "CARGO_PKG_VERSION": WORKSPACE_VERSION,
     }
 
     binaries = DEP_DATA.get(native.package_name())["binaries"]
@@ -101,7 +108,7 @@ def codex_rust_crate(
             proc_macro_deps = all_crate_deps(build_proc_macro = True),
             data = build_script_data,
             # Some build script deps sniff version-related env vars...
-            version = "0.0.0",
+            version = WORKSPACE_VERSION,
         )
 
         deps = deps + [name + "-build-script"]
@@ -150,6 +157,7 @@ def codex_rust_crate(
             proc_macro_deps = proc_macro_deps,
             edition = crate_edition,
             srcs = native.glob(["src/**/*.rs"]),
+            rustc_env = rustc_env,
             visibility = ["//visibility:public"],
         )
 
