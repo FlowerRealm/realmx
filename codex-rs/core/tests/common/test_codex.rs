@@ -27,7 +27,7 @@ use crate::load_default_config_for_test;
 use crate::responses::WebSocketTestServer;
 use crate::responses::start_mock_server;
 use crate::streaming_sse::StreamingSseServer;
-use crate::wait_for_event;
+use crate::wait_for_event_with_timeout;
 use wiremock::Match;
 use wiremock::matchers::path_regex;
 
@@ -282,9 +282,11 @@ impl TestCodex {
             })
             .await?;
 
-        wait_for_event(&self.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
-        })
+        wait_for_event_with_timeout(
+            &self.codex,
+            |event| matches!(event, EventMsg::TurnComplete(_)),
+            tokio::time::Duration::from_secs(30),
+        )
         .await;
         Ok(())
     }
