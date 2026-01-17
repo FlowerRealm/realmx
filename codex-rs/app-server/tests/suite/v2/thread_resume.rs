@@ -62,6 +62,10 @@ async fn thread_resume_returns_original_thread() -> Result<()> {
     let ThreadResumeResponse {
         thread: resumed, ..
     } = to_response::<ThreadResumeResponse>(resume_resp)?;
+    // `updated_at` 来自文件系统元数据：在不同 runner 速度/时间戳粒度下，
+    // `thread/resume` 时它可能已经发生变化。这里把断言聚焦在行为契约上。
+    let mut resumed = resumed;
+    resumed.updated_at = thread.updated_at;
     assert_eq!(resumed, thread);
 
     Ok(())
@@ -179,6 +183,9 @@ async fn thread_resume_prefers_path_over_thread_id() -> Result<()> {
     let ThreadResumeResponse {
         thread: resumed, ..
     } = to_response::<ThreadResumeResponse>(resume_resp)?;
+    // `updated_at` 可能因为文件系统时间戳粒度而变化。
+    let mut resumed = resumed;
+    resumed.updated_at = thread.updated_at;
     assert_eq!(resumed, thread);
 
     Ok(())
