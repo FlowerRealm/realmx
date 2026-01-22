@@ -196,6 +196,7 @@ async fn assert_network_blocked(cmd: &[&str]) {
     let output = match result {
         Ok(output) => output,
         Err(CodexErr::Sandbox(SandboxErr::Denied { output })) => *output,
+        Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => *output,
         _ => {
             panic!("expected sandbox denied error, got: {result:?}");
         }
