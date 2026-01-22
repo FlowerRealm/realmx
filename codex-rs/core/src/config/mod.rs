@@ -38,8 +38,6 @@ use crate::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use crate::project_doc::LOCAL_PROJECT_DOC_FILENAME;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
-use codex_app_server_protocol::Tools;
-use codex_app_server_protocol::UserSavedConfig;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModeKind;
@@ -74,14 +72,10 @@ mod constraint;
 pub mod edit;
 pub mod profile;
 pub mod schema;
-pub mod service;
 pub mod types;
 pub use constraint::Constrained;
 pub use constraint::ConstraintError;
 pub use constraint::ConstraintResult;
-
-pub use service::ConfigService;
-pub use service::ConfigServiceError;
 
 pub use codex_git::GhostSnapshotConfig;
 
@@ -939,31 +933,6 @@ pub struct ConfigToml {
     pub oss_provider: Option<String>,
 }
 
-impl From<ConfigToml> for UserSavedConfig {
-    fn from(config_toml: ConfigToml) -> Self {
-        let profiles = config_toml
-            .profiles
-            .into_iter()
-            .map(|(k, v)| (k, v.into()))
-            .collect();
-
-        Self {
-            approval_policy: config_toml.approval_policy,
-            sandbox_mode: config_toml.sandbox_mode,
-            sandbox_settings: config_toml.sandbox_workspace_write.map(From::from),
-            forced_chatgpt_workspace_id: config_toml.forced_chatgpt_workspace_id,
-            forced_login_method: config_toml.forced_login_method,
-            model: config_toml.model,
-            model_reasoning_effort: config_toml.model_reasoning_effort,
-            model_reasoning_summary: config_toml.model_reasoning_summary,
-            model_verbosity: config_toml.model_verbosity,
-            tools: config_toml.tools.map(From::from),
-            profile: config_toml.profile,
-            profiles,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ProjectConfig {
@@ -998,15 +967,6 @@ pub struct AgentsToml {
     /// When unset, no limit is enforced.
     #[schemars(range(min = 1))]
     pub max_threads: Option<usize>,
-}
-
-impl From<ToolsToml> for Tools {
-    fn from(tools_toml: ToolsToml) -> Self {
-        Self {
-            web_search: tools_toml.web_search,
-            view_image: tools_toml.view_image,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -1513,7 +1473,7 @@ impl Config {
             codex_home,
             config_layer_stack,
             history,
-            file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
+            file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::None),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -3674,7 +3634,7 @@ model_verbosity = "high"
                 codex_home: fixture.codex_home(),
                 config_layer_stack: Default::default(),
                 history: History::default(),
-                file_opener: UriBasedFileOpener::VsCode,
+                file_opener: UriBasedFileOpener::None,
                 codex_linux_sandbox_exe: None,
                 hide_agent_reasoning: false,
                 show_raw_agent_reasoning: false,
@@ -3755,7 +3715,7 @@ model_verbosity = "high"
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
+            file_opener: UriBasedFileOpener::None,
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,
@@ -3851,7 +3811,7 @@ model_verbosity = "high"
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
+            file_opener: UriBasedFileOpener::None,
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,
@@ -3933,7 +3893,7 @@ model_verbosity = "high"
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
+            file_opener: UriBasedFileOpener::None,
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,

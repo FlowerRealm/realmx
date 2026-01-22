@@ -8,7 +8,7 @@
 use codex_api::Provider as ApiProvider;
 use codex_api::WireApi as ApiWireApi;
 use codex_api::provider::RetryConfig as ApiRetryConfig;
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use http::HeaderMap;
 use http::header::HeaderName;
 use http::header::HeaderValue;

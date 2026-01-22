@@ -30,7 +30,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use std::sync::RwLock;
 

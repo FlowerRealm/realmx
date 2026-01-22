@@ -40,7 +40,7 @@ These are entities exit on the codex backend. The intent of this section is to e
    - The output of one `Turn` is the input to the next `Turn`
    - A `Turn` yielding no output terminates the `Task`
 
-The term "UI" is used to refer to the application driving `Codex`. This may be the CLI / TUI chat-like interface that users operate, or it may be a GUI interface like a VSCode extension. The UI is external to `Codex`, as `Codex` is intended to be operated by arbitrary UI implementations.
+The term "UI" is used to refer to the application driving `Codex`. This may be the CLI / TUI chat-like interface that users operate, or it may be another GUI interface (for example, an IDE integration). The UI is external to `Codex`, as `Codex` is intended to be operated by arbitrary UI implementations.
 
 When a `Turn` completes, the `response_id` from the `Model`'s final `response.completed` message is stored in the `Session` state to resume the thread given the next user turn. The `response_id` is also returned in the `EventMsg::TurnComplete` to the UI, which can be used to fork the thread from an earlier point by providing it in a future user turn.
 

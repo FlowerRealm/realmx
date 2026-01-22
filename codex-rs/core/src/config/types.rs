@@ -256,12 +256,6 @@ mod option_duration_secs {
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, JsonSchema)]
 pub enum UriBasedFileOpener {
-    #[serde(rename = "vscode")]
-    VsCode,
-
-    #[serde(rename = "vscode-insiders")]
-    VsCodeInsiders,
-
     #[serde(rename = "windsurf")]
     Windsurf,
 
@@ -276,8 +270,6 @@ pub enum UriBasedFileOpener {
 impl UriBasedFileOpener {
     pub fn get_scheme(&self) -> Option<&str> {
         match self {
-            UriBasedFileOpener::VsCode => Some("vscode"),
-            UriBasedFileOpener::VsCodeInsiders => Some("vscode-insiders"),
             UriBasedFileOpener::Windsurf => Some("windsurf"),
             UriBasedFileOpener::Cursor => Some("cursor"),
             UriBasedFileOpener::None => None,
@@ -460,9 +452,9 @@ const fn default_true() -> bool {
     true
 }
 
-/// Settings for notices we display to users via the tui and app-server clients
-/// (primarily the Codex IDE extension). NOTE: these are different from
-/// notifications - notices are warnings, NUX screens, acknowledgements, etc.
+/// Settings for notices we display to users via the TUI.
+/// NOTE: these are different from notifications - notices are warnings, NUX
+/// screens, acknowledgements, etc.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct Notice {
@@ -512,17 +504,6 @@ pub struct SandboxWorkspaceWrite {
     pub exclude_tmpdir_env_var: bool,
     #[serde(default)]
     pub exclude_slash_tmp: bool,
-}
-
-impl From<SandboxWorkspaceWrite> for codex_app_server_protocol::SandboxSettings {
-    fn from(sandbox_workspace_write: SandboxWorkspaceWrite) -> Self {
-        Self {
-            writable_roots: sandbox_workspace_write.writable_roots,
-            network_access: Some(sandbox_workspace_write.network_access),
-            exclude_tmpdir_env_var: Some(sandbox_workspace_write.exclude_tmpdir_env_var),
-            exclude_slash_tmp: Some(sandbox_workspace_write.exclude_slash_tmp),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]

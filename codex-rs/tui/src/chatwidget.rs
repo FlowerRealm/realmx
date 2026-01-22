@@ -29,7 +29,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::version::CODEX_CLI_VERSION;
-use codex_app_server_protocol::AuthMode;
 use codex_backend_client::Client as BackendClient;
 use codex_core::config::Config;
 use codex_core::config::ConstraintResult;
@@ -92,6 +91,7 @@ use codex_otel::OtelManager;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
 use codex_protocol::approvals::ElicitationRequestEvent;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;

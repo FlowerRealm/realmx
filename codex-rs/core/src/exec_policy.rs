@@ -501,12 +501,12 @@ async fn collect_policy_files(dir: impl AsRef<Path>) -> Result<Vec<PathBuf>, Exe
 mod tests {
     use super::*;
     use crate::config_loader::ConfigLayerEntry;
+    use crate::config_loader::ConfigLayerSource;
     use crate::config_loader::ConfigLayerStack;
     use crate::config_loader::ConfigRequirements;
     use crate::config_loader::ConfigRequirementsToml;
     use crate::features::Feature;
     use crate::features::Features;
-    use codex_app_server_protocol::ConfigLayerSource;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::SandboxPolicy;
     use codex_utils_absolute_path::AbsolutePathBuf;

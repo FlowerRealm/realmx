@@ -1,17 +1,28 @@
 use crate::config_loader::ConfigRequirements;
 use crate::config_loader::ConfigRequirementsToml;
 
+use super::ConfigLayerSource;
 use super::fingerprint::record_origins;
 use super::fingerprint::version_for_toml;
 use super::merge::merge_toml_values;
-use codex_app_server_protocol::ConfigLayer;
-use codex_app_server_protocol::ConfigLayerMetadata;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use toml::Value as TomlValue;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigLayerMetadata {
+    pub name: ConfigLayerSource,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigLayer {
+    pub name: ConfigLayerSource,
+    pub version: String,
+    pub config: JsonValue,
+}
 
 /// LoaderOverrides overrides managed configuration inputs (primarily for tests).
 #[derive(Debug, Default, Clone)]

@@ -1188,8 +1188,8 @@ impl Session {
     /// Persist the event to the rollout file, flush it, and only then deliver it to clients.
     ///
     /// Most events can be delivered immediately after queueing the rollout write, but some
-    /// clients (e.g. app-server thread/rollback) re-read the rollout file synchronously on
-    /// receipt of the event and depend on the marker already being visible on disk.
+    /// clients re-read the rollout file synchronously on receipt of the event and depend on the
+    /// marker already being visible on disk.
     pub(crate) async fn send_event_raw_flushed(&self, event: Event) {
         // Record the last known agent status.
         if let Some(status) = agent_status_from_event(&event.msg) {
@@ -3390,7 +3390,7 @@ mod tests {
     use crate::tools::handlers::UnifiedExecHandler;
     use crate::tools::registry::ToolHandler;
     use crate::turn_diff_tracker::TurnDiffTracker;
-    use codex_app_server_protocol::AuthMode;
+    use codex_protocol::config_types::AuthMode;
     use codex_protocol::models::ContentItem;
     use codex_protocol::models::ResponseItem;
     use std::path::Path;

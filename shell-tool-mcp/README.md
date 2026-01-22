@@ -92,7 +92,7 @@ Once the server has processed the update, it sends an empty response to acknowle
 }
 ```
 
-The Codex harness (used by the CLI and the VS Code extension) sends such requests to MCP servers that declare the `codex/sandbox-state` capability.
+The Codex harness (used by the CLI) sends such requests to MCP servers that declare the `codex/sandbox-state` capability.
 
 ## Package Contents
 

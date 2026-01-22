@@ -3,7 +3,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::util::resolve_path;
-use codex_app_server_protocol::GitSha;
 use codex_protocol::protocol::GitInfo;
 use futures::future::join_all;
 use serde::Deserialize;
@@ -11,6 +10,15 @@ use serde::Serialize;
 use tokio::process::Command;
 use tokio::time::Duration as TokioDuration;
 use tokio::time::timeout;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct GitSha(pub String);
+
+impl GitSha {
+    pub fn new(sha: &str) -> Self {
+        Self(sha.to_string())
+    }
+}
 
 /// Return `true` if the project folder specified by the `Config` is inside a
 /// Git repository.

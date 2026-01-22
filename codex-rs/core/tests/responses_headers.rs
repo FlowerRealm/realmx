@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use codex_app_server_protocol::AuthMode;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::ContentItem;
@@ -14,6 +13,7 @@ use codex_core::WireApi;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_otel::OtelManager;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::protocol::SessionSource;

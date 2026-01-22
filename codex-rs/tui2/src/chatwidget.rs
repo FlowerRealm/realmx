@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use codex_backend_client::Client as BackendClient;
 use codex_core::config::Config;
 use codex_core::config::ConstraintResult;

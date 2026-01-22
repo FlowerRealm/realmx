@@ -1,3 +1,4 @@
+mod config_layer_source;
 mod config_requirements;
 mod fingerprint;
 mod layer_io;
@@ -16,7 +17,6 @@ use crate::config::deserialize_config_toml_with_base;
 use crate::config_loader::config_requirements::ConfigRequirementsWithSources;
 use crate::config_loader::layer_io::LoadedConfigLayers;
 use crate::git_info::resolve_root_git_project_for_trust;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::TrustLevel;
 use codex_protocol::protocol::AskForApproval;
@@ -27,6 +27,7 @@ use std::io;
 use std::path::Path;
 use toml::Value as TomlValue;
 
+pub use config_layer_source::ConfigLayerSource;
 pub use config_requirements::ConfigRequirements;
 pub use config_requirements::ConfigRequirementsToml;
 pub use config_requirements::McpServerIdentity;
@@ -193,7 +194,7 @@ pub async fn load_config_layers_state(
     // config layer on top of everything else. For fields in
     // `managed_config.toml` that do not have an equivalent in
     // `ConfigRequirements`, note users can still override these values on a
-    // per-turn basis in the TUI and VS Code.
+    // per-turn basis in the TUI.
     let LoadedConfigLayers {
         managed_config,
         managed_config_from_mdm,

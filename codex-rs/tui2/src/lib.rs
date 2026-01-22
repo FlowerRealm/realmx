@@ -7,7 +7,7 @@ use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
 pub use app::ExitReason;
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use codex_common::oss::ensure_oss_provider_ready;
 use codex_common::oss::get_default_model_for_oss_provider;
 use codex_common::oss::ollama_chat_deprecation_notice;

@@ -1,11 +1,11 @@
 use crate::config::Config;
+use crate::config_loader::ConfigLayerSource;
 use crate::config_loader::ConfigLayerStack;
 use crate::skills::model::SkillError;
 use crate::skills::model::SkillInterface;
 use crate::skills::model::SkillLoadOutcome;
 use crate::skills::model::SkillMetadata;
 use crate::skills::system::system_cache_root_dir;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_protocol::protocol::SkillScope;
 use dunce::canonicalize as canonicalize_path;
 use serde::Deserialize;

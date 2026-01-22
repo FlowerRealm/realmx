@@ -1493,9 +1493,8 @@ fn session_cwd_from_items(items: &[RolloutItem]) -> Option<PathBuf> {
 #[serde(rename_all = "lowercase")]
 #[ts(rename_all = "lowercase")]
 pub enum SessionSource {
-    Cli,
     #[default]
-    VSCode,
+    Cli,
     Exec,
     Mcp,
     SubAgent(SubAgentSource),
@@ -1516,7 +1515,6 @@ impl fmt::Display for SessionSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SessionSource::Cli => f.write_str("cli"),
-            SessionSource::VSCode => f.write_str("vscode"),
             SessionSource::Exec => f.write_str("exec"),
             SessionSource::Mcp => f.write_str("mcp"),
             SessionSource::SubAgent(sub_source) => write!(f, "subagent_{sub_source}"),

@@ -139,10 +139,6 @@ When Codex needs approval to apply changes or run commands, the server issues JS
 
 The client must reply with `{ decision: "allow" | "deny" }` for each request.
 
-## Auth helpers
-
-For the complete request/response shapes and flow examples, see the [“Auth endpoints (v2)” section in the app‑server README](../app-server/README.md#auth-endpoints-v2).
-
 ## Example: start and send a message
 
 ```json

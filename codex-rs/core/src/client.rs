@@ -27,8 +27,8 @@ use codex_api::common::ResponsesWsRequest;
 use codex_api::create_text_param_for_request;
 use codex_api::error::ApiError;
 use codex_api::requests::responses::Compression;
-use codex_app_server_protocol::AuthMode;
 use codex_otel::OtelManager;
+use codex_protocol::config_types::AuthMode;
 
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;

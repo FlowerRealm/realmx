@@ -29,8 +29,8 @@ pub(crate) const TRAILING_OUTPUT_GRACE: Duration = Duration::from_millis(100);
 ///
 /// The unified exec output buffer already caps *retained* output (see
 /// `UNIFIED_EXEC_OUTPUT_MAX_BYTES`), but we also cap per-event payload size so
-/// downstream event consumers (especially app-server JSON-RPC) don't have to
-/// process arbitrarily large delta payloads.
+/// downstream event consumers don't have to process arbitrarily large delta
+/// payloads.
 const UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES: usize = 8192;
 
 /// Spawn a background task that continuously reads from the PTY, appends to the

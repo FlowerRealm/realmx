@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 
 pub use crate::auth::storage::AuthCredentialsStoreMode;

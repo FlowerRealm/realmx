@@ -184,30 +184,9 @@ async fn test_list_conversations_latest_first() {
     let u3 = Uuid::from_u128(3);
 
     // Create three sessions across three days
-    write_session_file(
-        home,
-        "2025-01-01T12-00-00",
-        u1,
-        3,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-01-02T12-00-00",
-        u2,
-        3,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-01-03T12-00-00",
-        u3,
-        3,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
+    write_session_file(home, "2025-01-01T12-00-00", u1, 3, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-01-02T12-00-00", u2, 3, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-01-03T12-00-00", u3, 3, Some(SessionSource::Cli)).unwrap();
 
     let provider_filter = provider_vec(&[TEST_PROVIDER]);
     let page = get_threads(
@@ -248,7 +227,7 @@ async fn test_list_conversations_latest_first() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -258,7 +237,7 @@ async fn test_list_conversations_latest_first() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -268,7 +247,7 @@ async fn test_list_conversations_latest_first() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -318,46 +297,11 @@ async fn test_pagination_cursor() {
     let u5 = Uuid::from_u128(55);
 
     // Oldest to newest
-    write_session_file(
-        home,
-        "2025-03-01T09-00-00",
-        u1,
-        1,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-03-02T09-00-00",
-        u2,
-        1,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-03-03T09-00-00",
-        u3,
-        1,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-03-04T09-00-00",
-        u4,
-        1,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
-    write_session_file(
-        home,
-        "2025-03-05T09-00-00",
-        u5,
-        1,
-        Some(SessionSource::VSCode),
-    )
-    .unwrap();
+    write_session_file(home, "2025-03-01T09-00-00", u1, 1, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-03-02T09-00-00", u2, 1, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-03-03T09-00-00", u3, 1, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-03-04T09-00-00", u4, 1, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, "2025-03-05T09-00-00", u5, 1, Some(SessionSource::Cli)).unwrap();
 
     let provider_filter = provider_vec(&[TEST_PROVIDER]);
     let page1 = get_threads(
@@ -389,7 +333,7 @@ async fn test_pagination_cursor() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -399,7 +343,7 @@ async fn test_pagination_cursor() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -457,7 +401,7 @@ async fn test_pagination_cursor() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -467,7 +411,7 @@ async fn test_pagination_cursor() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -519,7 +463,7 @@ async fn test_pagination_cursor() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -546,7 +490,7 @@ async fn test_get_thread_contents() {
 
     let uuid = Uuid::new_v4();
     let ts = "2025-04-01T10-30-00";
-    write_session_file(home, ts, uuid, 2, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, uuid, 2, Some(SessionSource::Cli)).unwrap();
 
     let provider_filter = provider_vec(&[TEST_PROVIDER]);
     let page = get_threads(
@@ -577,7 +521,7 @@ async fn test_get_thread_contents() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": null,
     })];
@@ -605,7 +549,7 @@ async fn test_get_thread_contents() {
             "originator": "test_originator",
             "cli_version": "test_version",
             "base_instructions": null,
-            "source": "vscode",
+            "source": "cli",
             "model_provider": "test-provider",
         }
     });
@@ -633,7 +577,7 @@ async fn test_base_instructions_missing_in_meta_defaults_to_null() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
     });
     write_session_file_with_meta_payload(home, ts, uuid, payload).unwrap();
@@ -676,7 +620,7 @@ async fn test_base_instructions_present_in_meta_is_preserved() {
         "cwd": ".",
         "originator": "test_originator",
         "cli_version": "test_version",
-        "source": "vscode",
+        "source": "cli",
         "model_provider": "test-provider",
         "base_instructions": {"text": base_text},
     });
@@ -714,7 +658,7 @@ async fn test_created_at_sort_uses_file_mtime_for_updated_at() -> Result<()> {
 
     let ts = "2025-06-01T08-00-00";
     let uuid = Uuid::from_u128(43);
-    write_session_file(home, ts, uuid, 0, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, uuid, 0, Some(SessionSource::Cli)).unwrap();
 
     let created = PrimitiveDateTime::parse(
         ts,
@@ -776,7 +720,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
                 cwd: ".".into(),
                 originator: "test_originator".into(),
                 cli_version: "test_version".into(),
-                source: SessionSource::VSCode,
+                source: SessionSource::Cli,
                 model_provider: Some("test-provider".into()),
                 base_instructions: None,
             },
@@ -848,9 +792,9 @@ async fn test_stable_ordering_same_second_pagination() {
     let u2 = Uuid::from_u128(2);
     let u3 = Uuid::from_u128(3);
 
-    write_session_file(home, ts, u1, 0, Some(SessionSource::VSCode)).unwrap();
-    write_session_file(home, ts, u2, 0, Some(SessionSource::VSCode)).unwrap();
-    write_session_file(home, ts, u3, 0, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, u1, 0, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, ts, u2, 0, Some(SessionSource::Cli)).unwrap();
+    write_session_file(home, ts, u3, 0, Some(SessionSource::Cli)).unwrap();
 
     let provider_filter = provider_vec(&[TEST_PROVIDER]);
     let page1 = get_threads(
@@ -884,7 +828,7 @@ async fn test_stable_ordering_same_second_pagination() {
             "cwd": ".",
             "originator": "test_originator",
             "cli_version": "test_version",
-            "source": "vscode",
+            "source": "cli",
             "model_provider": "test-provider",
             "base_instructions": null,
         })]
@@ -1033,7 +977,7 @@ async fn test_model_provider_filter_selects_only_matching_sessions() -> Result<(
         "2025-09-01T12-00-00",
         openai_id,
         1,
-        Some(SessionSource::VSCode),
+        Some(SessionSource::Cli),
         Some("openai"),
     )?;
     write_session_file_with_provider(
@@ -1041,7 +985,7 @@ async fn test_model_provider_filter_selects_only_matching_sessions() -> Result<(
         "2025-09-01T11-00-00",
         beta_id,
         1,
-        Some(SessionSource::VSCode),
+        Some(SessionSource::Cli),
         Some("beta"),
     )?;
     write_session_file_with_provider(
@@ -1049,7 +993,7 @@ async fn test_model_provider_filter_selects_only_matching_sessions() -> Result<(
         "2025-09-01T10-00-00",
         none_id,
         1,
-        Some(SessionSource::VSCode),
+        Some(SessionSource::Cli),
         None,
     )?;
 

@@ -3,10 +3,6 @@ members = [
     "backend-client",
     "ansi-escape",
     "async-utils",
-    "app-server",
-    "app-server-protocol",
-    "app-server-test-client",
-    "debug-client",
     "apply-patch",
     "arg0",
     "feedback",
@@ -50,7 +46,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2601220000-beta"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -60,11 +56,8 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Internal
-app_test_support = { path = "app-server/tests/common" }
 codex-ansi-escape = { path = "ansi-escape" }
 codex-api = { path = "codex-api" }
-codex-app-server = { path = "app-server" }
-codex-app-server-protocol = { path = "app-server-protocol" }
 codex-apply-patch = { path = "apply-patch" }
 codex-arg0 = { path = "arg0" }
 codex-async-utils = { path = "async-utils" }

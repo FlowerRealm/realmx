@@ -13,7 +13,7 @@ use crate::models_manager::model_info;
 use crate::models_manager::model_presets::builtin_model_presets;
 use codex_api::ModelsClient;
 use codex_api::ReqwestTransport;
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;

@@ -1,8 +1,8 @@
 #![cfg(not(target_os = "windows"))]
 
 use anyhow::Ok;
-use codex_app_server_protocol::ConfigLayerSource;
 use codex_core::config_loader::ConfigLayerEntry;
+use codex_core::config_loader::ConfigLayerSource;
 use codex_core::config_loader::ConfigLayerStack;
 use codex_core::config_loader::ConfigRequirements;
 use codex_core::config_loader::ConfigRequirementsToml;

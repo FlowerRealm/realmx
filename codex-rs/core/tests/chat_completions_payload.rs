@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use codex_app_server_protocol::AuthMode;
 use codex_core::ContentItem;
 use codex_core::LocalShellAction;
 use codex_core::LocalShellExecAction;
@@ -15,6 +14,7 @@ use codex_core::WireApi;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_otel::OtelManager;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::AuthMode;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::protocol::SessionSource;
 use core_test_support::load_default_config_for_test;
