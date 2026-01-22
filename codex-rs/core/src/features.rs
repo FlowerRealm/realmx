@@ -95,8 +95,6 @@ pub enum Feature {
     ShellSnapshot,
     /// Append additional AGENTS.md guidance to user instructions.
     ChildAgentsMd,
-    /// Experimental TUI v2 (viewport) implementation.
-    Tui2,
     /// Enforce UTF8 output in Powershell.
     PowershellUtf8,
     /// Compress request bodies (zstd) when sending streaming requests to codex-backend.
@@ -107,6 +105,8 @@ pub enum Feature {
     Steer,
     /// Enable collaboration modes (Plan, Pair Programming, Execute).
     CollaborationModes,
+    /// Use the Responses API WebSocket transport for OpenAI by default.
+    ResponsesWebsockets,
 }
 
 impl Feature {
@@ -405,7 +405,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::RemoteModels,
         key: "remote_models",
         stage: Stage::Beta,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::PowershellUtf8,
@@ -440,12 +440,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::Tui2,
-        key: "tui2",
-        stage: Stage::Beta,
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::Steer,
         key: "steer",
         stage: Stage::Experimental {
@@ -458,6 +452,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::CollaborationModes,
         key: "collaboration_modes",
+        stage: Stage::Beta,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ResponsesWebsockets,
+        key: "responses_websockets",
         stage: Stage::Beta,
         default_enabled: false,
     },

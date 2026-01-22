@@ -438,10 +438,10 @@ async fn project_paths_resolve_relative_to_dot_codex_and_override_in_order() -> 
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
 
     let root_cfg = r#"
-experimental_instructions_file = "root.txt"
+model_instructions_file = "root.txt"
 "#;
     let nested_cfg = r#"
-experimental_instructions_file = "child.txt"
+model_instructions_file = "child.txt"
 "#;
     tokio::fs::write(project_root.join(".codex").join(CONFIG_TOML_FILE), root_cfg).await?;
     tokio::fs::write(nested.join(".codex").join(CONFIG_TOML_FILE), nested_cfg).await?;
@@ -472,6 +472,42 @@ experimental_instructions_file = "child.txt"
     assert_eq!(
         config.base_instructions.as_deref(),
         Some("child instructions")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cli_override_model_instructions_file_sets_base_instructions() -> std::io::Result<()> {
+    let tmp = tempdir()?;
+    let codex_home = tmp.path().join("home");
+    tokio::fs::create_dir_all(&codex_home).await?;
+    tokio::fs::write(codex_home.join(CONFIG_TOML_FILE), "").await?;
+
+    let cwd = tmp.path().join("work");
+    tokio::fs::create_dir_all(&cwd).await?;
+
+    let instructions_path = tmp.path().join("instr.md");
+    tokio::fs::write(&instructions_path, "cli override instructions").await?;
+
+    let cli_overrides = vec![(
+        "model_instructions_file".to_string(),
+        TomlValue::String(instructions_path.to_string_lossy().to_string()),
+    )];
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home)
+        .cli_overrides(cli_overrides)
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(cwd),
+            ..ConfigOverrides::default()
+        })
+        .build()
+        .await?;
+
+    assert_eq!(
+        config.base_instructions.as_deref(),
+        Some("cli override instructions")
     );
 
     Ok(())
@@ -591,7 +627,7 @@ async fn cli_overrides_with_relative_paths_do_not_break_trust_check() -> std::io
 
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let cli_overrides = vec![(
-        "experimental_instructions_file".to_string(),
+        "model_instructions_file".to_string(),
         TomlValue::String("relative.md".to_string()),
     )];
 

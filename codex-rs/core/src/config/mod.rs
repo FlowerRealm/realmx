@@ -11,9 +11,7 @@ use crate::config::types::Notifications;
 use crate::config::types::OtelConfig;
 use crate::config::types::OtelConfigToml;
 use crate::config::types::OtelExporterKind;
-use crate::config::types::Personality;
 use crate::config::types::SandboxWorkspaceWrite;
-use crate::config::types::ScrollInputMode;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::config::types::ShellEnvironmentPolicyToml;
 use crate::config::types::SkillsConfig;
@@ -44,6 +42,8 @@ use codex_app_server_protocol::Tools;
 use codex_app_server_protocol::UserSavedConfig;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::ForcedLoginMethod;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::TrustLevel;
@@ -89,6 +89,7 @@ pub use codex_git::GhostSnapshotConfig;
 /// files are *silently truncated* to this size so we do not take up too much of
 /// the context window.
 pub(crate) const PROJECT_DOC_MAX_BYTES: usize = 32 * 1024; // 32 KiB
+pub(crate) const DEFAULT_AGENT_MAX_THREADS: Option<usize> = None;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
@@ -199,57 +200,8 @@ pub struct Config {
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
 
-    /// Override the events-per-wheel-tick factor for TUI2 scroll normalization.
-    ///
-    /// This is the same `tui.scroll_events_per_tick` value from `config.toml`, plumbed through the
-    /// merged [`Config`] object (see [`Tui`]) so TUI2 can normalize scroll event density per
-    /// terminal.
-    pub tui_scroll_events_per_tick: Option<u16>,
-
-    /// Override the number of lines applied per wheel tick in TUI2.
-    ///
-    /// This is the same `tui.scroll_wheel_lines` value from `config.toml` (see [`Tui`]). TUI2
-    /// applies it to wheel-like scroll streams. Trackpad-like scrolling uses a separate
-    /// `tui.scroll_trackpad_lines` setting.
-    pub tui_scroll_wheel_lines: Option<u16>,
-
-    /// Override the number of lines per tick-equivalent used for trackpad scrolling in TUI2.
-    ///
-    /// This is the same `tui.scroll_trackpad_lines` value from `config.toml` (see [`Tui`]).
-    pub tui_scroll_trackpad_lines: Option<u16>,
-
-    /// Trackpad acceleration: approximate number of events required to gain +1x speed in TUI2.
-    ///
-    /// This is the same `tui.scroll_trackpad_accel_events` value from `config.toml` (see [`Tui`]).
-    pub tui_scroll_trackpad_accel_events: Option<u16>,
-
-    /// Trackpad acceleration: maximum multiplier applied to trackpad-like streams in TUI2.
-    ///
-    /// This is the same `tui.scroll_trackpad_accel_max` value from `config.toml` (see [`Tui`]).
-    pub tui_scroll_trackpad_accel_max: Option<u16>,
-
-    /// Control how TUI2 interprets mouse scroll input (wheel vs trackpad).
-    ///
-    /// This is the same `tui.scroll_mode` value from `config.toml` (see [`Tui`]).
-    pub tui_scroll_mode: ScrollInputMode,
-
-    /// Override the wheel tick detection threshold (ms) for TUI2 auto scroll mode.
-    ///
-    /// This is the same `tui.scroll_wheel_tick_detect_max_ms` value from `config.toml` (see
-    /// [`Tui`]).
-    pub tui_scroll_wheel_tick_detect_max_ms: Option<u64>,
-
-    /// Override the wheel-like end-of-stream threshold (ms) for TUI2 auto scroll mode.
-    ///
-    /// This is the same `tui.scroll_wheel_like_max_duration_ms` value from `config.toml` (see
-    /// [`Tui`]).
-    pub tui_scroll_wheel_like_max_duration_ms: Option<u64>,
-
-    /// Invert mouse scroll direction for TUI2.
-    ///
-    /// This is the same `tui.scroll_invert` value from `config.toml` (see [`Tui`]) and is applied
-    /// consistently to both mouse wheels and trackpads.
-    pub tui_scroll_invert: bool,
+    /// Start the TUI in the specified collaboration mode (plan/execute/etc.).
+    pub experimental_mode: Option<ModeKind>,
 
     /// Controls whether the TUI uses the terminal's alternate screen buffer.
     ///
@@ -298,6 +250,9 @@ pub struct Config {
 
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
+
+    /// Maximum number of agent threads that can be open concurrently.
+    pub agent_max_threads: Option<usize>,
 
     /// Directory containing all Codex state (defaults to `~/.codex` but can be
     /// overridden by the `CODEX_HOME` environment variable).
@@ -820,6 +775,12 @@ pub struct ConfigToml {
     #[serde(default)]
     pub developer_instructions: Option<String>,
 
+    /// Optional path to a file containing model instructions that will override
+    /// the built-in instructions for the selected model. Users are STRONGLY
+    /// DISCOURAGED from using this field, as deviating from the instructions
+    /// sanctioned by Codex will likely degrade model performance.
+    pub model_instructions_file: Option<AbsolutePathBuf>,
+
     /// Compact prompt used for history compaction.
     pub compact_prompt: Option<String>,
 
@@ -918,6 +879,9 @@ pub struct ConfigToml {
     /// Nested tools section for feature toggles
     pub tools: Option<ToolsToml>,
 
+    /// Agent-related settings (thread limits, etc.).
+    pub agents: Option<AgentsToml>,
+
     /// User-level skill config entries keyed by SKILL.md path.
     pub skills: Option<SkillsConfig>,
 
@@ -965,6 +929,8 @@ pub struct ConfigToml {
     pub notice: Option<Notice>,
 
     /// Legacy, now use features
+    /// Deprecated: ignored. Use `model_instructions_file`.
+    #[schemars(skip)]
     pub experimental_instructions_file: Option<AbsolutePathBuf>,
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
     pub experimental_use_unified_exec_tool: Option<bool>,
@@ -1023,6 +989,15 @@ pub struct ToolsToml {
     /// Enable the `view_image` tool that lets the agent attach local images.
     #[serde(default)]
     pub view_image: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AgentsToml {
+    /// Maximum number of agent threads that can be open concurrently.
+    /// When unset, no limit is enforced.
+    #[schemars(range(min = 1))]
+    pub max_threads: Option<usize>,
 }
 
 impl From<ToolsToml> for Tools {
@@ -1355,6 +1330,12 @@ impl Config {
             || cfg.sandbox_mode.is_some();
 
         let mut model_providers = built_in_model_providers();
+        if features.enabled(Feature::ResponsesWebsockets)
+            && let Some(provider) = model_providers.get_mut("openai")
+            && provider.is_openai()
+        {
+            provider.wire_api = crate::model_provider_info::WireApi::ResponsesWebsocket;
+        }
         // Merge user-defined providers into the built-in list.
         for (key, provider) in cfg.model_providers.into_iter() {
             model_providers.entry(key).or_insert(provider);
@@ -1377,6 +1358,18 @@ impl Config {
         let shell_environment_policy = cfg.shell_environment_policy.into();
 
         let history = cfg.history.unwrap_or_default();
+
+        let agent_max_threads = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.max_threads)
+            .or(DEFAULT_AGENT_MAX_THREADS);
+        if agent_max_threads == Some(0) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "agents.max_threads must be at least 1",
+            ));
+        }
 
         let ghost_snapshot = {
             let mut config = GhostSnapshotConfig::default();
@@ -1432,14 +1425,12 @@ impl Config {
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
         // behaviour matches other path-like config values.
-        let experimental_instructions_path = config_profile
-            .experimental_instructions_file
+        let model_instructions_path = config_profile
+            .model_instructions_file
             .as_ref()
-            .or(cfg.experimental_instructions_file.as_ref());
-        let file_base_instructions = Self::try_read_non_empty_file(
-            experimental_instructions_path,
-            "experimental instructions file",
-        )?;
+            .or(cfg.model_instructions_file.as_ref());
+        let file_base_instructions =
+            Self::try_read_non_empty_file(model_instructions_path, "model instructions file")?;
         let base_instructions = base_instructions.or(file_base_instructions);
         let developer_instructions = developer_instructions.or(cfg.developer_instructions);
 
@@ -1518,6 +1509,7 @@ impl Config {
                 })
                 .collect(),
             tool_output_token_limit: cfg.tool_output_token_limit,
+            agent_max_threads,
             codex_home,
             config_layer_stack,
             history,
@@ -1572,27 +1564,7 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
-            tui_scroll_events_per_tick: cfg.tui.as_ref().and_then(|t| t.scroll_events_per_tick),
-            tui_scroll_wheel_lines: cfg.tui.as_ref().and_then(|t| t.scroll_wheel_lines),
-            tui_scroll_trackpad_lines: cfg.tui.as_ref().and_then(|t| t.scroll_trackpad_lines),
-            tui_scroll_trackpad_accel_events: cfg
-                .tui
-                .as_ref()
-                .and_then(|t| t.scroll_trackpad_accel_events),
-            tui_scroll_trackpad_accel_max: cfg
-                .tui
-                .as_ref()
-                .and_then(|t| t.scroll_trackpad_accel_max),
-            tui_scroll_mode: cfg.tui.as_ref().map(|t| t.scroll_mode).unwrap_or_default(),
-            tui_scroll_wheel_tick_detect_max_ms: cfg
-                .tui
-                .as_ref()
-                .and_then(|t| t.scroll_wheel_tick_detect_max_ms),
-            tui_scroll_wheel_like_max_duration_ms: cfg
-                .tui
-                .as_ref()
-                .and_then(|t| t.scroll_wheel_like_max_duration_ms),
-            tui_scroll_invert: cfg.tui.as_ref().map(|t| t.scroll_invert).unwrap_or(false),
+            experimental_mode: cfg.tui.as_ref().and_then(|t| t.experimental_mode),
             tui_alternate_screen: cfg
                 .tui
                 .as_ref()
@@ -1680,6 +1652,30 @@ impl Config {
             self.features.disable(Feature::WindowsSandboxElevated);
         }
     }
+}
+
+pub(crate) fn uses_deprecated_instructions_file(config_layer_stack: &ConfigLayerStack) -> bool {
+    config_layer_stack
+        .layers_high_to_low()
+        .into_iter()
+        .any(|layer| toml_uses_deprecated_instructions_file(&layer.config))
+}
+
+fn toml_uses_deprecated_instructions_file(value: &TomlValue) -> bool {
+    let Some(table) = value.as_table() else {
+        return false;
+    };
+    if table.contains_key("experimental_instructions_file") {
+        return true;
+    }
+    let Some(profiles) = table.get("profiles").and_then(TomlValue::as_table) else {
+        return false;
+    };
+    profiles.values().any(|profile| {
+        profile.as_table().is_some_and(|profile_table| {
+            profile_table.contains_key("experimental_instructions_file")
+        })
+    })
 }
 
 /// Returns the path to the Codex configuration directory, which can be
@@ -1821,15 +1817,7 @@ persistence = "none"
                 notifications: Notifications::Enabled(true),
                 animations: true,
                 show_tooltips: true,
-                scroll_events_per_tick: None,
-                scroll_wheel_lines: None,
-                scroll_trackpad_lines: None,
-                scroll_trackpad_accel_events: None,
-                scroll_trackpad_accel_max: None,
-                scroll_mode: ScrollInputMode::Auto,
-                scroll_wheel_tick_detect_max_ms: None,
-                scroll_wheel_like_max_duration_ms: None,
-                scroll_invert: false,
+                experimental_mode: None,
                 alternate_screen: AltScreenMode::Auto,
             }
         );
@@ -2477,6 +2465,30 @@ profile = "project"
         assert!(config.include_apply_patch_tool);
 
         assert!(config.use_experimental_unified_exec_tool);
+
+        Ok(())
+    }
+
+    #[test]
+    fn responses_websockets_feature_updates_openai_provider() -> std::io::Result<()> {
+        let codex_home = TempDir::new()?;
+        let mut entries = BTreeMap::new();
+        entries.insert("responses_websockets".to_string(), true);
+        let cfg = ConfigToml {
+            features: Some(crate::features::FeaturesToml { entries }),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            codex_home.path().to_path_buf(),
+        )?;
+
+        assert_eq!(
+            config.model_provider.wire_api,
+            crate::model_provider_info::WireApi::ResponsesWebsocket
+        );
 
         Ok(())
     }
@@ -3658,6 +3670,7 @@ model_verbosity = "high"
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 project_doc_fallback_filenames: Vec::new(),
                 tool_output_token_limit: None,
+                agent_max_threads: None,
                 codex_home: fixture.codex_home(),
                 config_layer_stack: Default::default(),
                 history: History::default(),
@@ -3690,17 +3703,9 @@ model_verbosity = "high"
                 tui_notifications: Default::default(),
                 animations: true,
                 show_tooltips: true,
+                experimental_mode: None,
                 analytics_enabled: Some(true),
                 feedback_enabled: true,
-                tui_scroll_events_per_tick: None,
-                tui_scroll_wheel_lines: None,
-                tui_scroll_trackpad_lines: None,
-                tui_scroll_trackpad_accel_events: None,
-                tui_scroll_trackpad_accel_max: None,
-                tui_scroll_mode: ScrollInputMode::Auto,
-                tui_scroll_wheel_tick_detect_max_ms: None,
-                tui_scroll_wheel_like_max_duration_ms: None,
-                tui_scroll_invert: false,
                 tui_alternate_screen: AltScreenMode::Auto,
                 otel: OtelConfig::default(),
             },
@@ -3746,6 +3751,7 @@ model_verbosity = "high"
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
+            agent_max_threads: None,
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
@@ -3778,17 +3784,9 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            experimental_mode: None,
             analytics_enabled: Some(true),
             feedback_enabled: true,
-            tui_scroll_events_per_tick: None,
-            tui_scroll_wheel_lines: None,
-            tui_scroll_trackpad_lines: None,
-            tui_scroll_trackpad_accel_events: None,
-            tui_scroll_trackpad_accel_max: None,
-            tui_scroll_mode: ScrollInputMode::Auto,
-            tui_scroll_wheel_tick_detect_max_ms: None,
-            tui_scroll_wheel_like_max_duration_ms: None,
-            tui_scroll_invert: false,
             tui_alternate_screen: AltScreenMode::Auto,
             otel: OtelConfig::default(),
         };
@@ -3849,6 +3847,7 @@ model_verbosity = "high"
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
+            agent_max_threads: None,
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
@@ -3881,17 +3880,9 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            experimental_mode: None,
             analytics_enabled: Some(false),
             feedback_enabled: true,
-            tui_scroll_events_per_tick: None,
-            tui_scroll_wheel_lines: None,
-            tui_scroll_trackpad_lines: None,
-            tui_scroll_trackpad_accel_events: None,
-            tui_scroll_trackpad_accel_max: None,
-            tui_scroll_mode: ScrollInputMode::Auto,
-            tui_scroll_wheel_tick_detect_max_ms: None,
-            tui_scroll_wheel_like_max_duration_ms: None,
-            tui_scroll_invert: false,
             tui_alternate_screen: AltScreenMode::Auto,
             otel: OtelConfig::default(),
         };
@@ -3938,6 +3929,7 @@ model_verbosity = "high"
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
+            agent_max_threads: None,
             codex_home: fixture.codex_home(),
             config_layer_stack: Default::default(),
             history: History::default(),
@@ -3970,17 +3962,9 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            experimental_mode: None,
             analytics_enabled: Some(true),
             feedback_enabled: true,
-            tui_scroll_events_per_tick: None,
-            tui_scroll_wheel_lines: None,
-            tui_scroll_trackpad_lines: None,
-            tui_scroll_trackpad_accel_events: None,
-            tui_scroll_trackpad_accel_max: None,
-            tui_scroll_mode: ScrollInputMode::Auto,
-            tui_scroll_wheel_tick_detect_max_ms: None,
-            tui_scroll_wheel_like_max_duration_ms: None,
-            tui_scroll_invert: false,
             tui_alternate_screen: AltScreenMode::Auto,
             otel: OtelConfig::default(),
         };

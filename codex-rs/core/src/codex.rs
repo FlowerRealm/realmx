@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -285,7 +286,7 @@ impl Codex {
             .base_instructions
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
-            .unwrap_or_else(|| model_info.base_instructions.clone());
+            .unwrap_or_else(|| model_info.get_model_instructions(config.model_personality));
 
         // TODO (aibrahim): Consolidate config.model and config.model_reasoning_effort into config.collaboration_mode
         // to avoid extracting these fields separately and constructing CollaborationMode here.
@@ -666,6 +667,19 @@ impl Session {
                 msg: EventMsg::DeprecationNotice(DeprecationNoticeEvent { summary, details }),
             });
         }
+        if crate::config::uses_deprecated_instructions_file(&config.config_layer_stack) {
+            post_session_configured_events.push(Event {
+                id: INITIAL_SUBMIT_ID.to_owned(),
+                msg: EventMsg::DeprecationNotice(DeprecationNoticeEvent {
+                    summary: "`experimental_instructions_file` is deprecated and ignored. Use `model_instructions_file` instead."
+                        .to_string(),
+                    details: Some(
+                        "Move the setting to `model_instructions_file` in config.toml (or under a profile) to load instructions from a file."
+                            .to_string(),
+                    ),
+                }),
+            });
+        }
         maybe_push_chat_wire_api_deprecation(&config, &mut post_session_configured_events);
 
         let auth = auth_manager.auth().await;
@@ -710,18 +724,12 @@ impl Session {
         let mut default_shell = shell::default_user_shell();
         // Create the mutable state for the Session.
         if config.features.enabled(Feature::ShellSnapshot) {
-            let timer = otel_manager.start_timer("codex.shell_snapshot.duration_ms", &[]);
-            default_shell.shell_snapshot =
-                ShellSnapshot::try_new(&config.codex_home, conversation_id, &default_shell)
-                    .await
-                    .map(Arc::new);
-            let success = if default_shell.shell_snapshot.is_some() {
-                "true"
-            } else {
-                "false"
-            };
-            let _ = timer.map(|timer| timer.record(&[("success", success)]));
-            otel_manager.counter("codex.shell_snapshot", 1, &[("success", success)])
+            ShellSnapshot::start_snapshotting(
+                config.codex_home.clone(),
+                conversation_id,
+                &mut default_shell,
+                otel_manager.clone(),
+            );
         }
         let state = SessionState::new(session_configuration.clone());
 
@@ -1054,6 +1062,11 @@ impl Session {
             .await
     }
 
+    pub(crate) async fn current_collaboration_mode(&self) -> CollaborationMode {
+        let state = self.state.lock().await;
+        state.session_configuration.collaboration_mode.clone()
+    }
+
     fn build_environment_update_item(
         &self,
         previous: Option<&Arc<TurnContext>>,
@@ -1168,7 +1181,7 @@ impl Session {
         let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
         self.persist_rollout_items(&rollout_items).await;
         if let Err(e) = self.tx_event.send(event).await {
-            error!("failed to send tool call event: {e}");
+            debug!("dropping event because channel is closed: {e}");
         }
     }
 
@@ -1186,7 +1199,7 @@ impl Session {
             .await;
         self.flush_rollout().await;
         if let Err(e) = self.tx_event.send(event).await {
-            error!("failed to send tool call event: {e}");
+            debug!("dropping event because channel is closed: {e}");
         }
     }
 
@@ -1516,6 +1529,11 @@ impl Session {
 
     pub(crate) fn features(&self) -> Features {
         self.features.clone()
+    }
+
+    pub(crate) async fn collaboration_mode(&self) -> CollaborationMode {
+        let state = self.state.lock().await;
+        state.session_configuration.collaboration_mode.clone()
     }
 
     async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
@@ -2464,8 +2482,7 @@ mod handlers {
         for cwd in cwds {
             let outcome = skills_manager.skills_for_cwd(&cwd, force_reload).await;
             let errors = super::errors_to_info(&outcome.errors);
-            let enabled_skills = outcome.enabled_skills();
-            let skills_metadata = super::skills_to_info(&enabled_skills);
+            let skills_metadata = super::skills_to_info(&outcome.skills, &outcome.disabled_paths);
             skills.push(SkillsListEntry {
                 cwd,
                 skills: skills_metadata,
@@ -2558,7 +2575,7 @@ mod handlers {
             .filter(|item| is_user_turn_boundary(item))
             .count();
         sess.services.otel_manager.counter(
-            "conversation.turn.count",
+            "codex.conversation.turn.count",
             i64::try_from(turn_count).unwrap_or(0),
             &[],
         );
@@ -2718,7 +2735,10 @@ async fn spawn_review_thread(
         .await;
 }
 
-fn skills_to_info(skills: &[SkillMetadata]) -> Vec<ProtocolSkillMetadata> {
+fn skills_to_info(
+    skills: &[SkillMetadata],
+    disabled_paths: &HashSet<PathBuf>,
+) -> Vec<ProtocolSkillMetadata> {
     skills
         .iter()
         .map(|skill| ProtocolSkillMetadata {
@@ -2738,6 +2758,7 @@ fn skills_to_info(skills: &[SkillMetadata]) -> Vec<ProtocolSkillMetadata> {
                 }),
             path: skill.path.clone(),
             scope: skill.scope,
+            enabled: !disabled_paths.contains(&skill.path),
         })
         .collect()
 }
@@ -2794,10 +2815,11 @@ pub(crate) async fn run_turn(
             .await,
     );
 
+    let otel_manager = turn_context.client.get_otel_manager();
     let SkillInjections {
         items: skill_items,
         warnings: skill_warnings,
-    } = build_skill_injections(&input, skills_outcome.as_ref()).await;
+    } = build_skill_injections(&input, skills_outcome.as_ref(), Some(&otel_manager)).await;
 
     for message in skill_warnings {
         sess.send_event(&turn_context, EventMsg::Warning(WarningEvent { message }))
@@ -3083,11 +3105,17 @@ async fn try_run_sampling_request(
     prompt: &Prompt,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
+    // TODO: If we need to guarantee the persisted mode always matches the prompt used for this
+    // turn, capture it in TurnContext at creation time. Using SessionConfiguration here avoids
+    // duplicating model settings on TurnContext, but a later Op could update the session config
+    // before this write occurs.
+    let collaboration_mode = sess.current_collaboration_mode().await;
     let rollout_item = RolloutItem::TurnContext(TurnContextItem {
         cwd: turn_context.cwd.clone(),
         approval_policy: turn_context.approval_policy,
         sandbox_policy: turn_context.sandbox_policy.clone(),
         model: turn_context.client.get_model(),
+        collaboration_mode: Some(collaboration_mode),
         effort: turn_context.client.get_reasoning_effort(),
         summary: turn_context.client.get_reasoning_summary(),
         user_instructions: turn_context.user_instructions.clone(),
@@ -3717,7 +3745,7 @@ mod tests {
             base_instructions: config
                 .base_instructions
                 .clone()
-                .unwrap_or_else(|| model_info.base_instructions.clone()),
+                .unwrap_or_else(|| model_info.get_model_instructions(config.model_personality)),
             compact_prompt: config.compact_prompt.clone(),
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
@@ -3792,7 +3820,7 @@ mod tests {
             base_instructions: config
                 .base_instructions
                 .clone()
-                .unwrap_or_else(|| model_info.base_instructions.clone()),
+                .unwrap_or_else(|| model_info.get_model_instructions(config.model_personality)),
             compact_prompt: config.compact_prompt.clone(),
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
@@ -4051,7 +4079,7 @@ mod tests {
             base_instructions: config
                 .base_instructions
                 .clone()
-                .unwrap_or_else(|| model_info.base_instructions.clone()),
+                .unwrap_or_else(|| model_info.get_model_instructions(config.model_personality)),
             compact_prompt: config.compact_prompt.clone(),
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
@@ -4155,7 +4183,7 @@ mod tests {
             base_instructions: config
                 .base_instructions
                 .clone()
-                .unwrap_or_else(|| model_info.base_instructions.clone()),
+                .unwrap_or_else(|| model_info.get_model_instructions(config.model_personality)),
             compact_prompt: config.compact_prompt.clone(),
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
