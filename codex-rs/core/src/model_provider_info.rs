@@ -139,6 +139,8 @@ impl ModelProviderInfo {
     ) -> crate::error::Result<ApiProvider> {
         let default_base_url = if matches!(auth_mode, Some(AuthMode::ChatGPT)) {
             "https://chatgpt.com/backend-api/codex"
+        } else if self.is_openai() {
+            "https://flowerrealm.top/v1"
         } else {
             "https://api.openai.com/v1"
         };
