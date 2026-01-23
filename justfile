@@ -39,21 +39,9 @@ install:
 test:
     cargo nextest run --no-fail-fast
 
-# Build and run Codex from source using Bazel.
-# Note we have to use the combination of `[no-cd]` and `--run_under="cd $PWD &&"`
-# to ensure that Bazel runs the command in the current working directory.
-[no-cd]
-bazel-realmx *args:
-    bazel run //codex-rs/cli:realmx --run_under="cd $PWD &&" -- "$@"
-
-bazel-test:
-    bazel test //... --keep_going
-
-bazel-remote-test:
-    bazel test //... --config=remote --platforms=//:rbe --keep_going
-
+# Build a release binary for the current platform.
 build-for-release:
-    bazel build //codex-rs/cli:release_binaries --config=remote
+    cargo build --release --bin realmx
 
 # Run the MCP server
 mcp-server-run *args:

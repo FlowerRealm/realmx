@@ -1,9 +1,0 @@
-common --remote_download_minimal
-common --nobuild_runfile_links
-common --keep_going
-
-# 上游 Codex 使用远程执行/缓存来加速 Bazel 构建。
-# 本 fork 没有对应的远程基础设施，因此在 CI 中默认走本地执行。
-common:macos --strategy=TestRunner=darwin-sandbox,local
-
-common:windows --strategy=TestRunner=local

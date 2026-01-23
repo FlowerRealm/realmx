@@ -1,14 +1,13 @@
 # npm releases
 
 Use the staging helper in the repo root to generate npm tarballs for a release. For
-example, to stage the CLI, responses proxy, and SDK packages for version `0.6.0`:
+example, to stage the CLI and responses proxy packages for version `0.6.0`:
 
 ```bash
 ./scripts/stage_npm_packages.py \
   --release-version 0.6.0 \
   --package realmx \
-  --package codex-responses-api-proxy \
-  --package codex-sdk
+  --package codex-responses-api-proxy
 ```
 
 This downloads the native artifacts once, hydrates `vendor/` for each package, and writes

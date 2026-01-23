@@ -79,11 +79,10 @@ If you don’t have the tool:
 - Prefer deep equals comparisons whenever possible. Perform `assert_eq!()` on entire objects, rather than individual fields.
 - Avoid mutating process environment in tests; prefer passing environment-derived flags or dependencies from above.
 
-### Spawning workspace binaries in tests (Cargo vs Bazel)
+### Spawning workspace binaries in tests
 
 - Prefer `codex_utils_cargo_bin::cargo_bin("...")` over `assert_cmd::Command::cargo_bin(...)` or `escargot` when tests need to spawn first-party binaries.
-  - Under Bazel, binaries and resources may live under runfiles; use `codex_utils_cargo_bin::cargo_bin` to resolve absolute paths that remain stable after `chdir`.
-- When locating fixture files or test resources under Bazel, avoid `env!("CARGO_MANIFEST_DIR")`. Prefer `codex_utils_cargo_bin::find_resource!` so paths resolve correctly under both Cargo and Bazel runfiles.
+  - Some build systems may set `CARGO_BIN_EXE_*` to project-relative paths; `cargo_bin()` resolves an absolute path up-front so tests can safely `chdir` afterwards.
 
 ### Integration tests (core)
 
