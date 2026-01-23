@@ -153,6 +153,9 @@
             "collaboration_modes": {
               "type": "boolean"
             },
+            "connectors": {
+              "type": "boolean"
+            },
             "elevated_windows_sandbox": {
               "type": "boolean"
             },
@@ -1131,6 +1134,9 @@
           "type": "boolean"
         },
         "collaboration_modes": {
+          "type": "boolean"
+        },
+        "connectors": {
           "type": "boolean"
         },
         "elevated_windows_sandbox": {
