@@ -29,6 +29,7 @@ clap = { workspace = true, features = ["derive"] }
 codex-ansi-escape = { workspace = true }
 codex-arg0 = { workspace = true }
 codex-backend-client = { workspace = true }
+codex-chatgpt = { workspace = true }
 codex-common = { workspace = true, features = [
     "cli",
     "elapsed",

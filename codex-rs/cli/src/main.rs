@@ -148,7 +148,7 @@ struct ResumeCommand {
     session_id: Option<String>,
 
     /// Continue the most recent session without showing the picker.
-    #[arg(long = "last", default_value_t = false, conflicts_with = "session_id")]
+    #[arg(long = "last", default_value_t = false)]
     last: bool,
 
     /// Show all sessions (disables cwd filtering and shows CWD column).
@@ -345,8 +345,7 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
-    println!();
-    println!("🎉 Update ran successfully! Please restart Codex.");
+    println!("\n🎉 Update ran successfully! Please restart Codex.");
     Ok(())
 }
 
@@ -403,8 +402,8 @@ enum FeaturesSubcommand {
 fn stage_str(stage: codex_core::features::Stage) -> &'static str {
     use codex_core::features::Stage;
     match stage {
-        Stage::Beta => "experimental",
-        Stage::Experimental { .. } => "beta",
+        Stage::UnderDevelopment => "under development",
+        Stage::Experimental { .. } => "experimental",
         Stage::Stable => "stable",
         Stage::Deprecated => "deprecated",
         Stage::Removed => "removed",

@@ -6,20 +6,13 @@ use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
 use super::selection_popup_common::GenericDisplayRow;
 use super::selection_popup_common::render_rows;
+use super::slash_commands;
 use crate::render::Insets;
 use crate::render::RectExt;
 use crate::slash_command::SlashCommand;
-use crate::slash_command::built_in_slash_commands;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use std::collections::HashSet;
-
-fn windows_degraded_sandbox_active() -> bool {
-    cfg!(target_os = "windows")
-        && codex_core::windows_sandbox::ELEVATED_SANDBOX_NUX_ENABLED
-        && codex_core::get_platform_sandbox().is_some()
-        && !codex_core::is_windows_elevated_sandbox_enabled()
-}
 
 /// A selectable item in the popup: either a built-in command or a user prompt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,16 +32,20 @@ pub(crate) struct CommandPopup {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CommandPopupFlags {
     pub(crate) collaboration_modes_enabled: bool,
+    pub(crate) connectors_enabled: bool,
+    pub(crate) personality_command_enabled: bool,
+    pub(crate) windows_degraded_sandbox_active: bool,
 }
 
 impl CommandPopup {
     pub(crate) fn new(mut prompts: Vec<CustomPrompt>, flags: CommandPopupFlags) -> Self {
-        let allow_elevate_sandbox = windows_degraded_sandbox_active();
-        let builtins: Vec<(&'static str, SlashCommand)> = built_in_slash_commands()
-            .into_iter()
-            .filter(|(_, cmd)| allow_elevate_sandbox || *cmd != SlashCommand::ElevateSandbox)
-            .filter(|(_, cmd)| flags.collaboration_modes_enabled || *cmd != SlashCommand::Collab)
-            .collect();
+        // Keep built-in availability in sync with the composer.
+        let builtins = slash_commands::builtins_for_input(
+            flags.collaboration_modes_enabled,
+            flags.connectors_enabled,
+            flags.personality_command_enabled,
+            flags.windows_degraded_sandbox_active,
+        );
         // Exclude prompts that collide with builtin command names and sort by name.
         let exclude: HashSet<String> = builtins.iter().map(|(n, _)| (*n).to_string()).collect();
         prompts.retain(|p| !exclude.contains(&p.name));
@@ -125,6 +122,10 @@ impl CommandPopup {
         if filter.is_empty() {
             // Built-ins first, in presentation order.
             for (_, cmd) in self.builtins.iter() {
+                // Skipping quit as it's a duplicate of exit.
+                if *cmd == SlashCommand::Quit {
+                    continue;
+                }
                 out.push((CommandItem::Builtin(*cmd), None));
             }
             // Then prompts, already sorted by name.
@@ -216,6 +217,7 @@ impl CommandPopup {
                     display_shortcut: None,
                     description: Some(description),
                     wrap_indent: None,
+                    is_disabled: false,
                     disabled_reason: None,
                 }
             })
@@ -442,6 +444,18 @@ mod tests {
     }
 
     #[test]
+    fn quit_hidden_in_empty_filter_but_shown_for_prefix() {
+        let mut popup = CommandPopup::new(Vec::new(), CommandPopupFlags::default());
+        popup.on_composer_text_change("/".to_string());
+        let items = popup.filtered_items();
+        assert!(!items.contains(&CommandItem::Builtin(SlashCommand::Quit)));
+
+        popup.on_composer_text_change("/qu".to_string());
+        let items = popup.filtered_items();
+        assert!(items.contains(&CommandItem::Builtin(SlashCommand::Quit)));
+    }
+
+    #[test]
     fn collab_command_hidden_when_collaboration_modes_disabled() {
         let mut popup = CommandPopup::new(Vec::new(), CommandPopupFlags::default());
         popup.on_composer_text_change("/coll".to_string());
@@ -466,6 +480,9 @@ mod tests {
             Vec::new(),
             CommandPopupFlags {
                 collaboration_modes_enabled: true,
+                connectors_enabled: false,
+                personality_command_enabled: true,
+                windows_degraded_sandbox_active: false,
             },
         );
         popup.on_composer_text_change("/collab".to_string());
@@ -473,6 +490,52 @@ mod tests {
         match popup.selected_item() {
             Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "collab"),
             other => panic!("expected collab to be selected for exact match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn personality_command_hidden_when_disabled() {
+        let mut popup = CommandPopup::new(
+            Vec::new(),
+            CommandPopupFlags {
+                collaboration_modes_enabled: true,
+                connectors_enabled: false,
+                personality_command_enabled: false,
+                windows_degraded_sandbox_active: false,
+            },
+        );
+        popup.on_composer_text_change("/pers".to_string());
+
+        let cmds: Vec<&str> = popup
+            .filtered_items()
+            .into_iter()
+            .filter_map(|item| match item {
+                CommandItem::Builtin(cmd) => Some(cmd.command()),
+                CommandItem::UserPrompt(_) => None,
+            })
+            .collect();
+        assert!(
+            !cmds.contains(&"personality"),
+            "expected '/personality' to be hidden when disabled, got {cmds:?}"
+        );
+    }
+
+    #[test]
+    fn personality_command_visible_when_enabled() {
+        let mut popup = CommandPopup::new(
+            Vec::new(),
+            CommandPopupFlags {
+                collaboration_modes_enabled: true,
+                connectors_enabled: false,
+                personality_command_enabled: true,
+                windows_degraded_sandbox_active: false,
+            },
+        );
+        popup.on_composer_text_change("/personality".to_string());
+
+        match popup.selected_item() {
+            Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "personality"),
+            other => panic!("expected personality to be selected for exact match, got {other:?}"),
         }
     }
 }
