@@ -128,8 +128,11 @@ pub enum AgentTreeIpcMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_protocol::protocol::FileChange;
     use codex_protocol::request_user_input::RequestUserInputQuestion;
     use pretty_assertions::assert_eq;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn work_request_json_round_trip() {
@@ -176,5 +179,92 @@ mod tests {
         };
         assert_eq!(need.args.questions.len(), 1);
         assert_eq!(need.args.questions[0].id, "q1");
+    }
+
+    #[test]
+    fn need_exec_approval_json_round_trip() {
+        let msg = AgentTreeIpcMessage::NeedExecApproval(NeedExecApproval {
+            request_key: AgentTreeRequestKey::new(ThreadId::new(), "0"),
+            event: ExecApprovalRequestEvent {
+                call_id: "call-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                command: vec!["echo".to_string(), "hello".to_string()],
+                cwd: PathBuf::from("/tmp"),
+                reason: Some("why".to_string()),
+                proposed_execpolicy_amendment: None,
+                parsed_cmd: Vec::new(),
+            },
+        });
+
+        let json = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(json["type"], "need_exec_approval");
+
+        let parsed: AgentTreeIpcMessage = serde_json::from_value(json).expect("deserialize");
+        let AgentTreeIpcMessage::NeedExecApproval(need) = parsed else {
+            panic!("expected NeedExecApproval");
+        };
+        assert_eq!(need.event.call_id, "call-1");
+        assert_eq!(need.event.turn_id, "turn-1");
+        assert_eq!(
+            need.event.command,
+            vec!["echo".to_string(), "hello".to_string()]
+        );
+        assert_eq!(need.event.cwd, PathBuf::from("/tmp"));
+    }
+
+    #[test]
+    fn need_patch_approval_json_round_trip() {
+        let msg = AgentTreeIpcMessage::NeedPatchApproval(NeedPatchApproval {
+            request_key: AgentTreeRequestKey::new(ThreadId::new(), "0"),
+            event: ApplyPatchApprovalRequestEvent {
+                call_id: "call-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                changes: HashMap::from([(
+                    PathBuf::from("a.txt"),
+                    FileChange::Add {
+                        content: "hello".to_string(),
+                    },
+                )]),
+                reason: None,
+                grant_root: None,
+            },
+        });
+
+        let json = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(json["type"], "need_patch_approval");
+
+        let parsed: AgentTreeIpcMessage = serde_json::from_value(json).expect("deserialize");
+        let AgentTreeIpcMessage::NeedPatchApproval(need) = parsed else {
+            panic!("expected NeedPatchApproval");
+        };
+        assert_eq!(need.event.call_id, "call-1");
+        assert_eq!(need.event.turn_id, "turn-1");
+        assert_eq!(need.event.changes.len(), 1);
+    }
+
+    #[test]
+    fn worker_result_json_round_trip() {
+        let msg = AgentTreeIpcMessage::WorkerResult(WorkerResult {
+            summary: "done".to_string(),
+            diff: "diff".to_string(),
+            commands: vec![WorkerCommandResult {
+                command: "cargo test".to_string(),
+                exit_code: Some(0),
+                output: "ok".to_string(),
+            }],
+            worktree_path: PathBuf::from("/tmp/worktree"),
+        });
+
+        let json = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(json["type"], "worker_result");
+
+        let parsed: AgentTreeIpcMessage = serde_json::from_value(json).expect("deserialize");
+        let AgentTreeIpcMessage::WorkerResult(result) = parsed else {
+            panic!("expected WorkerResult");
+        };
+        assert_eq!(result.summary, "done");
+        assert_eq!(result.diff, "diff");
+        assert_eq!(result.commands.len(), 1);
+        assert_eq!(result.worktree_path, PathBuf::from("/tmp/worktree"));
     }
 }

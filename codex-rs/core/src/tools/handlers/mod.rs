@@ -1,3 +1,4 @@
+mod agent_tree;
 pub mod apply_patch;
 pub(crate) mod collab;
 mod grep_files;
@@ -16,6 +17,7 @@ pub use plan::PLAN_TOOL;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
+pub use agent_tree::AgentTreeHandler;
 pub use apply_patch::ApplyPatchHandler;
 pub use collab::CollabHandler;
 pub use grep_files::GrepFilesHandler;

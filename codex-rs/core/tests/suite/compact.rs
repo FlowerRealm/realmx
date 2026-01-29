@@ -612,10 +612,13 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
                 // Ignore cached prefix messages (project docs + permissions) since they are not
                 // relevant to compaction behavior and can change as bundled prompts evolve.
                 let role = value.get("role").and_then(|role| role.as_str());
-                if role == Some("developer")
-                    && text.is_some_and(|text| text.contains("`sandbox_mode`"))
-                {
-                    return false;
+                if role == Some("developer") {
+                    if text.is_some_and(|text| text.contains("`sandbox_mode`")) {
+                        return false;
+                    }
+                    if text.is_some_and(|text| text.contains("<collaboration_mode>")) {
+                        return false;
+                    }
                 }
                 !text.is_some_and(|text| text.starts_with("# AGENTS.md instructions for "))
             })
@@ -1752,6 +1755,8 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
         .collect::<VecDeque<_>>();
 
     // Permissions developer message
+    final_output.pop_front();
+    // Collaboration mode developer message
     final_output.pop_front();
     // User instructions (project docs/skills)
     final_output.pop_front();

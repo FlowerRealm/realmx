@@ -25,7 +25,7 @@ pub enum ConfigLayerSource {
         file: AbsolutePathBuf,
     },
 
-    /// Path to a `.codex/` folder within a project. There could be multiple of
+    /// Path to a `.realmx/` folder within a project. There could be multiple of
     /// these between `cwd` and the project/repo root.
     #[serde(rename_all = "camelCase")]
     Project {

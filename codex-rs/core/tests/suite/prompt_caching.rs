@@ -140,6 +140,8 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         "apply_patch",
         "web_search",
         "view_image",
+        "agent_tree_delegate",
+        "agent_tree_apply_diff",
     ];
     let body0 = req1.single_request().body_json();
 
@@ -274,11 +276,19 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
     let input1 = body1["input"].as_array().expect("input array");
     assert_eq!(
         input1.len(),
-        4,
-        "expected permissions + cached prefix + env + user msg"
+        5,
+        "expected permissions + collab + cached prefix + env + user msg"
     );
 
-    let ui_text = input1[1]["content"][0]["text"]
+    let collab_text = input1[1]["content"][0]["text"]
+        .as_str()
+        .expect("collab message text");
+    assert!(
+        collab_text.contains("<collaboration_mode>"),
+        "expected collaboration mode message present"
+    );
+
+    let ui_text = input1[2]["content"][0]["text"]
         .as_str()
         .expect("ui message text");
     assert!(
@@ -290,11 +300,11 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
     let cwd_str = config.cwd.to_string_lossy();
     let expected_env_text = default_env_context_str(&cwd_str, &shell);
     assert_eq!(
-        input1[2],
+        input1[3],
         text_user_input(expected_env_text),
         "expected environment context after UI message"
     );
-    assert_eq!(input1[3], text_user_input("hello 1".to_string()));
+    assert_eq!(input1[4], text_user_input("hello 1".to_string()));
 
     let body2 = req2.single_request().body_json();
     let input2 = body2["input"].as_array().expect("input array");
@@ -708,7 +718,8 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
     let body2 = req2.single_request().body_json();
 
     let expected_permissions_msg = body1["input"][0].clone();
-    let expected_ui_msg = body1["input"][1].clone();
+    let expected_collab_msg = body1["input"][1].clone();
+    let expected_ui_msg = body1["input"][2].clone();
 
     let shell = default_user_shell();
     let default_cwd_lossy = default_cwd.to_string_lossy();
@@ -718,6 +729,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
 
     let expected_input_1 = serde_json::Value::Array(vec![
         expected_permissions_msg.clone(),
+        expected_collab_msg.clone(),
         expected_ui_msg.clone(),
         expected_env_msg_1.clone(),
         expected_user_message_1.clone(),
@@ -727,6 +739,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
     let expected_user_message_2 = text_user_input("hello 2".to_string());
     let expected_input_2 = serde_json::Value::Array(vec![
         expected_permissions_msg,
+        expected_collab_msg,
         expected_ui_msg,
         expected_env_msg_1,
         expected_user_message_1,
@@ -808,7 +821,8 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
     let body2 = req2.single_request().body_json();
 
     let expected_permissions_msg = body1["input"][0].clone();
-    let expected_ui_msg = body1["input"][1].clone();
+    let expected_collab_msg = body1["input"][1].clone();
+    let expected_ui_msg = body1["input"][2].clone();
 
     let shell = default_user_shell();
     let expected_env_text_1 = default_env_context_str(&default_cwd.to_string_lossy(), &shell);
@@ -816,6 +830,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
     let expected_user_message_1 = text_user_input("hello 1".to_string());
     let expected_input_1 = serde_json::Value::Array(vec![
         expected_permissions_msg.clone(),
+        expected_collab_msg.clone(),
         expected_ui_msg.clone(),
         expected_env_msg_1.clone(),
         expected_user_message_1.clone(),
@@ -831,6 +846,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
     let expected_user_message_2 = text_user_input("hello 2".to_string());
     let expected_input_2 = serde_json::Value::Array(vec![
         expected_permissions_msg,
+        expected_collab_msg,
         expected_ui_msg,
         expected_env_msg_1,
         expected_user_message_1,

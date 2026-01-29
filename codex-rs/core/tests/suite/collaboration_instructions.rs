@@ -78,8 +78,17 @@ async fn no_collaboration_instructions_by_default() -> Result<()> {
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
-    assert_eq!(dev_texts.len(), 1);
-    assert!(dev_texts[0].contains("`approval_policy`"));
+    assert_eq!(dev_texts.len(), 2);
+    assert!(
+        dev_texts[0].contains("`approval_policy`"),
+        "expected permissions message first, got {:?}",
+        dev_texts[0]
+    );
+    assert!(
+        dev_texts[1].starts_with(COLLABORATION_MODE_OPEN_TAG),
+        "expected collaboration mode message second, got {:?}",
+        dev_texts[1]
+    );
 
     Ok(())
 }
@@ -504,9 +513,12 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
-    assert_eq!(dev_texts.len(), 1);
     let collab_text = collab_xml("");
-    assert_eq!(count_exact(&dev_texts, &collab_text), 0);
+    assert_eq!(
+        count_exact(&dev_texts, &collab_text),
+        1,
+        "expected empty collaboration mode block to clear prior instructions"
+    );
 
     Ok(())
 }

@@ -217,11 +217,12 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
         .unwrap_or_default()
         .to_string();
     let permissions_message = requests[0]["input"][0].clone();
-    let user_instructions = requests[0]["input"][1]["content"][0]["text"]
+    let collaboration_mode_message = requests[0]["input"][1].clone();
+    let user_instructions = requests[0]["input"][2]["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
         .to_string();
-    let environment_context = requests[0]["input"][2]["content"][0]["text"]
+    let environment_context = requests[0]["input"][3]["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
         .to_string();
@@ -243,6 +244,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
       "instructions": prompt,
       "input": [
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -294,6 +296,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
       "instructions": prompt,
       "input": [
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -365,6 +368,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
       "instructions": prompt,
       "input": [
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -427,6 +431,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
       "instructions": prompt,
       "input": [
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -479,6 +484,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
           ]
         },
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -530,6 +536,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
       "instructions": prompt,
       "input": [
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -582,6 +589,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
           ]
         },
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -603,6 +611,7 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
           ]
         },
         permissions_message,
+        collaboration_mode_message,
         {
           "type": "message",
           "role": "user",
@@ -739,11 +748,12 @@ async fn compact_resume_after_second_compaction_preserves_history() {
         .unwrap_or_default()
         .to_string();
     let permissions_message = requests[0]["input"][0].clone();
-    let user_instructions = requests[0]["input"][1]["content"][0]["text"]
+    let collaboration_mode_message = requests[0]["input"][1].clone();
+    let user_instructions = requests[0]["input"][2]["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
         .to_string();
-    let environment_instructions = requests[0]["input"][2]["content"][0]["text"]
+    let environment_instructions = requests[0]["input"][3]["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
         .to_string();
@@ -758,6 +768,7 @@ async fn compact_resume_after_second_compaction_preserves_history() {
         "instructions": prompt,
         "input": [
           permissions_message,
+          collaboration_mode_message,
           {
             "type": "message",
             "role": "user",
@@ -800,6 +811,7 @@ async fn compact_resume_after_second_compaction_preserves_history() {
             ]
           },
           permissions_message,
+          collaboration_mode_message,
           {
             "type": "message",
             "role": "user",

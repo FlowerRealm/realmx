@@ -266,10 +266,16 @@ impl UnifiedExecProcessManager {
             if !tty {
                 return Err(UnifiedExecError::StdinClosed);
             }
-            Self::send_input(&writer_tx, request.input.as_bytes()).await?;
-            // Give the remote process a brief window to react so that we are
-            // more likely to capture its output in the poll below.
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // If the process has already exited, stdin can be closed by the time we get here.
+            // Treat that as a no-op so callers can still poll for final output.
+            if Self::send_input(&writer_tx, request.input.as_bytes())
+                .await
+                .is_ok()
+            {
+                // Give the remote process a brief window to react so that we are
+                // more likely to capture its output in the poll below.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         }
 
         let max_tokens = resolve_max_tokens(request.max_output_tokens);

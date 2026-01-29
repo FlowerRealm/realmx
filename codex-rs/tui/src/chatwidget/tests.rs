@@ -777,7 +777,7 @@ async fn make_chatwidget_manual(
     let models_manager = Arc::new(ModelsManager::new(codex_home, auth_manager.clone()));
     let collaboration_modes_enabled = cfg.features.enabled(Feature::CollaborationModes);
     let reasoning_effort = None;
-    let stored_collaboration_mode = if collaboration_modes_enabled {
+    let mut stored_collaboration_mode = if collaboration_modes_enabled {
         collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
             CollaborationMode::Custom(Settings {
                 model: resolved_model.clone(),
@@ -792,6 +792,15 @@ async fn make_chatwidget_manual(
             developer_instructions: None,
         })
     };
+    if cfg.features.enabled(Feature::AgentTree) {
+        stored_collaboration_mode = CollaborationMode::Plan(Settings {
+            model: stored_collaboration_mode.model().to_string(),
+            reasoning_effort: stored_collaboration_mode.reasoning_effort(),
+            developer_instructions: Some(
+                codex_core::agent_tree::prompts::L1_ORCHESTRATOR_DEVELOPER_INSTRUCTIONS.to_string(),
+            ),
+        });
+    }
     let widget = ChatWidget {
         app_event_tx,
         codex_op_tx: op_tx,

@@ -1086,8 +1086,10 @@ dependencies = [
  "supports-color 3.0.2",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml 0.9.5",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

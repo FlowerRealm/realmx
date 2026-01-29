@@ -7,14 +7,26 @@ use serde::Serialize;
 const ORCHESTRATOR_PROMPT: &str = include_str!("../../templates/agents/orchestrator.md");
 /// Base instructions for the worker role.
 const WORKER_PROMPT: &str = include_str!("../../gpt-5.2-codex_prompt.md");
+/// Base instructions for agent-tree explore sub-agents.
+const AGENT_TREE_EXPLORE_PROMPT: &str =
+    include_str!("../../templates/agent_tree/subagent_explore.md");
+/// Base instructions for agent-tree review sub-agents.
+const AGENT_TREE_REVIEW_PROMPT: &str =
+    include_str!("../../templates/agent_tree/subagent_review.md");
+/// Base instructions for agent-tree editor sub-agents.
+const AGENT_TREE_EDITOR_PROMPT: &str =
+    include_str!("../../templates/agent_tree/subagent_editor.md");
 /// Default worker model override used by the worker role.
 const WORKER_MODEL: &str = "gpt-5.2-codex";
 
 /// Enumerated list of all supported agent roles.
-const ALL_ROLES: [AgentRole; 3] = [
+const ALL_ROLES: [AgentRole; 6] = [
     AgentRole::Default,
     AgentRole::Orchestrator,
     AgentRole::Worker,
+    AgentRole::Explore,
+    AgentRole::Review,
+    AgentRole::Editor,
 ];
 
 /// Hard-coded agent role selection used when spawning sub-agents.
@@ -27,6 +39,12 @@ pub enum AgentRole {
     Orchestrator,
     /// Task-executing agent with a fixed model override.
     Worker,
+    /// Read-only exploratory agent for agent-tree tasks.
+    Explore,
+    /// Read-only reviewer agent for agent-tree tasks.
+    Review,
+    /// Code-editing agent for agent-tree tasks.
+    Editor,
 }
 
 /// Immutable profile data that drives per-agent configuration overrides.
@@ -59,6 +77,21 @@ impl AgentRole {
             },
             AgentRole::Worker => AgentProfile {
                 base_instructions: Some(WORKER_PROMPT),
+                model: Some(WORKER_MODEL),
+                ..Default::default()
+            },
+            AgentRole::Explore => AgentProfile {
+                base_instructions: Some(AGENT_TREE_EXPLORE_PROMPT),
+                model: Some(WORKER_MODEL),
+                read_only: true,
+            },
+            AgentRole::Review => AgentProfile {
+                base_instructions: Some(AGENT_TREE_REVIEW_PROMPT),
+                model: Some(WORKER_MODEL),
+                read_only: true,
+            },
+            AgentRole::Editor => AgentProfile {
+                base_instructions: Some(AGENT_TREE_EDITOR_PROMPT),
                 model: Some(WORKER_MODEL),
                 ..Default::default()
             },

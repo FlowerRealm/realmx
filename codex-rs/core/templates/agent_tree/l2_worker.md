@@ -4,11 +4,11 @@
 
 ## 目标（必须交付）
 
-你必须在 worktree 内完成实现，并在退出前生成结构化结果：
+你必须在 worktree 内完成实现，并在结束前确保 L1 能获得结构化结果：
 
-- `summary`: 变更说明（做了什么、为什么、影响范围）
-- `diff`: unified diff（必须包含新增/未跟踪文件）
-- `commands`: 关键命令与输出摘要（至少包含测试命令）
+- `summary`: 你最终输出的变更说明（做了什么、为什么、影响范围、如何验证）
+- `diff`: worker 进程会自动生成 unified diff（包含新增/未跟踪文件）
+- `commands`: worker 进程会自动收集关键命令与输出摘要（至少包含测试命令）
 
 ## 工作约束（严格）
 
@@ -23,6 +23,10 @@
 3. **可以启用子代理并发（建议）**
    - 你可以通过 `spawn_agent` 启动子代理来并发完成：探索(explore) / 审查(review) / 编码(editor) 等。
    - 子代理必须在同一个 worktree 下工作（继承 cwd）。
+   - 建议显式指定 `agent_type`：
+     - explore：`{"agent_type":"explore","message":"..."}`
+     - review：`{"agent_type":"review","message":"..."}`
+     - editor：`{"agent_type":"editor","message":"..."}`
    - 默认策略：
      - **读分析可以并发**（explore/review）
      - **写入型操作要串行化**（editor 的 apply_patch、会修改文件的 shell 命令等），避免同一 worktree 多写者竞态

@@ -381,17 +381,17 @@ def main() -> int:
     rc, out, err = run_sbx("workspace-write", ["cmd", "/c", "echo hack > .GiT\\config"], WS_ROOT)
     add("WS: protected path case-variation denied", rc != 0 and assert_not_exists(git_variation), f"rc={rc}")
 
-    # 34. WS: policy tamper (.codex artifacts) denied
-    codex_home = Path(os.environ["USERPROFILE"]) / ".codex"
-    cap_sid_target = codex_home / "cap_sid"
+    # 34. WS: policy tamper (.realmx artifacts) denied
+    realmx_home = Path(os.environ["USERPROFILE"]) / ".realmx"
+    cap_sid_target = realmx_home / "cap_sid"
     rc, out, err = run_sbx(
         "workspace-write",
         ["cmd", "/c", f"echo tamper > \"{cap_sid_target}\""],
         WS_ROOT,
     )
-    rc2, out2, err2 = run_sbx("workspace-write", ["cmd", "/c", "echo tamper > .codex\\policy.json"], WS_ROOT)
-    add("WS: .codex cap_sid tamper denied", rc != 0, f"rc={rc}, err={err}")
-    add("WS: .codex policy tamper denied", rc2 != 0, f"rc={rc2}, err={err2}")
+    rc2, out2, err2 = run_sbx("workspace-write", ["cmd", "/c", "echo tamper > .realmx\\policy.json"], WS_ROOT)
+    add("WS: .realmx cap_sid tamper denied", rc != 0, f"rc={rc}, err={err}")
+    add("WS: .realmx policy tamper denied", rc2 != 0, f"rc={rc2}, err={err2}")
 
     # 35. WS: PATH stub bypass denied (ssh before stubs)
     tools_dir = WS_ROOT / "tools"

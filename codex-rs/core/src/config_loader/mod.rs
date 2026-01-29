@@ -69,8 +69,8 @@ const DEFAULT_PROJECT_ROOT_MARKERS: &[&str] = &[".git"];
 /// - system    `/etc/codex/config.toml`
 /// - user      `${CODEX_HOME}/config.toml`
 /// - cwd       `${PWD}/config.toml` (only when the directory is trusted)
-/// - tree      parent directories up to root looking for `./.codex/config.toml` (trusted only)
-/// - repo      `$(git rev-parse --show-toplevel)/.codex/config.toml` (trusted only)
+/// - tree      parent directories up to root looking for `./.realmx/config.toml` (trusted only)
+/// - repo      `$(git rev-parse --show-toplevel)/.realmx/config.toml` (trusted only)
 /// - runtime   e.g., --config flags, model selector in UI
 ///
 /// (*) Only available on macOS via managed device profiles.
@@ -547,8 +547,8 @@ async fn load_project_layers(
 
     let mut layers = Vec::new();
     for dir in dirs {
-        let dot_codex = dir.join(".codex");
-        if !tokio::fs::metadata(&dot_codex)
+        let dot_realmx = dir.join(".realmx");
+        if !tokio::fs::metadata(&dot_realmx)
             .await
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
@@ -556,8 +556,8 @@ async fn load_project_layers(
             continue;
         }
 
-        let dot_codex_abs = AbsolutePathBuf::from_absolute_path(&dot_codex)?;
-        let config_file = dot_codex_abs.join(CONFIG_TOML_FILE)?;
+        let dot_realmx_abs = AbsolutePathBuf::from_absolute_path(&dot_realmx)?;
+        let config_file = dot_realmx_abs.join(CONFIG_TOML_FILE)?;
         match tokio::fs::read_to_string(&config_file).await {
             Ok(contents) => {
                 let config: TomlValue = toml::from_str(&contents).map_err(|e| {
@@ -570,10 +570,10 @@ async fn load_project_layers(
                     )
                 })?;
                 let config =
-                    resolve_relative_paths_in_config_toml(config, dot_codex_abs.as_path())?;
+                    resolve_relative_paths_in_config_toml(config, dot_realmx_abs.as_path())?;
                 layers.push(ConfigLayerEntry::new(
                     ConfigLayerSource::Project {
-                        dot_codex_folder: dot_codex_abs,
+                        dot_codex_folder: dot_realmx_abs,
                     },
                     config,
                 ));
@@ -585,7 +585,7 @@ async fn load_project_layers(
                     // that are significant in the overall ConfigLayerStack.
                     layers.push(ConfigLayerEntry::new(
                         ConfigLayerSource::Project {
-                            dot_codex_folder: dot_codex_abs,
+                            dot_codex_folder: dot_realmx_abs,
                         },
                         TomlValue::Table(toml::map::Map::new()),
                     ));

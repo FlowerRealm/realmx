@@ -1937,7 +1937,8 @@ impl ChatWidget {
             reasoning_effort: None,
             developer_instructions: None,
         };
-        let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
+        let mut stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes)
+        {
             initial_collaboration_mode(
                 models_manager.as_ref(),
                 fallback_custom,
@@ -1946,6 +1947,17 @@ impl ChatWidget {
         } else {
             CollaborationMode::Custom(fallback_custom)
         };
+
+        if config.features.enabled(Feature::AgentTree) {
+            stored_collaboration_mode = CollaborationMode::Plan(Settings {
+                model: stored_collaboration_mode.model().to_string(),
+                reasoning_effort: stored_collaboration_mode.reasoning_effort(),
+                developer_instructions: Some(
+                    codex_core::agent_tree::prompts::L1_ORCHESTRATOR_DEVELOPER_INSTRUCTIONS
+                        .to_string(),
+                ),
+            });
+        }
 
         let active_cell = Some(Self::placeholder_session_header_cell(
             &config,
@@ -2063,7 +2075,8 @@ impl ChatWidget {
             reasoning_effort: None,
             developer_instructions: None,
         };
-        let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
+        let mut stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes)
+        {
             initial_collaboration_mode(
                 models_manager.as_ref(),
                 fallback_custom,
@@ -2072,6 +2085,17 @@ impl ChatWidget {
         } else {
             CollaborationMode::Custom(fallback_custom)
         };
+
+        if config.features.enabled(Feature::AgentTree) {
+            stored_collaboration_mode = CollaborationMode::Plan(Settings {
+                model: stored_collaboration_mode.model().to_string(),
+                reasoning_effort: stored_collaboration_mode.reasoning_effort(),
+                developer_instructions: Some(
+                    codex_core::agent_tree::prompts::L1_ORCHESTRATOR_DEVELOPER_INSTRUCTIONS
+                        .to_string(),
+                ),
+            });
+        }
 
         let mut widget = Self {
             app_event_tx: app_event_tx.clone(),
@@ -2696,9 +2720,9 @@ impl ChatWidget {
             effort: self.stored_collaboration_mode.reasoning_effort(),
             summary: self.config.model_reasoning_summary,
             final_output_json_schema: None,
-            collaboration_mode: self
-                .collaboration_modes_enabled()
-                .then(|| self.stored_collaboration_mode.clone()),
+            collaboration_mode: (self.collaboration_modes_enabled()
+                || self.config.features.enabled(Feature::AgentTree))
+            .then(|| self.stored_collaboration_mode.clone()),
             personality: None,
         };
 

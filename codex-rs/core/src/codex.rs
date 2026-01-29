@@ -41,6 +41,8 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::protocol::COLLABORATION_MODE_CLOSE_TAG;
+use codex_protocol::protocol::COLLABORATION_MODE_OPEN_TAG;
 use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::HasLegacyEvent;
 use codex_protocol::protocol::ItemCompletedEvent;
@@ -295,11 +297,21 @@ impl Codex {
 
         // TODO (aibrahim): Consolidate config.model and config.model_reasoning_effort into config.collaboration_mode
         // to avoid extracting these fields separately and constructing CollaborationMode here.
-        let collaboration_mode = CollaborationMode::Custom(Settings {
-            model: model.clone(),
-            reasoning_effort: config.model_reasoning_effort,
-            developer_instructions: None,
-        });
+        let collaboration_mode = if config.features.enabled(Feature::AgentTree) {
+            CollaborationMode::Plan(Settings {
+                model: model.clone(),
+                reasoning_effort: config.model_reasoning_effort,
+                developer_instructions: Some(
+                    crate::agent_tree::prompts::L1_ORCHESTRATOR_DEVELOPER_INSTRUCTIONS.to_string(),
+                ),
+            })
+        } else {
+            CollaborationMode::Custom(Settings {
+                model: model.clone(),
+                reasoning_effort: config.model_reasoning_effort,
+                developer_instructions: None,
+            })
+        };
         let session_configuration = SessionConfiguration {
             provider: config.model_provider.clone(),
             collaboration_mode,
@@ -1168,16 +1180,30 @@ impl Session {
         previous_collaboration_mode: &CollaborationMode,
         next_collaboration_mode: Option<&CollaborationMode>,
     ) -> Option<ResponseItem> {
-        if let Some(next_mode) = next_collaboration_mode {
-            if previous_collaboration_mode == next_mode {
-                return None;
-            }
-            // If the next mode has empty developer instructions, this returns None and we emit no
-            // update, so prior collaboration instructions remain in the prompt history.
-            Some(DeveloperInstructions::from_collaboration_mode(next_mode)?.into())
-        } else {
-            None
+        let Some(next_mode) = next_collaboration_mode else {
+            return None;
+        };
+
+        let previous_instructions =
+            DeveloperInstructions::from_collaboration_mode(previous_collaboration_mode);
+        let next_instructions = DeveloperInstructions::from_collaboration_mode(next_mode);
+
+        if previous_instructions == next_instructions {
+            return None;
         }
+
+        if let Some(instructions) = next_instructions {
+            return Some(instructions.into());
+        }
+
+        // If the next mode has empty developer instructions, emit an explicit empty block so prior
+        // collaboration instructions can be cleared (e.g. when prompt caching is enabled).
+        previous_instructions.is_some().then(|| {
+            DeveloperInstructions::new(format!(
+                "{COLLABORATION_MODE_OPEN_TAG}{COLLABORATION_MODE_CLOSE_TAG}"
+            ))
+            .into()
+        })
     }
 
     fn build_settings_update_items(
@@ -2214,8 +2240,6 @@ mod handlers {
     use codex_protocol::request_user_input::RequestUserInputResponse;
 
     use crate::context_manager::is_user_turn_boundary;
-    use codex_protocol::config_types::CollaborationMode;
-    use codex_protocol::config_types::Settings;
     use codex_protocol::user_input::UserInput;
     use codex_rmcp_client::ElicitationAction;
     use codex_rmcp_client::ElicitationResponse;
@@ -2290,13 +2314,15 @@ mod handlers {
                 collaboration_mode,
                 personality,
             } => {
-                let collaboration_mode = collaboration_mode.or_else(|| {
-                    Some(CollaborationMode::Custom(Settings {
-                        model: model.clone(),
-                        reasoning_effort: effort,
-                        developer_instructions: None,
-                    }))
-                });
+                let collaboration_mode = if let Some(collaboration_mode) = collaboration_mode {
+                    Some(collaboration_mode)
+                } else {
+                    let existing_mode = {
+                        let state = sess.state.lock().await;
+                        state.session_configuration.collaboration_mode.clone()
+                    };
+                    Some(existing_mode.with_updates(Some(model.clone()), Some(effort), None))
+                };
                 (
                     items,
                     SessionSettingsUpdate {

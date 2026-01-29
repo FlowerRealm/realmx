@@ -107,6 +107,8 @@ pub enum Feature {
     Steer,
     /// Enable collaboration modes (Plan, Pair Programming, Execute).
     CollaborationModes,
+    /// Enable Agent Tree (delegate to a worker process per task using git worktrees).
+    AgentTree,
     /// Use the Responses API WebSocket transport for OpenAI by default.
     ResponsesWebsockets,
 }
@@ -462,6 +464,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "collaboration_modes",
         stage: Stage::Beta,
         default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::AgentTree,
+        key: "agent_tree",
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ResponsesWebsockets,

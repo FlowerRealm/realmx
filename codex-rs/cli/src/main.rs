@@ -30,6 +30,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use supports_color::Stream;
 
+mod agent_tree_worker;
 mod mcp_cmd;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -123,6 +124,10 @@ enum Subcommand {
     /// Internal: relay stdio to a Unix domain socket.
     #[clap(hide = true, name = "stdio-to-uds")]
     StdioToUds(StdioToUdsCommand),
+
+    /// Internal: run the Agent Tree worker process (spawned by Agent Tree tools).
+    #[clap(hide = true, name = "agent-tree-worker")]
+    AgentTreeWorker,
 
     /// Inspect feature flags.
     Features(FeaturesCli),
@@ -593,6 +598,20 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             let socket_path = cmd.socket_path;
             tokio::task::spawn_blocking(move || codex_stdio_to_uds::run(socket_path.as_path()))
                 .await??;
+        }
+        Some(Subcommand::AgentTreeWorker) => {
+            // Reuse the standard config loader so the worker shares auth/config state with L1.
+            let cli_kv_overrides = root_config_overrides
+                .parse_overrides()
+                .map_err(anyhow::Error::msg)?;
+            let overrides = ConfigOverrides {
+                config_profile: interactive.config_profile.clone(),
+                ..Default::default()
+            };
+            let config =
+                Config::load_with_cli_overrides_and_harness_overrides(cli_kv_overrides, overrides)
+                    .await?;
+            agent_tree_worker::run(config).await?;
         }
         Some(Subcommand::Features(FeaturesCli { sub })) => match sub {
             FeaturesSubcommand::List => {

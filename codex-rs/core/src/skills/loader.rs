@@ -568,7 +568,7 @@ mod tests {
     use tempfile::TempDir;
     use toml::Value as TomlValue;
 
-    const REPO_ROOT_CONFIG_DIR_NAME: &str = ".codex";
+    const REPO_ROOT_CONFIG_DIR_NAME: &str = ".realmx";
 
     async fn make_config(codex_home: &TempDir) -> Config {
         make_config_for_cwd(codex_home, codex_home.path().to_path_buf()).await

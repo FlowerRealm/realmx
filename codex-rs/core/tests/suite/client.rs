@@ -668,17 +668,26 @@ async fn includes_user_instructions_message_in_request() {
         "expected permissions message to mention sandbox_mode, got {permissions_text:?}"
     );
 
-    assert_message_role(&request_body["input"][1], "user");
-    assert_message_starts_with(&request_body["input"][1], "# AGENTS.md instructions for ");
-    assert_message_ends_with(&request_body["input"][1], "</INSTRUCTIONS>");
-    let ui_text = request_body["input"][1]["content"][0]["text"]
+    assert_message_role(&request_body["input"][1], "developer");
+    let collab_text = request_body["input"][1]["content"][0]["text"]
+        .as_str()
+        .expect("invalid collaboration mode message content");
+    assert!(
+        collab_text.contains("<collaboration_mode>"),
+        "expected collaboration mode message present, got {collab_text:?}"
+    );
+
+    assert_message_role(&request_body["input"][2], "user");
+    assert_message_starts_with(&request_body["input"][2], "# AGENTS.md instructions for ");
+    assert_message_ends_with(&request_body["input"][2], "</INSTRUCTIONS>");
+    let ui_text = request_body["input"][2]["content"][0]["text"]
         .as_str()
         .expect("invalid message content");
     assert!(ui_text.contains("<INSTRUCTIONS>"));
     assert!(ui_text.contains("be nice"));
-    assert_message_role(&request_body["input"][2], "user");
-    assert_message_starts_with(&request_body["input"][2], "<environment_context>");
-    assert_message_ends_with(&request_body["input"][2], "</environment_context>");
+    assert_message_role(&request_body["input"][3], "user");
+    assert_message_starts_with(&request_body["input"][3], "<environment_context>");
+    assert_message_ends_with(&request_body["input"][3], "</environment_context>");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -735,8 +744,17 @@ async fn skills_append_to_instructions() {
 
     assert_message_role(&request_body["input"][0], "developer");
 
-    assert_message_role(&request_body["input"][1], "user");
-    let instructions_text = request_body["input"][1]["content"][0]["text"]
+    assert_message_role(&request_body["input"][1], "developer");
+    let collab_text = request_body["input"][1]["content"][0]["text"]
+        .as_str()
+        .expect("invalid collaboration mode message content");
+    assert!(
+        collab_text.contains("<collaboration_mode>"),
+        "expected collaboration mode message present, got {collab_text:?}"
+    );
+
+    assert_message_role(&request_body["input"][2], "user");
+    let instructions_text = request_body["input"][2]["content"][0]["text"]
         .as_str()
         .expect("instructions text");
     assert!(
@@ -1184,17 +1202,27 @@ async fn includes_developer_instructions_message_in_request() {
 
     assert_message_role(&request_body["input"][1], "developer");
     assert_message_equals(&request_body["input"][1], "be useful");
-    assert_message_role(&request_body["input"][2], "user");
-    assert_message_starts_with(&request_body["input"][2], "# AGENTS.md instructions for ");
-    assert_message_ends_with(&request_body["input"][2], "</INSTRUCTIONS>");
-    let ui_text = request_body["input"][2]["content"][0]["text"]
+
+    assert_message_role(&request_body["input"][2], "developer");
+    let collab_text = request_body["input"][2]["content"][0]["text"]
+        .as_str()
+        .expect("invalid collaboration mode message content");
+    assert!(
+        collab_text.contains("<collaboration_mode>"),
+        "expected collaboration mode message present, got {collab_text:?}"
+    );
+
+    assert_message_role(&request_body["input"][3], "user");
+    assert_message_starts_with(&request_body["input"][3], "# AGENTS.md instructions for ");
+    assert_message_ends_with(&request_body["input"][3], "</INSTRUCTIONS>");
+    let ui_text = request_body["input"][3]["content"][0]["text"]
         .as_str()
         .expect("invalid message content");
     assert!(ui_text.contains("<INSTRUCTIONS>"));
     assert!(ui_text.contains("be nice"));
-    assert_message_role(&request_body["input"][3], "user");
-    assert_message_starts_with(&request_body["input"][3], "<environment_context>");
-    assert_message_ends_with(&request_body["input"][3], "</environment_context>");
+    assert_message_role(&request_body["input"][4], "user");
+    assert_message_starts_with(&request_body["input"][4], "<environment_context>");
+    assert_message_ends_with(&request_body["input"][4], "</environment_context>");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -28,6 +28,7 @@ pub(crate) struct ToolsConfig {
     pub web_search_mode: Option<WebSearchMode>,
     pub collab_tools: bool,
     pub collaboration_modes_tools: bool,
+    pub agent_tree_tools: bool,
     pub experimental_supported_tools: Vec<String>,
 }
 
@@ -47,6 +48,7 @@ impl ToolsConfig {
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
         let include_collab_tools = features.enabled(Feature::Collab);
         let include_collaboration_modes_tools = features.enabled(Feature::CollaborationModes);
+        let include_agent_tree_tools = features.enabled(Feature::AgentTree);
 
         let shell_type = if !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
@@ -79,6 +81,7 @@ impl ToolsConfig {
             web_search_mode: *web_search_mode,
             collab_tools: include_collab_tools,
             collaboration_modes_tools: include_collaboration_modes_tools,
+            agent_tree_tools: include_agent_tree_tools,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
         }
     }
@@ -633,6 +636,69 @@ fn create_close_agent_tool() -> ToolSpec {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+fn create_agent_tree_delegate_tool() -> ToolSpec {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "task".to_string(),
+        JsonSchema::String {
+            description: Some("Task to delegate to the agent-tree worker.".to_string()),
+        },
+    );
+    properties.insert(
+        "context".to_string(),
+        JsonSchema::String {
+            description: Some("Optional additional context for the worker.".to_string()),
+        },
+    );
+    properties.insert(
+        "tests".to_string(),
+        JsonSchema::Array {
+            items: Box::new(JsonSchema::String { description: None }),
+            description: Some("Optional list of preferred test commands.".to_string()),
+        },
+    );
+    properties.insert(
+        "base_ref".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Optional git ref to base the worktree on (defaults to HEAD).".to_string(),
+            ),
+        },
+    );
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "agent_tree_delegate".to_string(),
+        description: "Spawn an agent-tree worker process, delegate a task, and return its result."
+            .to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["task".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+fn create_agent_tree_apply_diff_tool() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "diff".to_string(),
+        JsonSchema::String {
+            description: Some("Unified diff to apply to the current working tree.".to_string()),
+        },
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "agent_tree_apply_diff".to_string(),
+        description: "Apply a unified diff produced by agent_tree_delegate.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["diff".to_string()]),
             additional_properties: Some(false.into()),
         },
     })
@@ -1217,6 +1283,7 @@ pub(crate) fn build_specs(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
 ) -> ToolRegistryBuilder {
+    use crate::tools::handlers::AgentTreeHandler;
     use crate::tools::handlers::ApplyPatchHandler;
     use crate::tools::handlers::CollabHandler;
     use crate::tools::handlers::GrepFilesHandler;
@@ -1365,6 +1432,14 @@ pub(crate) fn build_specs(
         builder.register_handler("send_input", collab_handler.clone());
         builder.register_handler("wait", collab_handler.clone());
         builder.register_handler("close_agent", collab_handler);
+    }
+
+    if config.agent_tree_tools {
+        let agent_tree_handler = Arc::new(AgentTreeHandler);
+        builder.push_spec(create_agent_tree_delegate_tool());
+        builder.push_spec(create_agent_tree_apply_diff_tool());
+        builder.register_handler("agent_tree_delegate", agent_tree_handler.clone());
+        builder.register_handler("agent_tree_apply_diff", agent_tree_handler);
     }
 
     if let Some(mcp_tools) = mcp_tools {
@@ -1529,6 +1604,8 @@ mod tests {
                 external_web_access: Some(true),
             },
             create_view_image_tool(),
+            create_agent_tree_delegate_tool(),
+            create_agent_tree_apply_diff_tool(),
         ] {
             expected.insert(tool_name(&spec).to_string(), spec);
         }
@@ -1674,6 +1751,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1696,6 +1775,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1720,6 +1801,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1744,6 +1827,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1765,6 +1850,8 @@ mod tests {
                 "request_user_input",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1787,6 +1874,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1808,6 +1897,8 @@ mod tests {
                 "request_user_input",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1830,6 +1921,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1853,6 +1946,8 @@ mod tests {
                 "apply_patch",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
@@ -1876,6 +1971,8 @@ mod tests {
                 "request_user_input",
                 "web_search",
                 "view_image",
+                "agent_tree_delegate",
+                "agent_tree_apply_diff",
             ],
         );
     }
