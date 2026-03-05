@@ -47,7 +47,11 @@ fn try_build_vendored_bwrap() -> Result<(), String> {
     let src_dir = resolve_bwrap_source_dir(&manifest_dir)?;
     let libcap = pkg_config::Config::new()
         .probe("libcap")
-        .map_err(|err| format!("libcap not available via pkg-config: {err}"))?;
+        .map_err(|err| {
+            format!(
+                "libcap not available via pkg-config: {err}\n\nInstall libcap development headers (sys/capability.h) and pkg-config metadata (libcap.pc)."
+            )
+        })?;
 
     let config_h = out_dir.join("config.h");
     std::fs::write(
@@ -69,6 +73,7 @@ fn try_build_vendored_bwrap() -> Result<(), String> {
         .define("_GNU_SOURCE", None)
         // Rename `main` so we can call it via FFI.
         .define("main", Some("bwrap_main"));
+
     for include_path in libcap.include_paths {
         // Use -idirafter so target sysroot headers win (musl cross builds),
         // while still allowing libcap headers from the host toolchain.

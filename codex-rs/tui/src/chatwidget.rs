@@ -1391,7 +1391,7 @@ impl ChatWidget {
     }
 
     fn on_plan_delta(&mut self, delta: String) {
-        if self.active_mode_kind() != ModeKind::Plan {
+        if !self.active_mode_kind().is_plan_output_mode() {
             return;
         }
         if !self.plan_item_active {
@@ -1596,7 +1596,7 @@ impl ChatWidget {
         if !self.queued_user_messages.is_empty() {
             return;
         }
-        if self.active_mode_kind() != ModeKind::Plan {
+        if !self.active_mode_kind().is_plan_output_mode() {
             return;
         }
         if !self.saw_plan_item_this_turn {
@@ -1613,7 +1613,23 @@ impl ChatWidget {
             return;
         }
 
-        self.open_plan_implementation_prompt();
+        match self.active_mode_kind() {
+            ModeKind::Plan => self.open_plan_implementation_prompt(),
+            ModeKind::AutoPlan => {
+                let Some(mask) =
+                    collaboration_modes::default_mode_mask(self.models_manager.as_ref())
+                else {
+                    self.add_error_message("Default mode unavailable".to_string());
+                    return;
+                };
+                let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
+                self.app_event_tx.send(AppEvent::SubmitUserMessageWithMode {
+                    text: user_text,
+                    collaboration_mode: mask,
+                });
+            }
+            ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => {}
+        }
     }
 
     fn open_plan_implementation_prompt(&mut self) {
@@ -6115,7 +6131,7 @@ impl ChatWidget {
         selected_effort: Option<ReasoningEffortConfig>,
     ) -> bool {
         if !self.collaboration_modes_enabled()
-            || self.active_mode_kind() != ModeKind::Plan
+            || !self.active_mode_kind().is_plan_output_mode()
             || selected_model != self.current_model()
         {
             return false;
@@ -6220,7 +6236,7 @@ impl ChatWidget {
         let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
         let supported = preset.supported_reasoning_efforts;
         let in_plan_mode =
-            self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan;
+            self.collaboration_modes_enabled() && self.active_mode_kind().is_plan_output_mode();
 
         let warn_effort = if supported
             .iter()
@@ -7180,16 +7196,17 @@ impl ChatWidget {
 
     pub(crate) fn set_plan_mode_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.config.plan_mode_reasoning_effort = effort;
+        let active_kind = self.active_mode_kind();
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
-            && mask.mode == Some(ModeKind::Plan)
+            && mask.mode.is_some_and(ModeKind::is_plan_output_mode)
         {
             if let Some(effort) = effort {
                 mask.reasoning_effort = Some(Some(effort));
-            } else if let Some(plan_mask) =
-                collaboration_modes::plan_mask(self.models_manager.as_ref())
+            } else if let Some(default_mask) =
+                collaboration_modes::mask_for_kind(self.models_manager.as_ref(), active_kind)
             {
-                mask.reasoning_effort = plan_mask.reasoning_effort;
+                mask.reasoning_effort = default_mask.reasoning_effort;
             }
         }
     }
@@ -7201,7 +7218,7 @@ impl ChatWidget {
                 .with_updates(None, Some(effort), None);
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
-            && mask.mode != Some(ModeKind::Plan)
+            && !mask.mode.is_some_and(ModeKind::is_plan_output_mode)
         {
             // Generic "global default" updates should not mutate the active Plan mask.
             // Plan reasoning is controlled by the Plan preset and Plan-only override updates.
@@ -7459,6 +7476,7 @@ impl ChatWidget {
         }
         match self.active_mode_kind() {
             ModeKind::Plan => Some(CollaborationModeIndicator::Plan),
+            ModeKind::AutoPlan => Some(CollaborationModeIndicator::AutoPlan),
             ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => None,
         }
     }
@@ -7484,7 +7502,7 @@ impl ChatWidget {
         }
     }
 
-    /// Cycle to the next collaboration mode variant (Plan -> Default -> Plan).
+    /// Cycle to the next collaboration mode preset.
     fn cycle_collaboration_mode(&mut self) {
         if !self.collaboration_modes_enabled() {
             return;
@@ -7509,7 +7527,7 @@ impl ChatWidget {
         let previous_mode = self.active_mode_kind();
         let previous_model = self.current_model().to_string();
         let previous_effort = self.effective_reasoning_effort();
-        if mask.mode == Some(ModeKind::Plan)
+        if mask.mode.is_some_and(ModeKind::is_plan_output_mode)
             && let Some(effort) = self.config.plan_mode_reasoning_effort
         {
             mask.reasoning_effort = Some(Some(effort));
@@ -7936,7 +7954,9 @@ impl ChatWidget {
         text: String,
         mut collaboration_mode: CollaborationModeMask,
     ) {
-        if collaboration_mode.mode == Some(ModeKind::Plan)
+        if collaboration_mode
+            .mode
+            .is_some_and(ModeKind::is_plan_output_mode)
             && let Some(effort) = self.config.plan_mode_reasoning_effort
         {
             collaboration_mode.reasoning_effort = Some(Some(effort));
