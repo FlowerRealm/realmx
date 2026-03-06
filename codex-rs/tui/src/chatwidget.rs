@@ -6613,6 +6613,7 @@ impl ChatWidget {
                     description,
                     stage_tag,
                     enabled: self.config.features.enabled(spec.id),
+                    original_enabled: self.config.features.enabled(spec.id),
                 })
             })
             .collect();

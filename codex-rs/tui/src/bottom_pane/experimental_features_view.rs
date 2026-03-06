@@ -35,6 +35,7 @@ pub(crate) struct ExperimentalFeatureItem {
     pub description: String,
     pub stage_tag: String,
     pub enabled: bool,
+    pub original_enabled: bool,
 }
 
 pub(crate) struct ExperimentalFeaturesView {
@@ -200,13 +201,13 @@ impl BottomPaneView for ExperimentalFeaturesView {
     }
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
-        // Save the updates
-        if !self.features.is_empty() {
-            let updates = self
-                .features
-                .iter()
-                .map(|item| (item.feature, item.enabled))
-                .collect();
+        let updates: Vec<_> = self
+            .features
+            .iter()
+            .filter(|item| item.enabled != item.original_enabled)
+            .map(|item| (item.feature, item.enabled))
+            .collect();
+        if !updates.is_empty() {
             self.app_event_tx
                 .send(AppEvent::UpdateFeatureFlags { updates });
         }

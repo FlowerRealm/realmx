@@ -6828,6 +6828,7 @@ async fn experimental_features_popup_snapshot() {
             description: "Capture undo snapshots each turn.".to_string(),
             stage_tag: "stable".to_string(),
             enabled: false,
+            original_enabled: false,
         },
         ExperimentalFeatureItem {
             feature: Feature::JsRepl,
@@ -6835,6 +6836,7 @@ async fn experimental_features_popup_snapshot() {
             description: "Enable a persistent Node-backed JavaScript REPL.".to_string(),
             stage_tag: "experimental".to_string(),
             enabled: true,
+            original_enabled: true,
         },
     ];
     let view = ExperimentalFeaturesView::new(features, chat.app_event_tx.clone());
@@ -6842,6 +6844,32 @@ async fn experimental_features_popup_snapshot() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert_snapshot!("experimental_features_popup", popup);
+}
+
+#[tokio::test]
+async fn experimental_features_exit_without_changes_does_not_emit_update() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    let view = ExperimentalFeaturesView::new(
+        vec![ExperimentalFeatureItem {
+            feature: Feature::GhostCommit,
+            name: "Ghost snapshots".to_string(),
+            description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
+            enabled: false,
+            original_enabled: false,
+        }],
+        chat.app_event_tx.clone(),
+    );
+    chat.bottom_pane.show_view(Box::new(view));
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    while let Ok(event) = rx.try_recv() {
+        if matches!(event, AppEvent::UpdateFeatureFlags { .. }) {
+            panic!("did not expect UpdateFeatureFlags event when nothing changed");
+        }
+    }
 }
 
 #[tokio::test]
@@ -6856,6 +6884,7 @@ async fn experimental_features_toggle_saves_on_exit() {
             description: "Capture undo snapshots each turn.".to_string(),
             stage_tag: "stable".to_string(),
             enabled: false,
+            original_enabled: false,
         }],
         chat.app_event_tx.clone(),
     );
@@ -6887,48 +6916,68 @@ async fn experimental_features_toggle_saves_on_exit() {
 
 #[tokio::test]
 async fn experimental_popup_shows_all_non_removed_feature_flags() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 
     chat.open_experimental_popup();
 
     let popup = render_bottom_popup(&chat, 220);
     assert!(
         popup.contains("shell_tool"),
-        "expected stable features in popup, got:\n{popup}"
+        "expected stable features in popup, got:
+{popup}"
     );
     assert!(
         popup.contains("shell_zsh_fork"),
-        "expected under-development features in popup, got:\n{popup}"
+        "expected under-development features in popup, got:
+{popup}"
     );
     assert!(
         popup.contains("web_search_request"),
-        "expected deprecated features in popup, got:\n{popup}"
+        "expected deprecated features in popup, got:
+{popup}"
     );
     assert!(
         popup.contains("[stable]"),
-        "expected stable stage tag, got:\n{popup}"
+        "expected stable stage tag, got:
+{popup}"
     );
     assert!(
         popup.contains("[under development]"),
-        "expected under-development stage tag, got:\n{popup}"
+        "expected under-development stage tag, got:
+{popup}"
     );
     assert!(
         popup.contains("[deprecated]"),
-        "expected deprecated stage tag, got:\n{popup}"
+        "expected deprecated stage tag, got:
+{popup}"
     );
 
-    for _ in 0..10 {
-        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let mut updates = None;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::UpdateFeatureFlags {
+            updates: event_updates,
+        } = event
+        {
+            updates = Some(event_updates);
+            break;
+        }
     }
 
-    let popup = render_bottom_popup(&chat, 220);
+    let updates = updates.expect("expected UpdateFeatureFlags event");
+    assert_eq!(updates, vec![(Feature::GhostCommit, true)]);
     assert!(
-        !popup.contains("search_tool"),
-        "did not expect removed feature flags in popup, got:\n{popup}"
+        !updates
+            .iter()
+            .any(|(feature, _)| *feature == Feature::SearchTool),
+        "did not expect removed feature flags in updates: {updates:?}"
     );
 }
 
 #[tokio::test]
+
 async fn experimental_popup_shows_js_repl_node_requirement() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
