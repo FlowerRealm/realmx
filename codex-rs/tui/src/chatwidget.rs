@@ -3064,7 +3064,7 @@ impl ChatWidget {
             .unwrap_or_else(|| model_for_header.clone());
         let fallback_default = Settings {
             model: header_model.clone(),
-            reasoning_effort: None,
+            reasoning_effort: config.model_reasoning_effort,
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
@@ -3246,7 +3246,7 @@ impl ChatWidget {
             .unwrap_or_else(|| model_for_header.clone());
         let fallback_default = Settings {
             model: header_model.clone(),
-            reasoning_effort: None,
+            reasoning_effort: config.model_reasoning_effort,
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
@@ -3417,13 +3417,14 @@ impl ChatWidget {
             .and_then(|mask| mask.model.clone())
             .unwrap_or(header_model);
 
+        let session_reasoning_effort = session_configured.reasoning_effort;
         let current_cwd = Some(session_configured.cwd.clone());
         let codex_op_tx =
             spawn_agent_from_existing(conversation, session_configured, app_event_tx.clone());
 
         let fallback_default = Settings {
             model: header_model.clone(),
-            reasoning_effort: None,
+            reasoning_effort: session_reasoning_effort,
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
@@ -6166,17 +6167,15 @@ impl ChatWidget {
                 "user-chosen Plan override ({})",
                 Self::reasoning_effort_label(plan_override).to_lowercase()
             )
-        } else if let Some(plan_mask) = collaboration_modes::plan_mask(self.models_manager.as_ref())
-        {
-            match plan_mask.reasoning_effort.flatten() {
-                Some(plan_effort) => format!(
-                    "built-in Plan default ({})",
-                    Self::reasoning_effort_label(plan_effort).to_lowercase()
-                ),
-                None => "built-in Plan default (no reasoning)".to_string(),
-            }
         } else {
-            "built-in Plan default".to_string()
+            match self.current_collaboration_mode.reasoning_effort() {
+                Some(ReasoningEffortConfig::None) => "global default (no reasoning)".to_string(),
+                Some(global_effort) => format!(
+                    "global default ({})",
+                    Self::reasoning_effort_label(global_effort).to_lowercase()
+                ),
+                None => "global default (model default)".to_string(),
+            }
         };
         let all_modes_description = format!(
             "Set the global default reasoning level and the Plan mode override. This replaces the current {plan_reasoning_source}."

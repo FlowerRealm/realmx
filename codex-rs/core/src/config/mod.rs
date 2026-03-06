@@ -416,9 +416,11 @@ pub struct Config {
     pub model_reasoning_effort: Option<ReasoningEffort>,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
-    /// When unset, Plan mode uses the built-in Plan preset default (currently
-    /// `medium`). When explicitly set (including `none`), this overrides the
-    /// Plan preset. The `none` value means "no reasoning" (not "inherit the
+    /// When unset, Plan mode and Auto Plan inherit
+    /// `model_reasoning_effort`. If that is also unset, they fall back to the
+    /// selected model's default reasoning behavior. When explicitly set
+    /// (including `none`), this overrides the inherited default for Plan
+    /// output modes. The `none` value means "no reasoning" (not "inherit the
     /// global default").
     pub plan_mode_reasoning_effort: Option<ReasoningEffort>,
 
