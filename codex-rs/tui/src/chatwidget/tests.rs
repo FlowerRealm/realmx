@@ -6826,12 +6826,14 @@ async fn experimental_features_popup_snapshot() {
             feature: Feature::GhostCommit,
             name: "Ghost snapshots".to_string(),
             description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
             enabled: false,
         },
         ExperimentalFeatureItem {
-            feature: Feature::ShellTool,
-            name: "Shell tool".to_string(),
-            description: "Allow the model to run shell commands.".to_string(),
+            feature: Feature::JsRepl,
+            name: "JavaScript REPL".to_string(),
+            description: "Enable a persistent Node-backed JavaScript REPL.".to_string(),
+            stage_tag: "beta".to_string(),
             enabled: true,
         },
     ];
@@ -6852,6 +6854,7 @@ async fn experimental_features_toggle_saves_on_exit() {
             feature: expected_feature,
             name: "Ghost snapshots".to_string(),
             description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
             enabled: false,
         }],
         chat.app_event_tx.clone(),
@@ -6880,6 +6883,49 @@ async fn experimental_features_toggle_saves_on_exit() {
 
     let updates = updates.expect("expected UpdateFeatureFlags event");
     assert_eq!(updates, vec![(expected_feature, true)]);
+}
+
+#[tokio::test]
+async fn experimental_popup_shows_all_non_removed_feature_flags() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.open_experimental_popup();
+
+    let popup = render_bottom_popup(&chat, 220);
+    assert!(
+        popup.contains("shell_tool"),
+        "expected stable features in popup, got:\n{popup}"
+    );
+    assert!(
+        popup.contains("shell_zsh_fork"),
+        "expected under-development features in popup, got:\n{popup}"
+    );
+    assert!(
+        popup.contains("web_search_request"),
+        "expected deprecated features in popup, got:\n{popup}"
+    );
+    assert!(
+        popup.contains("[stable]"),
+        "expected stable stage tag, got:\n{popup}"
+    );
+    assert!(
+        popup.contains("[under development]"),
+        "expected under-development stage tag, got:\n{popup}"
+    );
+    assert!(
+        popup.contains("[deprecated]"),
+        "expected deprecated stage tag, got:\n{popup}"
+    );
+
+    for _ in 0..10 {
+        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    }
+
+    let popup = render_bottom_popup(&chat, 220);
+    assert!(
+        !popup.contains("search_tool"),
+        "did not expect removed feature flags in popup, got:\n{popup}"
+    );
 }
 
 #[tokio::test]

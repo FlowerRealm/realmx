@@ -60,6 +60,7 @@ use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::ConfigLayerStackOrdering;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
+use codex_core::features::Stage;
 use codex_core::find_thread_name_by_id;
 use codex_core::git_info::current_branch_name;
 use codex_core::git_info::get_git_repo_root;
@@ -6573,12 +6574,44 @@ impl ChatWidget {
         let features: Vec<ExperimentalFeatureItem> = FEATURES
             .iter()
             .filter_map(|spec| {
-                let name = spec.stage.experimental_menu_name()?;
-                let description = spec.stage.experimental_menu_description()?;
+                let default_state = if spec.default_enabled { "on" } else { "off" };
+                let (name, description, stage_tag) = match spec.stage {
+                    Stage::Experimental {
+                        name,
+                        menu_description,
+                        ..
+                    } => (
+                        name.to_string(),
+                        format!("{menu_description} Default: {default_state}."),
+                        "beta".to_string(),
+                    ),
+                    Stage::UnderDevelopment => (
+                        spec.key.to_string(),
+                        format!(
+                            "Under development. Incomplete and may behave unpredictably. Default: {default_state}."
+                        ),
+                        "under development".to_string(),
+                    ),
+                    Stage::Stable => (
+                        spec.key.to_string(),
+                        format!("Stable feature flag. Default: {default_state}."),
+                        "stable".to_string(),
+                    ),
+                    Stage::Deprecated => (
+                        spec.key.to_string(),
+                        format!(
+                            "Deprecated feature flag kept for backward compatibility. Default: {default_state}."
+                        ),
+                        "deprecated".to_string(),
+                    ),
+                    Stage::Removed => return None,
+                };
+
                 Some(ExperimentalFeatureItem {
                     feature: spec.id,
-                    name: name.to_string(),
-                    description: description.to_string(),
+                    name,
+                    description,
+                    stage_tag,
                     enabled: self.config.features.enabled(spec.id),
                 })
             })

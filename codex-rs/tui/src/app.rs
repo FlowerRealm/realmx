@@ -2862,7 +2862,7 @@ impl App {
                             "failed to update constrained feature flags"
                         );
                         self.chat_widget.add_error_message(format!(
-                            "Failed to update experimental feature `{feature_key}`: {err}"
+                            "Failed to update feature flag `{feature_key}`: {err}"
                         ));
                         continue;
                     }
@@ -2903,9 +2903,8 @@ impl App {
                 }
                 if let Err(err) = builder.apply().await {
                     tracing::error!(error = %err, "failed to persist feature flags");
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to update experimental features: {err}"
-                    ));
+                    self.chat_widget
+                        .add_error_message(format!("Failed to update feature flags: {err}"));
                 }
             }
             AppEvent::SkipNextWorldWritableScan => {

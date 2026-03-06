@@ -33,6 +33,7 @@ pub(crate) struct ExperimentalFeatureItem {
     pub feature: Feature,
     pub name: String,
     pub description: String,
+    pub stage_tag: String,
     pub enabled: bool,
 }
 
@@ -51,9 +52,9 @@ impl ExperimentalFeaturesView {
         app_event_tx: AppEventSender,
     ) -> Self {
         let mut header = ColumnRenderable::new();
-        header.push(Line::from("Experimental features".bold()));
+        header.push(Line::from("Feature flags".bold()));
         header.push(Line::from(
-            "Toggle experimental features. Changes are saved to config.toml.".dim(),
+            "Inspect and toggle feature flags. Changes are saved to config.toml.".dim(),
         ));
 
         let mut view = Self {
@@ -94,6 +95,7 @@ impl ExperimentalFeaturesView {
             rows.push(GenericDisplayRow {
                 name,
                 description: Some(item.description.clone()),
+                category_tag: Some(format!("[{}]", item.stage_tag)),
                 ..Default::default()
             });
         }
@@ -260,7 +262,7 @@ impl Renderable for ExperimentalFeaturesView {
                 &rows,
                 &self.state,
                 MAX_POPUP_ROWS,
-                "  No experimental features available for now",
+                "  No feature flags available for now",
             );
         }
 
