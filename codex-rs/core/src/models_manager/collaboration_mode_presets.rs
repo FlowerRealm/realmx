@@ -1,8 +1,6 @@
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
-use codex_protocol::openai_models::ReasoningEffort;
-
 const COLLABORATION_MODE_PLAN: &str = include_str!("../../templates/collaboration_mode/plan.md");
 const COLLABORATION_MODE_AUTO_PLAN: &str =
     include_str!("../../templates/collaboration_mode/auto_plan.md");
@@ -38,7 +36,7 @@ fn plan_preset() -> CollaborationModeMask {
         name: ModeKind::Plan.display_name().to_string(),
         mode: Some(ModeKind::Plan),
         model: None,
-        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        reasoning_effort: None,
         developer_instructions: Some(Some(COLLABORATION_MODE_PLAN.to_string())),
     }
 }
@@ -48,7 +46,7 @@ fn auto_plan_preset() -> CollaborationModeMask {
         name: ModeKind::AutoPlan.display_name().to_string(),
         mode: Some(ModeKind::AutoPlan),
         model: None,
-        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        reasoning_effort: None,
         developer_instructions: Some(Some(COLLABORATION_MODE_AUTO_PLAN.to_string())),
     }
 }
@@ -131,14 +129,8 @@ mod tests {
             default_preset(CollaborationModesConfig::default()).name,
             ModeKind::Default.display_name()
         );
-        assert_eq!(
-            plan_preset().reasoning_effort,
-            Some(Some(ReasoningEffort::Medium))
-        );
-        assert_eq!(
-            auto_plan_preset().reasoning_effort,
-            Some(Some(ReasoningEffort::Medium))
-        );
+        assert_eq!(plan_preset().reasoning_effort, None);
+        assert_eq!(auto_plan_preset().reasoning_effort, None);
     }
 
     #[test]

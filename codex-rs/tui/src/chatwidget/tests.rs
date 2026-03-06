@@ -1701,6 +1701,51 @@ async fn helpers_are_available_and_do_not_panic() {
     let _ = &mut w;
 }
 
+#[tokio::test]
+async fn new_uses_configured_reasoning_effort_for_plan_inheritance() {
+    let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+    let tx = AppEventSender::new(tx_raw);
+    let mut cfg = test_config().await;
+    cfg.model_reasoning_effort = Some(ReasoningEffortConfig::High);
+    let resolved_model = codex_core::test_support::get_model_offline(cfg.model.as_deref());
+    let otel_manager = test_otel_manager(&cfg, resolved_model.as_str());
+    let thread_manager = Arc::new(
+        codex_core::test_support::thread_manager_with_models_provider(
+            CodexAuth::from_api_key("test"),
+            cfg.model_provider.clone(),
+        ),
+    );
+    let auth_manager =
+        codex_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
+    let init = ChatWidgetInit {
+        config: cfg,
+        frame_requester: FrameRequester::test_dummy(),
+        app_event_tx: tx,
+        initial_user_message: None,
+        enhanced_keys_supported: false,
+        auth_manager,
+        models_manager: thread_manager.get_models_manager(),
+        feedback: codex_feedback::CodexFeedback::new(),
+        is_first_run: true,
+        feedback_audience: FeedbackAudience::External,
+        model: Some(resolved_model),
+        startup_tooltip_override: None,
+        status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
+        otel_manager,
+    };
+    let mut chat = ChatWidget::new(init, thread_manager);
+    chat.set_feature_enabled(Feature::CollaborationModes, true);
+
+    let plan_mask = collaboration_modes::plan_mask(chat.models_manager.as_ref())
+        .expect("expected plan collaboration mode");
+    chat.set_collaboration_mask(plan_mask);
+
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::High)
+    );
+}
+
 fn test_otel_manager(config: &Config, model: &str) -> OtelManager {
     let model_info = codex_core::test_support::construct_model_info_offline(model, config);
     OtelManager::new(
@@ -1757,7 +1802,7 @@ async fn make_chatwidget_manual(
         None,
         CollaborationModesConfig::default(),
     ));
-    let reasoning_effort = None;
+    let reasoning_effort = cfg.model_reasoning_effort;
     let base_mode = CollaborationMode {
         mode: ModeKind::Default,
         settings: Settings {
@@ -2422,7 +2467,7 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
 }
 
 #[tokio::test]
-async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_global_opens_scope_prompt()
+async fn reasoning_selection_in_plan_mode_matching_override_but_different_global_opens_scope_prompt()
  {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
@@ -2433,10 +2478,12 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
 
-    // Reproduce: Plan effective reasoning remains the preset (medium), but the
-    // global default differs (high). Pressing Enter on the current Plan choice
-    // should open the scope prompt rather than silently rewriting the global default.
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::Medium));
+
+    // When the current Plan override differs from the global default, pressing Enter on the
+    // current Plan choice should open the scope prompt rather than silently rewriting the
+    // global default.
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);
@@ -2703,7 +2750,7 @@ async fn plan_reasoning_scope_popup_mentions_selected_reasoning() {
 }
 
 #[tokio::test]
-async fn plan_reasoning_scope_popup_mentions_built_in_plan_default_when_no_override() {
+async fn plan_reasoning_scope_popup_mentions_global_default_when_no_override() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.open_plan_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
@@ -2711,7 +2758,7 @@ async fn plan_reasoning_scope_popup_mentions_built_in_plan_default_when_no_overr
     );
 
     let popup = render_bottom_popup(&chat, 100);
-    assert!(popup.contains("built-in Plan default (medium)"));
+    assert!(popup.contains("global default (model default)"));
 }
 
 #[tokio::test]
@@ -5154,7 +5201,7 @@ async fn mode_switch_surfaces_model_change_notification_when_effective_model_cha
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        plan_messages.contains("Model changed to gpt-5.1-codex-mini medium for Plan mode."),
+        plan_messages.contains("Model changed to gpt-5.1-codex-mini default for Plan mode."),
         "expected Plan-mode model switch notice, got: {plan_messages:?}"
     );
 
@@ -5191,7 +5238,7 @@ async fn mode_switch_surfaces_reasoning_change_notification_when_model_stays_sam
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        plan_messages.contains("Model changed to gpt-5.3-codex medium for Plan mode."),
+        plan_messages.contains("Model changed to gpt-5.3-codex high for Plan mode."),
         "expected reasoning-change notice in Plan mode, got: {plan_messages:?}"
     );
 }
@@ -5435,11 +5482,11 @@ async fn set_reasoning_effort_updates_active_collaboration_mask() {
             .expect("expected plan collaboration mask");
     chat.set_collaboration_mask(plan_mask);
 
-    chat.set_reasoning_effort(None);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     assert_eq!(
         chat.current_reasoning_effort(),
-        Some(ReasoningEffortConfig::Medium)
+        Some(ReasoningEffortConfig::High)
     );
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
 }
