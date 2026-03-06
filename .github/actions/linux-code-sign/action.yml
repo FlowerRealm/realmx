@@ -1,5 +1,5 @@
 name: linux-code-sign
-description: Sign Linux artifacts with cosign.
+description: Deprecated and unused. Retained for historical reference after releases switched to unsigned artifacts.
 inputs:
   target:
     description: Target triple for the artifacts to sign.

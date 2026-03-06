@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Deprecated and unused. Retained for historical reference after releases switched to unsigned artifacts.
+
 notarize_submission() {
   local label="$1"
   local path="$2"

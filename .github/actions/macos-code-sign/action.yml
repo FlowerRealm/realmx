@@ -1,5 +1,5 @@
 name: macos-code-sign
-description: Configure, sign, notarize, and clean up macOS code signing artifacts.
+description: Deprecated and unused. Retained for historical reference after releases switched to unsigned artifacts.
 inputs:
   target:
     description: Rust compilation target triple (e.g. aarch64-apple-darwin).
