@@ -269,7 +269,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | realmx login --with-api-key`)"
+        help = "Read the API key from stdin by piping it to this command"
     )]
     with_api_key: bool,
 
@@ -1224,6 +1224,15 @@ mod tests {
         let cli = MultitoolCli::try_parse_from(["codex", "--version"]).expect("parse");
         assert!(cli.print_version);
         assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn login_help_does_not_hardcode_primary_cli_name() {
+        let err = MultitoolCli::try_parse_from(["codex", "login", "--help"]).expect_err("help");
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+        let help = err.to_string();
+        assert!(help.contains("--with-api-key"));
+        assert!(!help.contains("realmx login --with-api-key"));
     }
 
     fn app_server_from_args(args: &[&str]) -> AppServerCommand {
