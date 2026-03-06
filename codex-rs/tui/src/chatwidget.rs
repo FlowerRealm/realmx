@@ -6583,7 +6583,7 @@ impl ChatWidget {
                     } => (
                         name.to_string(),
                         format!("{menu_description} Default: {default_state}."),
-                        "beta".to_string(),
+                        "experimental".to_string(),
                     ),
                     Stage::UnderDevelopment => (
                         spec.key.to_string(),

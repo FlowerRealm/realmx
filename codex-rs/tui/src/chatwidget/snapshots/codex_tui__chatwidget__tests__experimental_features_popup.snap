@@ -7,6 +7,6 @@ expression: popup
 
 › [ ] Ghost snapshots  Capture undo snapshots each turn.  [stable]
   [x] JavaScript REPL  Enable a persistent Node-backed JavaScript REPL.
-                       [beta]
+                       [experimental]
 
   Press space to select or enter to save for next conversation

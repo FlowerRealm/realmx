@@ -6833,7 +6833,7 @@ async fn experimental_features_popup_snapshot() {
             feature: Feature::JsRepl,
             name: "JavaScript REPL".to_string(),
             description: "Enable a persistent Node-backed JavaScript REPL.".to_string(),
-            stage_tag: "beta".to_string(),
+            stage_tag: "experimental".to_string(),
             enabled: true,
         },
     ];
