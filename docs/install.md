@@ -19,6 +19,12 @@ The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file fo
 git clone https://github.com/openai/codex.git
 cd codex/codex-rs
 
+# Linux system dependencies (Ubuntu/Debian):
+# Codex's Linux sandbox builds vendored bubblewrap, which requires libcap headers
+# (provides /usr/include/sys/capability.h) and pkg-config metadata (libcap.pc).
+sudo apt-get update
+sudo apt-get install -y pkg-config libcap-dev
+
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"

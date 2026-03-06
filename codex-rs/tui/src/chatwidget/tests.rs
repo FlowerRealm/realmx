@@ -2996,6 +2996,38 @@ async fn plan_implementation_popup_shows_after_proposed_plan_output() {
 }
 
 #[tokio::test]
+async fn auto_plan_mode_auto_submits_implementation_after_proposed_plan_output() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+    chat.set_feature_enabled(Feature::CollaborationModes, true);
+    let auto_plan_mask =
+        collaboration_modes::mask_for_kind(chat.models_manager.as_ref(), ModeKind::AutoPlan)
+            .expect("expected auto plan collaboration mask");
+    chat.set_collaboration_mask(auto_plan_mask);
+
+    chat.on_task_started();
+    chat.on_plan_delta("- Step 1\n- Step 2\n".to_string());
+    chat.on_plan_item_completed("- Step 1\n- Step 2\n".to_string());
+    chat.on_task_complete(None, false);
+
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(
+        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        "expected no plan popup in Auto Plan mode, got {popup:?}"
+    );
+
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            AppEvent::SubmitUserMessageWithMode { text, collaboration_mode }
+                if text == PLAN_IMPLEMENTATION_CODING_MESSAGE
+                    && collaboration_mode.mode == Some(ModeKind::Default)
+        )),
+        "expected Auto Plan to submit implementation automatically; events: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn plan_implementation_popup_skips_when_steer_follows_proposed_plan() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
@@ -5086,6 +5118,10 @@ async fn collab_mode_shift_tab_cycles_only_when_idle() {
     let initial = chat.current_collaboration_mode().clone();
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.current_collaboration_mode(), &initial);
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::AutoPlan);
     assert_eq!(chat.current_collaboration_mode(), &initial);
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));

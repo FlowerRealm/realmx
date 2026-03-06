@@ -6319,7 +6319,7 @@ async fn try_run_sampling_request(
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
     let mut should_emit_turn_diff = false;
-    let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
+    let plan_mode = turn_context.collaboration_mode.mode.is_plan_output_mode();
     let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
     let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
     let receiving_span = trace_span!("receiving_stream");

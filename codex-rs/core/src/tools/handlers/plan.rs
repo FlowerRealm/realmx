@@ -10,7 +10,6 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::spec::JsonSchema;
 use async_trait::async_trait;
-use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
@@ -104,9 +103,10 @@ pub(crate) async fn handle_update_plan(
     arguments: String,
     _call_id: String,
 ) -> Result<String, FunctionCallError> {
-    if turn_context.collaboration_mode.mode == ModeKind::Plan {
+    if turn_context.collaboration_mode.mode.is_plan_output_mode() {
         return Err(FunctionCallError::RespondToModel(
-            "update_plan is a TODO/checklist tool and is not allowed in Plan mode".to_string(),
+            "update_plan is a TODO/checklist tool and is not allowed in Plan output modes"
+                .to_string(),
         ));
     }
     let args = parse_update_plan_arguments(&arguments)?;

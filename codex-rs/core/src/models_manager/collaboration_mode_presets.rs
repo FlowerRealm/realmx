@@ -4,6 +4,8 @@ use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::openai_models::ReasoningEffort;
 
 const COLLABORATION_MODE_PLAN: &str = include_str!("../../templates/collaboration_mode/plan.md");
+const COLLABORATION_MODE_AUTO_PLAN: &str =
+    include_str!("../../templates/collaboration_mode/auto_plan.md");
 const COLLABORATION_MODE_DEFAULT: &str =
     include_str!("../../templates/collaboration_mode/default.md");
 const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
@@ -24,7 +26,11 @@ pub struct CollaborationModesConfig {
 pub(crate) fn builtin_collaboration_mode_presets(
     collaboration_modes_config: CollaborationModesConfig,
 ) -> Vec<CollaborationModeMask> {
-    vec![plan_preset(), default_preset(collaboration_modes_config)]
+    vec![
+        plan_preset(),
+        auto_plan_preset(),
+        default_preset(collaboration_modes_config),
+    ]
 }
 
 fn plan_preset() -> CollaborationModeMask {
@@ -34,6 +40,16 @@ fn plan_preset() -> CollaborationModeMask {
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
         developer_instructions: Some(Some(COLLABORATION_MODE_PLAN.to_string())),
+    }
+}
+
+fn auto_plan_preset() -> CollaborationModeMask {
+    CollaborationModeMask {
+        name: ModeKind::AutoPlan.display_name().to_string(),
+        mode: Some(ModeKind::AutoPlan),
+        model: None,
+        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        developer_instructions: Some(Some(COLLABORATION_MODE_AUTO_PLAN.to_string())),
     }
 }
 
@@ -110,12 +126,17 @@ mod tests {
     #[test]
     fn preset_names_use_mode_display_names() {
         assert_eq!(plan_preset().name, ModeKind::Plan.display_name());
+        assert_eq!(auto_plan_preset().name, ModeKind::AutoPlan.display_name());
         assert_eq!(
             default_preset(CollaborationModesConfig::default()).name,
             ModeKind::Default.display_name()
         );
         assert_eq!(
             plan_preset().reasoning_effort,
+            Some(Some(ReasoningEffort::Medium))
+        );
+        assert_eq!(
+            auto_plan_preset().reasoning_effort,
             Some(Some(ReasoningEffort::Medium))
         );
     }
