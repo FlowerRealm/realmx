@@ -6570,8 +6570,8 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn open_experimental_popup(&mut self) {
-        let features: Vec<ExperimentalFeatureItem> = FEATURES
+    pub(crate) fn experimental_feature_items(&self) -> Vec<ExperimentalFeatureItem> {
+        FEATURES
             .iter()
             .filter_map(|spec| {
                 let default_state = if spec.default_enabled { "on" } else { "off" };
@@ -6616,9 +6616,14 @@ impl ChatWidget {
                     original_enabled: self.config.features.enabled(spec.id),
                 })
             })
-            .collect();
+            .collect()
+    }
 
-        let view = ExperimentalFeaturesView::new(features, self.app_event_tx.clone());
+    pub(crate) fn open_experimental_popup(&mut self) {
+        let view = ExperimentalFeaturesView::new(
+            self.experimental_feature_items(),
+            self.app_event_tx.clone(),
+        );
         self.bottom_pane.show_view(Box::new(view));
     }
 
