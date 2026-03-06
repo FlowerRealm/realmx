@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage one or more Codex npm packages for release."""
+"""Stage one or more Realmx npm packages for release."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ _SPEC.loader.exec_module(_BUILD_MODULE)
 PACKAGE_NATIVE_COMPONENTS = getattr(_BUILD_MODULE, "PACKAGE_NATIVE_COMPONENTS", {})
 PACKAGE_EXPANSIONS = getattr(_BUILD_MODULE, "PACKAGE_EXPANSIONS", {})
 CODEX_PLATFORM_PACKAGES = getattr(_BUILD_MODULE, "CODEX_PLATFORM_PACKAGES", {})
+CLI_PACKAGE = getattr(_BUILD_MODULE, "CLI_PACKAGE", "realmx")
 
 
 def parse_args() -> argparse.Namespace:
@@ -132,8 +133,8 @@ def run_command(cmd: list[str]) -> None:
 
 def tarball_name_for_package(package: str, version: str) -> str:
     if package in CODEX_PLATFORM_PACKAGES:
-        platform = package.removeprefix("codex-")
-        return f"codex-npm-{platform}-{version}.tgz"
+        platform = package.removeprefix(f"{CLI_PACKAGE}-")
+        return f"{CLI_PACKAGE}-npm-{platform}-{version}.tgz"
     return f"{package}-npm-{version}.tgz"
 
 

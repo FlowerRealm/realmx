@@ -1,5 +1,5 @@
 {
-  "name": "@openai/codex-shell-tool-mcp",
+  "name": "@flowerrealm/realmx-shell-tool-mcp",
   "version": "0.0.0-dev",
   "description": "Patched Bash and Zsh binaries for Codex shell execution.",
   "license": "Apache-2.0",

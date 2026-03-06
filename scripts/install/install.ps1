@@ -126,7 +126,7 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $resolvedVersion = Resolve-Version
 Write-Step "Resolved version: $resolvedVersion"
-$packageAsset = "codex-npm-$npmTag-$resolvedVersion.tgz"
+$packageAsset = "realmx-npm-$npmTag-$resolvedVersion.tgz"
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-install-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null

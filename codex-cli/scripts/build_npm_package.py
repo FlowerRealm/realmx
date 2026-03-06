@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @openai/codex npm module."""
+"""Stage and optionally package the @flowerrealm/realmx npm module."""
 
 import argparse
 import json
@@ -14,48 +14,52 @@ CODEX_CLI_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = CODEX_CLI_ROOT.parent
 RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / "npm"
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
-CODEX_NPM_NAME = "@openai/codex"
+NPM_SCOPE = "@flowerrealm"
+CLI_PACKAGE = "realmx"
+CODEX_NPM_NAME = f"{NPM_SCOPE}/{CLI_PACKAGE}"
+RESPONSES_API_PROXY_PACKAGE = f"{CLI_PACKAGE}-responses-api-proxy"
+CODEX_SDK_PACKAGE = f"{CLI_PACKAGE}-sdk"
 
 # `npm_name` is the local optional-dependency alias consumed by `bin/codex.js`.
-# The underlying package published to npm is always `@openai/codex`.
+# The underlying package published to npm is always `@flowerrealm/realmx`.
 CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
-    "codex-linux-x64": {
-        "npm_name": "@openai/codex-linux-x64",
+    f"{CLI_PACKAGE}-linux-x64": {
+        "npm_name": f"{CODEX_NPM_NAME}-linux-x64",
         "npm_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
     },
-    "codex-linux-arm64": {
-        "npm_name": "@openai/codex-linux-arm64",
+    f"{CLI_PACKAGE}-linux-arm64": {
+        "npm_name": f"{CODEX_NPM_NAME}-linux-arm64",
         "npm_tag": "linux-arm64",
         "target_triple": "aarch64-unknown-linux-musl",
         "os": "linux",
         "cpu": "arm64",
     },
-    "codex-darwin-x64": {
-        "npm_name": "@openai/codex-darwin-x64",
+    f"{CLI_PACKAGE}-darwin-x64": {
+        "npm_name": f"{CODEX_NPM_NAME}-darwin-x64",
         "npm_tag": "darwin-x64",
         "target_triple": "x86_64-apple-darwin",
         "os": "darwin",
         "cpu": "x64",
     },
-    "codex-darwin-arm64": {
-        "npm_name": "@openai/codex-darwin-arm64",
+    f"{CLI_PACKAGE}-darwin-arm64": {
+        "npm_name": f"{CODEX_NPM_NAME}-darwin-arm64",
         "npm_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
     },
-    "codex-win32-x64": {
-        "npm_name": "@openai/codex-win32-x64",
+    f"{CLI_PACKAGE}-win32-x64": {
+        "npm_name": f"{CODEX_NPM_NAME}-win32-x64",
         "npm_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",
     },
-    "codex-win32-arm64": {
-        "npm_name": "@openai/codex-win32-arm64",
+    f"{CLI_PACKAGE}-win32-arm64": {
+        "npm_name": f"{CODEX_NPM_NAME}-win32-arm64",
         "npm_tag": "win32-arm64",
         "target_triple": "aarch64-pc-windows-msvc",
         "os": "win32",
@@ -64,19 +68,19 @@ CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
 }
 
 PACKAGE_EXPANSIONS: dict[str, list[str]] = {
-    "codex": ["codex", *CODEX_PLATFORM_PACKAGES],
+    CLI_PACKAGE: [CLI_PACKAGE, *CODEX_PLATFORM_PACKAGES],
 }
 
 PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
-    "codex": [],
-    "codex-linux-x64": ["codex", "rg"],
-    "codex-linux-arm64": ["codex", "rg"],
-    "codex-darwin-x64": ["codex", "rg"],
-    "codex-darwin-arm64": ["codex", "rg"],
-    "codex-win32-x64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
-    "codex-win32-arm64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
-    "codex-responses-api-proxy": ["codex-responses-api-proxy"],
-    "codex-sdk": [],
+    CLI_PACKAGE: [],
+    f"{CLI_PACKAGE}-linux-x64": ["codex", "rg"],
+    f"{CLI_PACKAGE}-linux-arm64": ["codex", "rg"],
+    f"{CLI_PACKAGE}-darwin-x64": ["codex", "rg"],
+    f"{CLI_PACKAGE}-darwin-arm64": ["codex", "rg"],
+    f"{CLI_PACKAGE}-win32-x64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
+    f"{CLI_PACKAGE}-win32-arm64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
+    RESPONSES_API_PROXY_PACKAGE: ["codex-responses-api-proxy"],
+    CODEX_SDK_PACKAGE: [],
 }
 
 PACKAGE_TARGET_FILTERS: dict[str, str] = {
@@ -96,12 +100,12 @@ COMPONENT_DEST_DIR: dict[str, str] = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build or stage the Codex CLI npm package.")
+    parser = argparse.ArgumentParser(description="Build or stage the Realmx CLI npm package.")
     parser.add_argument(
         "--package",
         choices=PACKAGE_CHOICES,
-        default="codex",
-        help="Which npm package to stage (default: codex).",
+        default=CLI_PACKAGE,
+        help=f"Which npm package to stage (default: {CLI_PACKAGE}).",
     )
     parser.add_argument(
         "--version",
@@ -181,14 +185,14 @@ def main() -> int:
 
         if release_version:
             staging_dir_str = str(staging_dir)
-            if package == "codex":
+            if package == CLI_PACKAGE:
                 print(
                     f"Staged version {version} for release in {staging_dir_str}\n\n"
                     "Verify the CLI:\n"
                     f"    node {staging_dir_str}/bin/codex.js --version\n"
                     f"    node {staging_dir_str}/bin/codex.js --help\n\n"
                 )
-            elif package == "codex-responses-api-proxy":
+            elif package == RESPONSES_API_PROXY_PACKAGE:
                 print(
                     f"Staged version {version} for release in {staging_dir_str}\n\n"
                     "Verify the responses API proxy:\n"
@@ -229,7 +233,7 @@ def prepare_staging_dir(staging_dir: Path | None) -> tuple[Path, bool]:
             raise RuntimeError(f"Staging directory {staging_dir} is not empty.")
         return staging_dir, False
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="codex-npm-stage-"))
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"{CLI_PACKAGE}-npm-stage-"))
     return temp_dir, True
 
 
@@ -237,7 +241,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
     package_json: dict
     package_json_path: Path | None = None
 
-    if package == "codex":
+    if package == CLI_PACKAGE:
         bin_dir = staging_dir / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CODEX_CLI_ROOT / "bin" / "codex.js", bin_dir / "codex.js")
@@ -279,7 +283,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         package_manager = codex_package_json.get("packageManager")
         if isinstance(package_manager, str):
             package_json["packageManager"] = package_manager
-    elif package == "codex-responses-api-proxy":
+    elif package == RESPONSES_API_PROXY_PACKAGE:
         bin_dir = staging_dir / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         launcher_src = RESPONSES_API_PROXY_NPM_ROOT / "bin" / "codex-responses-api-proxy.js"
@@ -290,7 +294,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             shutil.copy2(readme_src, staging_dir / "README.md")
 
         package_json_path = RESPONSES_API_PROXY_NPM_ROOT / "package.json"
-    elif package == "codex-sdk":
+    elif package == CODEX_SDK_PACKAGE:
         package_json_path = CODEX_SDK_ROOT / "package.json"
         stage_codex_sdk_sources(staging_dir)
     else:
@@ -301,18 +305,18 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             package_json = json.load(fh)
         package_json["version"] = version
 
-    if package == "codex":
+    if package == CLI_PACKAGE:
         package_json["files"] = ["bin"]
         package_json["optionalDependencies"] = {
             CODEX_PLATFORM_PACKAGES[platform_package]["npm_name"]: (
                 f"npm:{CODEX_NPM_NAME}@"
                 f"{compute_platform_package_version(version, CODEX_PLATFORM_PACKAGES[platform_package]['npm_tag'])}"
             )
-            for platform_package in PACKAGE_EXPANSIONS["codex"]
-            if platform_package != "codex"
+            for platform_package in PACKAGE_EXPANSIONS[CLI_PACKAGE]
+            if platform_package != CLI_PACKAGE
         }
 
-    elif package == "codex-sdk":
+    elif package == CODEX_SDK_PACKAGE:
         scripts = package_json.get("scripts")
         if isinstance(scripts, dict):
             scripts.pop("prepare", None)
@@ -347,7 +351,7 @@ def stage_codex_sdk_sources(staging_dir: Path) -> None:
 
     dist_src = package_root / "dist"
     if not dist_src.exists():
-        raise RuntimeError("codex-sdk build did not produce a dist directory.")
+        raise RuntimeError(f"{CODEX_SDK_PACKAGE} build did not produce a dist directory.")
 
     shutil.copytree(dist_src, staging_dir / "dist")
 
@@ -419,7 +423,7 @@ def run_npm_pack(staging_dir: Path, output_path: Path) -> Path:
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="codex-npm-pack-") as pack_dir_str:
+    with tempfile.TemporaryDirectory(prefix=f"{CLI_PACKAGE}-npm-pack-") as pack_dir_str:
         pack_dir = Path(pack_dir_str)
         stdout = subprocess.check_output(
             ["npm", "pack", "--json", "--pack-destination", str(pack_dir)],

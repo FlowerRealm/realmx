@@ -197,7 +197,7 @@ step "$install_mode Codex CLI"
 step "Detected platform: $platform_label"
 
 resolved_version="$(resolve_version)"
-asset="codex-npm-$npm_tag-$resolved_version.tgz"
+asset="realmx-npm-$npm_tag-$resolved_version.tgz"
 download_url="$(release_url_for_asset "$asset" "$resolved_version")"
 
 step "Resolved version: $resolved_version"

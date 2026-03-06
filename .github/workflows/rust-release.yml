@@ -446,9 +446,9 @@ jobs:
         run: |
           ./scripts/stage_npm_packages.py \
             --release-version "${{ steps.release_name.outputs.name }}" \
-            --package codex \
-            --package codex-responses-api-proxy \
-            --package codex-sdk
+            --package realmx \
+            --package realmx-responses-api-proxy \
+            --package realmx-sdk
 
       - name: Stage installer scripts
         run: |
@@ -505,7 +505,7 @@ jobs:
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
-          scope: "@openai"
+          scope: "@flowerrealm"
 
       # Trusted publishing requires npm CLI version 11.5.1 or later.
       - name: Update npm
@@ -520,12 +520,12 @@ jobs:
           tag="${{ needs.release.outputs.tag }}"
           mkdir -p dist/npm
           patterns=(
-            "codex-npm-${version}.tgz"
-            "codex-npm-linux-*-${version}.tgz"
-            "codex-npm-darwin-*-${version}.tgz"
-            "codex-npm-win32-*-${version}.tgz"
-            "codex-responses-api-proxy-npm-${version}.tgz"
-            "codex-sdk-npm-${version}.tgz"
+            "realmx-npm-${version}.tgz"
+            "realmx-npm-linux-*-${version}.tgz"
+            "realmx-npm-darwin-*-${version}.tgz"
+            "realmx-npm-win32-*-${version}.tgz"
+            "realmx-responses-api-proxy-npm-${version}.tgz"
+            "realmx-sdk-npm-${version}.tgz"
           )
           for pattern in "${patterns[@]}"; do
             gh release download "$tag" \
@@ -558,12 +558,12 @@ jobs:
             tag=""
 
             case "${filename}" in
-              codex-npm-linux-*-"${VERSION}".tgz|codex-npm-darwin-*-"${VERSION}".tgz|codex-npm-win32-*-"${VERSION}".tgz)
-                platform="${filename#codex-npm-}"
+              realmx-npm-linux-*-"${VERSION}".tgz|realmx-npm-darwin-*-"${VERSION}".tgz|realmx-npm-win32-*-"${VERSION}".tgz)
+                platform="${filename#realmx-npm-}"
                 platform="${platform%-${VERSION}.tgz}"
                 tag="${prefix}${platform}"
                 ;;
-              codex-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
+              realmx-npm-"${VERSION}".tgz|realmx-responses-api-proxy-npm-"${VERSION}".tgz|realmx-sdk-npm-"${VERSION}".tgz)
                 tag="${NPM_TAG}"
                 ;;
               *)

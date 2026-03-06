@@ -438,7 +438,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build (shell-tool-mcp)
-        run: pnpm --filter @openai/codex-shell-tool-mcp run build
+        run: pnpm --filter @flowerrealm/realmx-shell-tool-mcp run build
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -498,12 +498,12 @@ jobs:
           staging="${{ steps.staging.outputs.dir }}"
           pack_info=$(cd "$staging" && npm pack --ignore-scripts --json --pack-destination "${GITHUB_WORKSPACE}/dist/npm")
           filename=$(PACK_INFO="$pack_info" node -e 'const data = JSON.parse(process.env.PACK_INFO); console.log(data[0].filename);')
-          mv "dist/npm/${filename}" "dist/npm/codex-shell-tool-mcp-npm-${PACKAGE_VERSION}.tgz"
+          mv "dist/npm/${filename}" "dist/npm/realmx-shell-tool-mcp-npm-${PACKAGE_VERSION}.tgz"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: codex-shell-tool-mcp-npm
-          path: dist/npm/codex-shell-tool-mcp-npm-${{ env.PACKAGE_VERSION }}.tgz
+          name: realmx-shell-tool-mcp-npm
+          path: dist/npm/realmx-shell-tool-mcp-npm-${{ env.PACKAGE_VERSION }}.tgz
           if-no-files-found: error
 
   publish:
@@ -522,7 +522,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
-          scope: "@openai"
+          scope: "@flowerrealm"
 
       # Trusted publishing requires npm CLI version 11.5.1 or later.
       - name: Update npm
@@ -531,7 +531,7 @@ jobs:
       - name: Download npm tarball
         uses: actions/download-artifact@v8
         with:
-          name: codex-shell-tool-mcp-npm
+          name: realmx-shell-tool-mcp-npm
           path: dist/npm
 
       - name: Publish to npm
@@ -545,4 +545,4 @@ jobs:
           if [[ -n "${NPM_TAG}" ]]; then
             tag_args+=(--tag "${NPM_TAG}")
           fi
-          npm publish "dist/npm/codex-shell-tool-mcp-npm-${VERSION}.tgz" "${tag_args[@]}"
+          npm publish "dist/npm/realmx-shell-tool-mcp-npm-${VERSION}.tgz" "${tag_args[@]}"
