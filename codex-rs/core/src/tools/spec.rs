@@ -102,7 +102,7 @@ impl ToolsConfig {
             features.enabled(Feature::Artifact) && codex_artifacts::can_manage_artifact_runtime();
         let include_image_gen_tool =
             features.enabled(Feature::ImageGeneration) && supports_image_generation(model_info);
-        let include_agent_jobs = include_collab_tools && features.enabled(Feature::Sqlite);
+        let include_agent_jobs = include_collab_tools;
         let request_permission_enabled = features.enabled(Feature::RequestPermissions);
         let shell_command_backend =
             if features.enabled(Feature::ShellTool) && features.enabled(Feature::ShellZshFork) {
@@ -684,7 +684,7 @@ fn create_collab_input_items_schema() -> JsonSchema {
             "path".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Path when type is local_image/skill, or mention target such as app://<connector-id> when type is mention."
+                    "Path when type is local_image/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
                         .to_string(),
                 ),
             },
