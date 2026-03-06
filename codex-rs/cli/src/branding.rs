@@ -1,5 +1,4 @@
 use std::ffi::OsStr;
-use std::path::Path;
 
 pub const CLI_NAME_ENV_VAR: &str = "CODEX_CLI_NAME";
 pub const LEGACY_CLI_NAME: &str = "codex";
@@ -40,7 +39,9 @@ pub fn rewrite_command_for_cli(command: &str, cli_name: &str) -> String {
 }
 
 fn normalize_cli_name(value: &OsStr) -> Option<&'static str> {
-    let stem = Path::new(value).file_stem()?.to_str()?.to_ascii_lowercase();
+    let file_name = value.to_str()?.rsplit(['/', '\\']).next()?;
+    let normalized = file_name.to_ascii_lowercase();
+    let stem = normalized.strip_suffix(".exe").unwrap_or(&normalized);
 
     if stem == PRIMARY_CLI_NAME || stem.starts_with(&format!("{PRIMARY_CLI_NAME}-")) {
         Some(PRIMARY_CLI_NAME)
@@ -68,6 +69,10 @@ mod tests {
     fn display_cli_name_normalizes_platform_specific_binaries() {
         assert_eq!(
             display_cli_name_from(None, Some(OsStr::new("/tmp/realmx-x86_64-apple-darwin"))),
+            PRIMARY_CLI_NAME
+        );
+        assert_eq!(
+            display_cli_name_from(None, Some(OsStr::new("C:\\bin\\realmx.exe"))),
             PRIMARY_CLI_NAME
         );
         assert_eq!(
