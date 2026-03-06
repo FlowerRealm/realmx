@@ -11,7 +11,7 @@ npm i -g @flowerrealm/realmx
 realmx
 ```
 
-The legacy `codex` command remains available for compatibility. You can also install via Homebrew (`brew install --cask codex`) or download a platform-specific release directly from our [GitHub Releases](https://github.com/openai/codex/releases).
+The legacy `codex` command remains available for compatibility. You can also install via Homebrew (`brew install --cask codex`), which currently continues to expose the `codex` command name, or download a platform-specific release directly from our [GitHub Releases](https://github.com/openai/codex/releases).
 
 ## Documentation quickstart
 

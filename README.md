@@ -26,7 +26,10 @@ npm install -g @flowerrealm/realmx
 brew install --cask codex
 ```
 
-Then run `realmx` to get started. The legacy `codex` command remains available for compatibility.
+Then run the command that matches how you installed it:
+
+- `npm install -g @flowerrealm/realmx`: run `realmx` (the legacy `codex` command also works)
+- `brew install --cask codex`: run `codex`
 
 <details>
 <summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
