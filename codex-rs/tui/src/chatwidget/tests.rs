@@ -28,6 +28,7 @@ use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::RequirementSource;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
+use codex_core::features::Stage;
 use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_core::skills::model::SkillMetadata;
@@ -113,6 +114,7 @@ use pretty_assertions::assert_eq;
 #[cfg(target_os = "windows")]
 use serial_test::serial;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -6826,13 +6828,17 @@ async fn experimental_features_popup_snapshot() {
             feature: Feature::GhostCommit,
             name: "Ghost snapshots".to_string(),
             description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
             enabled: false,
+            original_enabled: false,
         },
         ExperimentalFeatureItem {
-            feature: Feature::ShellTool,
-            name: "Shell tool".to_string(),
-            description: "Allow the model to run shell commands.".to_string(),
+            feature: Feature::JsRepl,
+            name: "JavaScript REPL".to_string(),
+            description: "Enable a persistent Node-backed JavaScript REPL.".to_string(),
+            stage_tag: "experimental".to_string(),
             enabled: true,
+            original_enabled: true,
         },
     ];
     let view = ExperimentalFeaturesView::new(features, chat.app_event_tx.clone());
@@ -6840,6 +6846,32 @@ async fn experimental_features_popup_snapshot() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert_snapshot!("experimental_features_popup", popup);
+}
+
+#[tokio::test]
+async fn experimental_features_exit_without_changes_does_not_emit_update() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    let view = ExperimentalFeaturesView::new(
+        vec![ExperimentalFeatureItem {
+            feature: Feature::GhostCommit,
+            name: "Ghost snapshots".to_string(),
+            description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
+            enabled: false,
+            original_enabled: false,
+        }],
+        chat.app_event_tx.clone(),
+    );
+    chat.bottom_pane.show_view(Box::new(view));
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    while let Ok(event) = rx.try_recv() {
+        if matches!(event, AppEvent::UpdateFeatureFlags { .. }) {
+            panic!("did not expect UpdateFeatureFlags event when nothing changed");
+        }
+    }
 }
 
 #[tokio::test]
@@ -6852,7 +6884,9 @@ async fn experimental_features_toggle_saves_on_exit() {
             feature: expected_feature,
             name: "Ghost snapshots".to_string(),
             description: "Capture undo snapshots each turn.".to_string(),
+            stage_tag: "stable".to_string(),
             enabled: false,
+            original_enabled: false,
         }],
         chat.app_event_tx.clone(),
     );
@@ -6883,6 +6917,71 @@ async fn experimental_features_toggle_saves_on_exit() {
 }
 
 #[tokio::test]
+async fn experimental_popup_shows_all_non_removed_feature_flags() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    let items = chat.experimental_feature_items();
+    let actual_features: BTreeSet<_> = items.iter().map(|item| item.feature).collect();
+    let expected_features: BTreeSet<_> = FEATURES
+        .iter()
+        .filter(|spec| !matches!(spec.stage, Stage::Removed))
+        .map(|spec| spec.id)
+        .collect();
+    assert_eq!(actual_features, expected_features);
+
+    let actual_stage_tags: BTreeSet<_> = items.iter().map(|item| item.stage_tag.as_str()).collect();
+    let expected_stage_tags: BTreeSet<_> = FEATURES
+        .iter()
+        .filter_map(|spec| match spec.stage {
+            Stage::Experimental { .. } => Some("experimental"),
+            Stage::UnderDevelopment => Some("under development"),
+            Stage::Stable => Some("stable"),
+            Stage::Deprecated => Some("deprecated"),
+            Stage::Removed => None,
+        })
+        .collect();
+    assert_eq!(actual_stage_tags, expected_stage_tags);
+
+    let target_feature = items
+        .iter()
+        .find(|item| !item.enabled)
+        .map(|item| item.feature)
+        .expect("expected at least one disabled feature flag");
+    let target_idx = items
+        .iter()
+        .position(|item| item.feature == target_feature)
+        .expect("target feature should exist in popup items");
+
+    chat.open_experimental_popup();
+    for _ in 0..target_idx {
+        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let mut updates = None;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::UpdateFeatureFlags {
+            updates: event_updates,
+        } = event
+        {
+            updates = Some(event_updates);
+            break;
+        }
+    }
+
+    let updates = updates.expect("expected UpdateFeatureFlags event");
+    assert_eq!(updates, vec![(target_feature, true)]);
+    assert!(
+        !updates
+            .iter()
+            .any(|(feature, _)| matches!(feature.stage(), Stage::Removed)),
+        "did not expect removed feature flags in updates: {updates:?}"
+    );
+}
+
+#[tokio::test]
+
 async fn experimental_popup_shows_js_repl_node_requirement() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 

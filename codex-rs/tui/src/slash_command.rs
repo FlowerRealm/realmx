@@ -103,7 +103,7 @@ impl SlashCommand {
             SlashCommand::SandboxReadRoot => {
                 "let sandbox read a directory: /sandbox-add-read-dir <absolute_path>"
             }
-            SlashCommand::Experimental => "toggle experimental features",
+            SlashCommand::Experimental => "inspect and toggle feature flags",
             SlashCommand::Mcp => "list configured MCP tools",
             SlashCommand::Apps => "manage apps",
             SlashCommand::Logout => "log out of Codex",
