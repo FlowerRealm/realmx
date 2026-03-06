@@ -60,13 +60,15 @@ export class CodexExec {
   private executablePath: string;
   private envOverride?: Record<string, string>;
   private configOverrides?: CodexConfigObject;
+  private useBundledCliBranding: boolean;
 
   constructor(
     executablePath: string | null = null,
     env?: Record<string, string>,
     configOverrides?: CodexConfigObject,
   ) {
-    this.executablePath = executablePath || findCodexPath();
+    this.useBundledCliBranding = executablePath === null;
+    this.executablePath = executablePath ?? findCodexPath();
     this.envOverride = env;
     this.configOverrides = configOverrides;
   }
@@ -152,7 +154,7 @@ export class CodexExec {
     if (!env[INTERNAL_ORIGINATOR_ENV]) {
       env[INTERNAL_ORIGINATOR_ENV] = TYPESCRIPT_SDK_ORIGINATOR;
     }
-    if (!env[CLI_NAME_ENV]) {
+    if (this.useBundledCliBranding && !env[CLI_NAME_ENV]) {
       env[CLI_NAME_ENV] = PRIMARY_CLI_NAME;
     }
     if (args.baseUrl) {
@@ -165,7 +167,7 @@ export class CodexExec {
     const child = spawn(this.executablePath, commandArgs, {
       env,
       signal: args.signal,
-      argv0: env[CLI_NAME_ENV],
+      argv0: this.useBundledCliBranding ? env[CLI_NAME_ENV] : undefined,
     });
 
     let spawnError: unknown | null = null;

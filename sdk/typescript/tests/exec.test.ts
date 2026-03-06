@@ -93,4 +93,27 @@ describe("CodexExec", () => {
     expect(imageIndex).toBeGreaterThan(-1);
     expect(resumeIndex).toBeLessThan(imageIndex);
   });
+
+  it("does not override cli branding for custom executable paths", async () => {
+    const { CodexExec } = await import("../src/exec");
+    spawnMock.mockClear();
+    const child = new FakeChildProcess();
+    spawnMock.mockReturnValue(child as unknown as child_process.ChildProcess);
+
+    setImmediate(() => {
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("exit", 0, null);
+    });
+
+    const exec = new CodexExec("codex");
+    for await (const _ of exec.run({ input: "hi" })) {
+      // no-op
+    }
+
+    const options = spawnMock.mock.calls[0]?.[2] as child_process.SpawnOptions | undefined;
+    expect(options).toBeDefined();
+    expect(options?.env?.CODEX_CLI_NAME).toBeUndefined();
+    expect(options?.argv0).toBeUndefined();
+  });
 });

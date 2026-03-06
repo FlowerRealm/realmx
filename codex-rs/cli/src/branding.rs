@@ -15,7 +15,7 @@ pub fn display_cli_name_from(env_name: Option<&OsStr>, arg0: Option<&OsStr>) -> 
     env_name
         .and_then(normalize_cli_name)
         .or_else(|| arg0.and_then(normalize_cli_name))
-        .unwrap_or(LEGACY_CLI_NAME)
+        .unwrap_or(PRIMARY_CLI_NAME)
         .to_string()
 }
 
@@ -61,6 +61,14 @@ mod tests {
     fn display_cli_name_prefers_explicit_env() {
         assert_eq!(
             display_cli_name_from(Some(OsStr::new("realmx")), Some(OsStr::new("codex"))),
+            PRIMARY_CLI_NAME
+        );
+    }
+
+    #[test]
+    fn display_cli_name_defaults_to_primary_brand_for_unknown_entrypoints() {
+        assert_eq!(
+            display_cli_name_from(None, Some(OsStr::new("/tmp/custom-wrapper"))),
             PRIMARY_CLI_NAME
         );
     }
