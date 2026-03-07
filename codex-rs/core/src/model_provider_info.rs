@@ -3,7 +3,7 @@
 //! Providers can be defined in two places:
 //!   1. Built-in defaults compiled into the binary so Codex works out-of-the-box.
 //!   2. User-defined entries inside `~/.codex/config.toml` under the `model_providers`
-//!      key. These override or extend the defaults at runtime.
+//!      key. These extend the defaults at runtime.
 
 use crate::auth::AuthMode;
 use crate::error::EnvVarError;
@@ -62,6 +62,8 @@ pub struct ModelProviderInfo {
     pub name: String,
     /// Base URL for the provider's OpenAI-compatible API.
     pub base_url: Option<String>,
+    /// API key stored directly in config.toml for this provider.
+    pub api_key: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
 
@@ -178,6 +180,15 @@ impl ModelProviderInfo {
     /// (and non-empty) in the environment. If `env_key` is required but
     /// cannot be found, returns an error.
     pub fn api_key(&self) -> crate::error::Result<Option<String>> {
+        if let Some(api_key) = self
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok(Some(api_key.to_string()));
+        }
+
         match &self.env_key {
             Some(env_key) => {
                 let api_key = std::env::var(env_key)
@@ -226,6 +237,7 @@ impl ModelProviderInfo {
             base_url: std::env::var("OPENAI_BASE_URL")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
+            api_key: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
@@ -314,6 +326,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
     ModelProviderInfo {
         name: "gpt-oss".into(),
         base_url: Some(base_url.into()),
+        api_key: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -343,6 +356,7 @@ base_url = "http://localhost:11434/v1"
         let expected_provider = ModelProviderInfo {
             name: "Ollama".into(),
             base_url: Some("http://localhost:11434/v1".into()),
+            api_key: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
@@ -372,6 +386,7 @@ query_params = { api-version = "2025-04-01-preview" }
         let expected_provider = ModelProviderInfo {
             name: "Azure".into(),
             base_url: Some("https://xxxxx.openai.azure.com/openai".into()),
+            api_key: None,
             env_key: Some("AZURE_OPENAI_API_KEY".into()),
             env_key_instructions: None,
             experimental_bearer_token: None,
@@ -404,6 +419,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         let expected_provider = ModelProviderInfo {
             name: "Example".into(),
             base_url: Some("https://example.com".into()),
+            api_key: None,
             env_key: Some("API_KEY".into()),
             env_key_instructions: None,
             experimental_bearer_token: None,
@@ -437,5 +453,59 @@ wire_api = "chat"
 
         let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
         assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    }
+
+    #[test]
+    fn test_deserialize_example_model_provider_with_inline_api_key() {
+        let provider_toml = r#"
+name = "Example"
+base_url = "https://example.com"
+api_key = "secret"
+env_key = "API_KEY"
+        "#;
+
+        let expected_provider = ModelProviderInfo {
+            name: "Example".into(),
+            base_url: Some("https://example.com".into()),
+            api_key: Some("secret".into()),
+            env_key: Some("API_KEY".into()),
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        };
+
+        let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+        assert_eq!(expected_provider, provider);
+    }
+
+    #[test]
+    fn api_key_prefers_inline_config_value() {
+        let provider = ModelProviderInfo {
+            name: "Example".into(),
+            base_url: Some("https://example.com/v1".into()),
+            api_key: Some("inline-key".into()),
+            env_key: Some("SHOULD_NOT_BE_USED".into()),
+            env_key_instructions: None,
+            experimental_bearer_token: Some("fallback-token".into()),
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        };
+
+        assert_eq!(provider.api_key().unwrap(), Some("inline-key".to_string()));
     }
 }

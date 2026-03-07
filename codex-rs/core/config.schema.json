@@ -727,6 +727,10 @@
       "additionalProperties": false,
       "description": "Serializable representation of a provider definition.",
       "properties": {
+        "api_key": {
+          "description": "API key stored directly in config.toml for this provider.",
+          "type": "string"
+        },
         "base_url": {
           "description": "Base URL for the provider's OpenAI-compatible API.",
           "type": "string"
@@ -2092,7 +2096,7 @@
         "$ref": "#/definitions/ModelProviderInfo"
       },
       "default": {},
-      "description": "User-defined provider entries that extend/override the built-in list.",
+      "description": "User-defined provider entries that extend the built-in list.",
       "type": "object"
     },
     "model_reasoning_effort": {

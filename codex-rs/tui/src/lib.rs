@@ -595,7 +595,6 @@ async fn run_ratatui_app(
         let show_login_screen = should_show_login_screen(login_status, &initial_config);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
-                show_login_screen,
                 show_trust_screen: should_show_trust_screen_flag,
                 login_status,
                 auth_manager: auth_manager.clone(),
@@ -630,7 +629,10 @@ async fn run_ratatui_app(
 
         // If the user made an explicit trust decision, or we showed the login flow, reload config
         // so current process state reflects persisted trust/auth changes.
-        if onboarding_result.directory_trust_decision.is_some() || show_login_screen {
+        if onboarding_result.directory_trust_decision.is_some()
+            || onboarding_result.provider_changed
+            || show_login_screen
+        {
             load_config_or_exit(
                 cli_kv_overrides.clone(),
                 overrides.clone(),

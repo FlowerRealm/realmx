@@ -774,6 +774,15 @@ impl App {
         Ok(())
     }
 
+    async fn refresh_config_after_provider_change(&mut self) -> Result<()> {
+        let mut config = self.rebuild_config_for_cwd(self.config.cwd.clone()).await?;
+        self.apply_runtime_policy_overrides(&mut config);
+        self.chat_widget.set_config(config.clone());
+        self.config = config;
+        self.refresh_status_line();
+        Ok(())
+    }
+
     fn apply_runtime_policy_overrides(&mut self, config: &mut Config) {
         if let Some(policy) = self.runtime_approval_policy_override.as_ref()
             && let Err(err) = config.permissions.approval_policy.set(*policy)
@@ -2650,6 +2659,83 @@ impl App {
                 #[cfg(not(target_os = "windows"))]
                 {
                     let _ = (preset, mode);
+                }
+            }
+            AppEvent::PersistModelProvider { id, provider } => {
+                match ConfigEditsBuilder::new(&self.config.codex_home)
+                    .set_model_provider(&id, &provider)
+                    .apply()
+                    .await
+                {
+                    Ok(()) => {
+                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                            self.chat_widget.add_error_message(format!(
+                                "Provider saved but failed to reload config: {err}"
+                            ));
+                        } else {
+                            self.chat_widget.add_info_message(
+                                format!("Saved provider {id}"),
+                                Some(
+                                    "Use Enter in /provider to switch the default provider."
+                                        .to_string(),
+                                ),
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to persist model provider");
+                        self.chat_widget
+                            .add_error_message(format!("Failed to save provider `{id}`: {err}"));
+                    }
+                }
+            }
+            AppEvent::RemoveModelProvider { id } => {
+                match ConfigEditsBuilder::new(&self.config.codex_home)
+                    .remove_model_provider(&id)
+                    .apply()
+                    .await
+                {
+                    Ok(()) => {
+                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                            self.chat_widget.add_error_message(format!(
+                                "Provider removed but failed to reload config: {err}"
+                            ));
+                        } else {
+                            self.chat_widget
+                                .add_info_message(format!("Removed provider {id}"), None);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to remove model provider");
+                        self.chat_widget
+                            .add_error_message(format!("Failed to remove provider `{id}`: {err}"));
+                    }
+                }
+            }
+            AppEvent::PersistDefaultModelProvider { id } => {
+                let profile = self.active_profile.as_deref();
+                match ConfigEditsBuilder::new(&self.config.codex_home)
+                    .with_profile(profile)
+                    .set_default_model_provider(&id)
+                    .apply()
+                    .await
+                {
+                    Ok(()) => {
+                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                            self.chat_widget.add_error_message(format!(
+                                "Provider switched but failed to reload config: {err}"
+                            ));
+                        } else {
+                            self.chat_widget
+                                .add_info_message(format!("Provider changed to {id}"), None);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to persist default model provider");
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to switch default provider to `{id}`: {err}"
+                        ));
+                    }
                 }
             }
             AppEvent::PersistModelSelection { model, effort } => {

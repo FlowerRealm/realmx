@@ -492,6 +492,7 @@ mod tests {
         ModelProviderInfo {
             name: "mock".into(),
             base_url: Some(base_url),
+            api_key: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,

@@ -1724,6 +1724,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     let provider = ModelProviderInfo {
         name: "azure".into(),
         base_url: Some(format!("{}/openai", server.uri())),
+        api_key: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -2317,6 +2318,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
     let provider = ModelProviderInfo {
         name: "custom".to_string(),
         base_url: Some(format!("{}/openai", server.uri())),
+        api_key: None,
         // Reuse the existing environment variable to avoid using unsafe code
         env_key: Some(existing_env_var_with_random_value.to_string()),
         experimental_bearer_token: None,
@@ -2401,6 +2403,7 @@ async fn env_var_overrides_loaded_auth() {
     let provider = ModelProviderInfo {
         name: "custom".to_string(),
         base_url: Some(format!("{}/openai", server.uri())),
+        api_key: None,
         // Reuse the existing environment variable to avoid using unsafe code
         env_key: Some(existing_env_var_with_random_value.to_string()),
         query_params: Some(std::collections::HashMap::from([(

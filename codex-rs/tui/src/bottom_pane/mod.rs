@@ -78,6 +78,7 @@ mod file_search_popup;
 mod footer;
 mod list_selection_view;
 mod prompt_args;
+mod provider_manager_view;
 mod skill_popup;
 mod skills_toggle_view;
 mod slash_commands;
@@ -106,6 +107,7 @@ mod selection_popup_common;
 mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
+pub(crate) use provider_manager_view::ProviderManagerView;
 
 /// How long the "press again to quit" hint stays visible.
 ///

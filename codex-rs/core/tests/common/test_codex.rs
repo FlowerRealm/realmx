@@ -226,6 +226,7 @@ impl TestCodexBuilder {
     ) -> anyhow::Result<(Config, Arc<TempDir>)> {
         let model_provider = ModelProviderInfo {
             base_url: Some(base_url),
+            api_key: None,
             ..built_in_model_providers()["openai"].clone()
         };
         let cwd = Arc::new(TempDir::new()?);

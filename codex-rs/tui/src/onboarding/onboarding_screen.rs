@@ -20,6 +20,7 @@ use crate::LoginStatus;
 use crate::onboarding::auth::AuthModeWidget;
 use crate::onboarding::auth::SignInOption;
 use crate::onboarding::auth::SignInState;
+use crate::onboarding::provider::ProviderWidget;
 use crate::onboarding::trust_directory::TrustDirectorySelection;
 use crate::onboarding::trust_directory::TrustDirectoryWidget;
 use crate::onboarding::welcome::WelcomeWidget;
@@ -33,6 +34,7 @@ use std::sync::RwLock;
 #[allow(clippy::large_enum_variant)]
 enum Step {
     Welcome(WelcomeWidget),
+    Provider(ProviderWidget),
     Auth(AuthModeWidget),
     TrustDirectory(TrustDirectoryWidget),
 }
@@ -56,13 +58,14 @@ pub(crate) trait StepStateProvider {
 pub(crate) struct OnboardingScreen {
     request_frame: FrameRequester,
     steps: Vec<Step>,
+    initial_provider_id: String,
+    login_step_enabled: bool,
     is_done: bool,
     should_exit: bool,
 }
 
 pub(crate) struct OnboardingScreenArgs {
     pub show_trust_screen: bool,
-    pub show_login_screen: bool,
     pub login_status: LoginStatus,
     pub auth_manager: Arc<AuthManager>,
     pub config: Config,
@@ -70,6 +73,7 @@ pub(crate) struct OnboardingScreenArgs {
 
 pub(crate) struct OnboardingResult {
     pub directory_trust_decision: Option<TrustDirectorySelection>,
+    pub provider_changed: bool,
     pub should_exit: bool,
 }
 
@@ -77,7 +81,6 @@ impl OnboardingScreen {
     pub(crate) fn new(tui: &mut Tui, args: OnboardingScreenArgs) -> Self {
         let OnboardingScreenArgs {
             show_trust_screen,
-            show_login_screen,
             login_status,
             auth_manager,
             config,
@@ -87,13 +90,15 @@ impl OnboardingScreen {
         let forced_login_method = config.forced_login_method;
         let codex_home = config.codex_home.clone();
         let cli_auth_credentials_store_mode = config.cli_auth_credentials_store_mode;
+        let login_step_enabled = matches!(login_status, LoginStatus::NotAuthenticated);
         let mut steps: Vec<Step> = Vec::new();
         steps.push(Step::Welcome(WelcomeWidget::new(
             !matches!(login_status, LoginStatus::NotAuthenticated),
             tui.frame_requester(),
             config.animations,
         )));
-        if show_login_screen {
+        steps.push(Step::Provider(ProviderWidget::new(&config)));
+        if login_step_enabled {
             let highlighted_mode = match forced_login_method {
                 Some(ForcedLoginMethod::Api) => SignInOption::ApiKey,
                 _ => SignInOption::ChatGpt,
@@ -133,15 +138,29 @@ impl OnboardingScreen {
         Self {
             request_frame: tui.frame_requester(),
             steps,
+            initial_provider_id: config.model_provider_id,
+            login_step_enabled,
             is_done: false,
             should_exit: false,
         }
     }
 
+    fn effective_step_state(&self, step: &Step) -> StepState {
+        match step {
+            Step::Auth(_) => self.auth_step_state(),
+            _ => step.intrinsic_state(),
+        }
+    }
+
     fn current_steps_mut(&mut self) -> Vec<&mut Step> {
+        let auth_state = self.auth_step_state();
         let mut out: Vec<&mut Step> = Vec::new();
         for step in self.steps.iter_mut() {
-            match step.get_step_state() {
+            let step_state = match step {
+                Step::Auth(_) => auth_state,
+                _ => step.intrinsic_state(),
+            };
+            match step_state {
                 StepState::Hidden => continue,
                 StepState::Complete => out.push(step),
                 StepState::InProgress => {
@@ -155,8 +174,8 @@ impl OnboardingScreen {
 
     fn current_steps(&self) -> Vec<&Step> {
         let mut out: Vec<&Step> = Vec::new();
-        for step in self.steps.iter() {
-            match step.get_step_state() {
+        for step in &self.steps {
+            match self.effective_step_state(step) {
                 StepState::Hidden => continue,
                 StepState::Complete => out.push(step),
                 StepState::InProgress => {
@@ -168,10 +187,38 @@ impl OnboardingScreen {
         out
     }
 
+    fn selected_provider_requires_openai_auth(&self) -> bool {
+        self.steps
+            .iter()
+            .find_map(|step| {
+                if let Step::Provider(widget) = step {
+                    widget.selected_requires_openai_auth()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(self.login_step_enabled)
+    }
+
+    fn auth_step_state(&self) -> StepState {
+        if !self.login_step_enabled || !self.selected_provider_requires_openai_auth() {
+            return StepState::Hidden;
+        }
+
+        self.steps
+            .iter()
+            .find_map(|step| {
+                if let Step::Auth(widget) = step {
+                    Some(widget.get_step_state())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(StepState::Hidden)
+    }
+
     fn is_auth_in_progress(&self) -> bool {
-        self.steps.iter().any(|step| {
-            matches!(step, Step::Auth(_)) && matches!(step.get_step_state(), StepState::InProgress)
-        })
+        self.auth_step_state() == StepState::InProgress
     }
 
     pub(crate) fn is_done(&self) -> bool {
@@ -179,7 +226,7 @@ impl OnboardingScreen {
             || !self
                 .steps
                 .iter()
-                .any(|step| matches!(step.get_step_state(), StepState::InProgress))
+                .any(|step| self.effective_step_state(step) == StepState::InProgress)
     }
 
     pub fn directory_trust_decision(&self) -> Option<TrustDirectorySelection> {
@@ -193,6 +240,16 @@ impl OnboardingScreen {
                 }
             })
             .flatten()
+    }
+
+    pub fn selected_provider_id(&self) -> Option<&str> {
+        self.steps.iter().find_map(|step| {
+            if let Step::Provider(widget) = step {
+                widget.selected_provider_id()
+            } else {
+                None
+            }
+        })
     }
 
     pub fn should_exit(&self) -> bool {
@@ -352,6 +409,7 @@ impl KeyboardHandler for Step {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match self {
             Step::Welcome(widget) => widget.handle_key_event(key_event),
+            Step::Provider(widget) => widget.handle_key_event(key_event),
             Step::Auth(widget) => widget.handle_key_event(key_event),
             Step::TrustDirectory(widget) => widget.handle_key_event(key_event),
         }
@@ -360,19 +418,27 @@ impl KeyboardHandler for Step {
     fn handle_paste(&mut self, pasted: String) {
         match self {
             Step::Welcome(_) => {}
+            Step::Provider(widget) => widget.handle_paste(pasted),
             Step::Auth(widget) => widget.handle_paste(pasted),
             Step::TrustDirectory(widget) => widget.handle_paste(pasted),
         }
     }
 }
 
-impl StepStateProvider for Step {
-    fn get_step_state(&self) -> StepState {
+impl Step {
+    fn intrinsic_state(&self) -> StepState {
         match self {
             Step::Welcome(w) => w.get_step_state(),
+            Step::Provider(w) => w.get_step_state(),
             Step::Auth(w) => w.get_step_state(),
             Step::TrustDirectory(w) => w.get_step_state(),
         }
+    }
+}
+
+impl StepStateProvider for Step {
+    fn get_step_state(&self) -> StepState {
+        self.intrinsic_state()
     }
 }
 
@@ -380,6 +446,9 @@ impl WidgetRef for Step {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         match self {
             Step::Welcome(widget) => {
+                widget.render_ref(area, buf);
+            }
+            Step::Provider(widget) => {
                 widget.render_ref(area, buf);
             }
             Step::Auth(widget) => {
@@ -398,6 +467,7 @@ pub(crate) async fn run_onboarding_app(
 ) -> Result<OnboardingResult> {
     use tokio_stream::StreamExt;
 
+    let codex_home = args.config.codex_home.clone();
     let mut onboarding_screen = OnboardingScreen::new(tui, args);
     // One-time guard to fully clear the screen after ChatGPT login success message is shown
     let mut did_full_clear_after_success = false;
@@ -456,8 +526,22 @@ pub(crate) async fn run_onboarding_app(
             }
         }
     }
+    let selected_provider = onboarding_screen.selected_provider_id().map(str::to_string);
+    let provider_changed = if let Some(provider_id) = selected_provider.as_deref() {
+        if provider_id != onboarding_screen.initial_provider_id {
+            let _ = codex_core::config::edit::ConfigEditsBuilder::new(&codex_home)
+                .set_default_model_provider(provider_id)
+                .apply_blocking();
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     Ok(OnboardingResult {
         directory_trust_decision: onboarding_screen.directory_trust_decision(),
+        provider_changed,
         should_exit: onboarding_screen.should_exit(),
     })
 }

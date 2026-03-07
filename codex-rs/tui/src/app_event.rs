@@ -22,6 +22,7 @@ use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::history_cell::HistoryCell;
 
+use codex_core::ModelProviderInfo;
 use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::Personality;
@@ -191,6 +192,22 @@ pub(crate) enum AppEvent {
     PersistModelSelection {
         model: String,
         effort: Option<ReasoningEffort>,
+    },
+
+    /// Persist a custom provider entry under `[model_providers.<id>]`.
+    PersistModelProvider {
+        id: String,
+        provider: ModelProviderInfo,
+    },
+
+    /// Remove a custom provider entry.
+    RemoveModelProvider {
+        id: String,
+    },
+
+    /// Persist the default provider selection and refresh runtime config.
+    PersistDefaultModelProvider {
+        id: String,
     },
 
     /// Persist the selected personality to the appropriate config.

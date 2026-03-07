@@ -1139,7 +1139,7 @@ pub struct ConfigToml {
     /// to 127.0.0.1 (using `mcp_oauth_callback_port` when provided).
     pub mcp_oauth_callback_url: Option<String>,
 
-    /// User-defined provider entries that extend/override the built-in list.
+    /// User-defined provider entries that extend the built-in list.
     #[serde(default)]
     pub model_providers: HashMap<String, ModelProviderInfo>,
 

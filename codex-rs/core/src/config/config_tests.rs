@@ -2872,6 +2872,25 @@ fn model_catalog_json_rejects_empty_catalog() -> std::io::Result<()> {
     Ok(())
 }
 
+#[test]
+fn config_parses_provider_inline_api_key() {
+    let cfg: ConfigToml = toml::from_str(
+        r#"[model_providers.example]
+name = "Example"
+base_url = "https://example.com/v1"
+api_key = "secret-inline"
+wire_api = "responses"
+"#,
+    )
+    .expect("provider config should parse");
+
+    let provider = cfg
+        .model_providers
+        .get("example")
+        .expect("example provider should exist");
+    assert_eq!(provider.api_key.as_deref(), Some("secret-inline"));
+}
+
 fn create_test_fixture() -> std::io::Result<PrecedenceTestFixture> {
     let toml = r#"
 model = "o3"
@@ -2936,6 +2955,7 @@ model_verbosity = "high"
     let openai_custom_provider = ModelProviderInfo {
         name: "OpenAI custom".to_string(),
         base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key: None,
         env_key: Some("OPENAI_API_KEY".to_string()),
         wire_api: crate::WireApi::Responses,
         env_key_instructions: None,

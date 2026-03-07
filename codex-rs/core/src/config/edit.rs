@@ -1,5 +1,6 @@
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
+use crate::model_provider_info::ModelProviderInfo;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
 use anyhow::Context;
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::task;
+use toml::Value as TomlValue;
 use toml_edit::ArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
@@ -57,6 +59,15 @@ pub enum ConfigEdit {
     },
     /// Remove the value stored at the exact dotted path.
     ClearPath { segments: Vec<String> },
+    /// Set or replace a provider entry under `[model_providers.<id>]`.
+    SetModelProvider {
+        id: String,
+        provider: ModelProviderInfo,
+    },
+    /// Remove a provider entry under `[model_providers.<id>]`.
+    RemoveModelProvider { id: String },
+    /// Set the active default model provider.
+    SetDefaultModelProvider { id: String },
 }
 
 /// Produces a config edit that sets `[tui] theme = "<name>"`.
@@ -376,6 +387,16 @@ impl ConfigDocument {
             }
             ConfigEdit::SetPath { segments, value } => Ok(self.insert(segments, value.clone())),
             ConfigEdit::ClearPath { segments } => Ok(self.clear_owned(segments)),
+            ConfigEdit::SetModelProvider { id, provider } => {
+                let item = model_provider_to_item(provider)?;
+                Ok(self.insert(&["model_providers".to_string(), id.clone()], item))
+            }
+            ConfigEdit::RemoveModelProvider { id } => {
+                Ok(self.remove(&["model_providers".to_string(), id.clone()]))
+            }
+            ConfigEdit::SetDefaultModelProvider { id } => {
+                Ok(self.write_profile_value(&["model_provider"], Some(value(id.clone()))))
+            }
             ConfigEdit::SetProjectTrustLevel { path, level } => {
                 // Delegate to the existing, tested logic in config.rs to
                 // ensure tables are explicit and migration is preserved.
@@ -684,6 +705,49 @@ fn normalize_skill_config_path(path: &Path) -> String {
         .to_string()
 }
 
+fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
+    let value = TomlValue::try_from(provider.clone())?;
+    toml_value_to_item(&value)
+}
+
+fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
+    match value {
+        TomlValue::Table(table) => {
+            let mut table_item = TomlTable::new();
+            table_item.set_implicit(false);
+            for (key, val) in table {
+                table_item.insert(key, toml_value_to_item(val)?);
+            }
+            Ok(TomlItem::Table(table_item))
+        }
+        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
+    }
+}
+
+fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
+    match value {
+        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
+        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Array(items) => {
+            let mut array = toml_edit::Array::new();
+            for item in items {
+                array.push(toml_value_to_value(item)?);
+            }
+            Ok(toml_edit::Value::Array(array))
+        }
+        TomlValue::Table(table) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (key, val) in table {
+                inline.insert(key, toml_value_to_value(val)?);
+            }
+            Ok(toml_edit::Value::InlineTable(inline))
+        }
+    }
+}
+
 /// Persist edits using a blocking strategy.
 pub fn apply_blocking(
     codex_home: &Path,
@@ -842,6 +906,26 @@ impl ConfigEditsBuilder {
     pub fn replace_mcp_servers(mut self, servers: &BTreeMap<String, McpServerConfig>) -> Self {
         self.edits
             .push(ConfigEdit::ReplaceMcpServers(servers.clone()));
+        self
+    }
+
+    pub fn set_model_provider(mut self, id: &str, provider: &ModelProviderInfo) -> Self {
+        self.edits.push(ConfigEdit::SetModelProvider {
+            id: id.to_string(),
+            provider: provider.clone(),
+        });
+        self
+    }
+
+    pub fn remove_model_provider(mut self, id: &str) -> Self {
+        self.edits
+            .push(ConfigEdit::RemoveModelProvider { id: id.to_string() });
+        self
+    }
+
+    pub fn set_default_model_provider(mut self, id: &str) -> Self {
+        self.edits
+            .push(ConfigEdit::SetDefaultModelProvider { id: id.to_string() });
         self
     }
 
@@ -1823,6 +1907,100 @@ foo = { command = "cmd" , enabled = false }
             .and_then(|tbl| tbl.get("notifications"))
             .and_then(toml::Value::as_bool);
         assert_eq!(notifications, Some(false));
+    }
+
+    #[test]
+    fn blocking_set_model_provider_writes_provider_table() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+        let provider = ModelProviderInfo {
+            name: "Example Provider".into(),
+            base_url: Some("https://example.com/v1".into()),
+            api_key: Some("secret".into()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            wire_api: crate::model_provider_info::WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        };
+
+        ConfigEditsBuilder::new(codex_home)
+            .set_model_provider("example", &provider)
+            .apply_blocking()
+            .expect("persist provider");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        let expected = r#"[model_providers.example]
+api_key = "secret"
+base_url = "https://example.com/v1"
+name = "Example Provider"
+requires_openai_auth = false
+supports_websockets = false
+wire_api = "responses"
+"#;
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn blocking_set_default_model_provider_updates_profile_scope() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+        std::fs::write(
+            codex_home.join(CONFIG_TOML_FILE),
+            r#"profile = "team"
+
+[profiles.team]
+model = "o3"
+"#,
+        )
+        .expect("seed");
+
+        ConfigEditsBuilder::new(codex_home)
+            .set_default_model_provider("example")
+            .apply_blocking()
+            .expect("persist provider id");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        let expected = r#"profile = "team"
+
+[profiles.team]
+model = "o3"
+model_provider = "example"
+"#;
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn blocking_remove_model_provider_clears_entry() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+        std::fs::write(
+            codex_home.join(CONFIG_TOML_FILE),
+            r#"[model_providers.example]
+name = "Example"
+base_url = "https://example.com"
+wire_api = "responses"
+"#,
+        )
+        .expect("seed");
+
+        ConfigEditsBuilder::new(codex_home)
+            .remove_model_provider("example")
+            .apply_blocking()
+            .expect("remove provider");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        assert!(contents.is_empty());
     }
 
     #[tokio::test]
