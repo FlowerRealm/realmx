@@ -17,6 +17,7 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
+use serde::Deserialize;
 
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
@@ -129,6 +130,9 @@ pub(crate) enum AppEvent {
 
     /// Result of refreshing rate limits
     RateLimitSnapshotFetched(RateLimitSnapshot),
+
+    /// Result of refreshing SU8 usage snapshot.
+    Su8UsageSnapshotFetched(Option<Su8UsageSnapshot>),
 
     /// Result of prefetching connectors.
     ConnectorsLoaded {
@@ -477,4 +481,13 @@ pub(crate) enum FeedbackCategory {
     Bug,
     SafetyCheck,
     Other,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub(crate) struct Su8UsageSnapshot {
+    pub(crate) remaining: f64,
+    #[serde(rename = "todayLimit")]
+    pub(crate) today_limit: Option<f64>,
+    #[serde(rename = "todayRemaining")]
+    pub(crate) today_remaining: Option<f64>,
 }

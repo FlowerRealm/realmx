@@ -2277,6 +2277,9 @@ impl App {
             AppEvent::RateLimitSnapshotFetched(snapshot) => {
                 self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
             }
+            AppEvent::Su8UsageSnapshotFetched(snapshot) => {
+                self.chat_widget.on_su8_usage_snapshot(snapshot);
+            }
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }

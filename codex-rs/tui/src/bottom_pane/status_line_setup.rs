@@ -75,6 +75,12 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the weekly rate limit.
     WeeklyLimit,
 
+    /// Remaining usage reported by the SU8 gateway.
+    Su8Remaining,
+
+    /// Today's consumed plan usage reported by the SU8 gateway.
+    Su8TodayUsed,
+
     /// Codex application version.
     CodexVersion,
 
@@ -114,6 +120,12 @@ impl StatusLineItem {
             }
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on weekly usage limit (omitted when unavailable)"
+            }
+            StatusLineItem::Su8Remaining => {
+                "Remaining usage from the SU8 provider usage endpoint (omitted when unavailable)"
+            }
+            StatusLineItem::Su8TodayUsed => {
+                "Today's used plan quota from the SU8 provider usage endpoint (omitted when unavailable)"
             }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {

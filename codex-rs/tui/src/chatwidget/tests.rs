@@ -1788,6 +1788,8 @@ async fn make_chatwidget_manual(
         rate_limit_warnings: RateLimitWarningState::default(),
         rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
         rate_limit_poller: None,
+        su8_usage: Su8StatusLineUsage::default(),
+        su8_usage_poller: None,
         adaptive_chunking: crate::streaming::chunking::AdaptiveChunkingPolicy::default(),
         stream_controller: None,
         plan_stream_controller: None,
@@ -9363,6 +9365,71 @@ async fn status_line_invalid_items_warn_once() {
     assert!(
         cells.is_empty(),
         "expected invalid status line warning to emit only once"
+    );
+}
+
+#[tokio::test]
+async fn su8_provider_appends_default_status_items() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+
+    let items = chat.configured_status_line_items();
+
+    assert!(items.iter().any(|item| item == "su8-remaining"));
+    assert!(items.iter().any(|item| item == "su8-today-used"));
+}
+
+#[tokio::test]
+async fn su8_status_line_values_render_remaining_and_today_used() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+    chat.on_su8_usage_snapshot(Some(crate::app_event::Su8UsageSnapshot {
+        remaining: 12.345,
+        today_limit: Some(20.0),
+        today_remaining: Some(7.5),
+    }));
+
+    assert_eq!(
+        chat.status_line_value_for_item(&StatusLineItem::Su8Remaining),
+        Some("rem 12.35 USD".to_string())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(&StatusLineItem::Su8TodayUsed),
+        Some("today 12.50 USD".to_string())
+    );
+}
+
+#[tokio::test]
+async fn su8_status_line_footer_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+    chat.config.tui_status_line = Some(vec![
+        "su8-remaining".to_string(),
+        "su8-today-used".to_string(),
+    ]);
+    chat.on_su8_usage_snapshot(Some(crate::app_event::Su8UsageSnapshot {
+        remaining: 12.345,
+        today_limit: Some(20.0),
+        today_remaining: Some(7.5),
+    }));
+
+    let footer = render_bottom_popup(&chat, 80);
+    assert_snapshot!("su8_status_line_footer", footer);
+}
+
+#[tokio::test]
+async fn su8_status_line_today_used_clamps_at_zero() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+    chat.on_su8_usage_snapshot(Some(crate::app_event::Su8UsageSnapshot {
+        remaining: 3.0,
+        today_limit: Some(5.0),
+        today_remaining: Some(8.0),
+    }));
+
+    assert_eq!(
+        chat.status_line_value_for_item(&StatusLineItem::Su8TodayUsed),
+        Some("today 0.00 USD".to_string())
     );
 }
 

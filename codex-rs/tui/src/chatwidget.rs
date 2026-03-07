@@ -39,6 +39,7 @@ use std::time::Instant;
 
 use self::realtime::PendingSteerCompareKey;
 use crate::app_event::RealtimeAudioDeviceKind;
+use crate::app_event::Su8UsageSnapshot;
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
 use crate::audio_device::list_realtime_audio_device_names;
 use crate::bottom_pane::StatusLineItem;
@@ -59,6 +60,7 @@ use codex_core::config::ConstraintResult;
 use codex_core::config::types::Notifications;
 use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::ConfigLayerStackOrdering;
+use codex_core::default_client::build_reqwest_client;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_core::features::Stage;
@@ -161,6 +163,8 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
+use reqwest::StatusCode;
+use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tracing::debug;
@@ -308,11 +312,28 @@ const USER_SHELL_COMMAND_HELP_HINT: &str = "Example: !ls";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 3] =
     ["model-with-reasoning", "context-remaining", "current-dir"];
+const SU8_PROVIDER_ID: &str = "su8";
 // Track information about an in-flight exec command.
 struct RunningCommand {
     command: Vec<String>,
     parsed_cmd: Vec<ParsedCommand>,
     source: ExecCommandSource,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Su8StatusLineUsage {
+    remaining: Option<f64>,
+    today_limit: Option<f64>,
+    today_remaining: Option<f64>,
+}
+
+impl Su8StatusLineUsage {
+    fn today_used(&self) -> Option<f64> {
+        let limit = self.today_limit?;
+        let remaining = self.today_remaining?;
+        let used = limit - remaining;
+        Some(if used.is_sign_negative() { 0.0 } else { used })
+    }
 }
 
 struct UnifiedExecProcessSummary {
@@ -570,6 +591,8 @@ pub(crate) struct ChatWidget {
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_switch_prompt: RateLimitSwitchPromptState,
     rate_limit_poller: Option<JoinHandle<()>>,
+    su8_usage: Su8StatusLineUsage,
+    su8_usage_poller: Option<JoinHandle<()>>,
     adaptive_chunking: AdaptiveChunkingPolicy,
     // Stream lifecycle controller
     stream_controller: Option<StreamController>,
@@ -1760,6 +1783,16 @@ impl ChatWidget {
                 }
             }
         }
+    }
+
+    pub(crate) fn on_su8_usage_snapshot(&mut self, snapshot: Option<Su8UsageSnapshot>) {
+        self.su8_usage =
+            snapshot.map_or_else(Su8StatusLineUsage::default, |snapshot| Su8StatusLineUsage {
+                remaining: Some(snapshot.remaining),
+                today_limit: snapshot.today_limit,
+                today_remaining: snapshot.today_remaining,
+            });
+        self.refresh_status_line();
     }
 
     pub(crate) fn on_rate_limit_snapshot(&mut self, snapshot: Option<RateLimitSnapshot>) {
@@ -3129,6 +3162,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            su8_usage: Su8StatusLineUsage::default(),
+            su8_usage_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -3191,6 +3226,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.prefetch_su8_usage();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -3311,6 +3347,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            su8_usage: Su8StatusLineUsage::default(),
+            su8_usage_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -3373,6 +3411,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.prefetch_su8_usage();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -3485,6 +3524,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            su8_usage: Su8StatusLineUsage::default(),
+            su8_usage_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -3547,6 +3588,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.prefetch_su8_usage();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -5225,12 +5267,19 @@ impl ChatWidget {
     }
 
     fn configured_status_line_items(&self) -> Vec<String> {
-        self.config.tui_status_line.clone().unwrap_or_else(|| {
-            DEFAULT_STATUS_LINE_ITEMS
-                .iter()
-                .map(ToString::to_string)
-                .collect()
-        })
+        if let Some(items) = self.config.tui_status_line.clone() {
+            return items;
+        }
+
+        let mut items = DEFAULT_STATUS_LINE_ITEMS
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if self.is_su8_provider() {
+            items.push(StatusLineItem::Su8Remaining.to_string());
+            items.push(StatusLineItem::Su8TodayUsed.to_string());
+        }
+        items
     }
 
     fn status_line_cwd(&self) -> &Path {
@@ -5352,6 +5401,14 @@ impl ChatWidget {
                     .unwrap_or_else(|| "weekly".to_string());
                 self.status_line_limit_display(window, &label)
             }
+            StatusLineItem::Su8Remaining => self
+                .su8_usage
+                .remaining
+                .map(|remaining| format!("rem {remaining:.2} USD")),
+            StatusLineItem::Su8TodayUsed => self
+                .su8_usage
+                .today_used()
+                .map(|used| format!("today {used:.2} USD")),
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
@@ -5448,6 +5505,12 @@ impl ChatWidget {
         }
     }
 
+    fn stop_su8_usage_poller(&mut self) {
+        if let Some(handle) = self.su8_usage_poller.take() {
+            handle.abort();
+        }
+    }
+
     pub(crate) fn refresh_connectors(&mut self, force_refetch: bool) {
         self.prefetch_connectors_with_options(force_refetch);
     }
@@ -5530,6 +5593,7 @@ impl ChatWidget {
 
     fn prefetch_rate_limits(&mut self) {
         self.stop_rate_limit_poller();
+        self.stop_su8_usage_poller();
 
         if !self.should_prefetch_rate_limits() {
             return;
@@ -5566,6 +5630,39 @@ impl ChatWidget {
             .auth_cached()
             .as_ref()
             .is_some_and(CodexAuth::is_chatgpt_auth)
+    }
+
+    fn prefetch_su8_usage(&mut self) {
+        self.stop_su8_usage_poller();
+
+        if !self.is_su8_provider() {
+            self.su8_usage = Su8StatusLineUsage::default();
+            self.refresh_status_line();
+            return;
+        }
+
+        let provider = self.config.model_provider.clone();
+        let auth_manager = Arc::clone(&self.auth_manager);
+        let app_event_tx = self.app_event_tx.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+
+            loop {
+                let auth = auth_manager.auth().await;
+                let snapshot = fetch_su8_usage_snapshot(provider.clone(), auth).await;
+                app_event_tx.send(AppEvent::Su8UsageSnapshotFetched(snapshot));
+                interval.tick().await;
+            }
+        });
+
+        self.su8_usage_poller = Some(handle);
+    }
+
+    fn is_su8_provider(&self) -> bool {
+        self.config
+            .model_provider_id
+            .eq_ignore_ascii_case(SU8_PROVIDER_ID)
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {
@@ -8730,6 +8827,67 @@ fn extract_first_bold(s: &str) -> Option<String> {
         i += 1;
     }
     None
+}
+
+#[derive(Debug, Deserialize)]
+struct Su8UsageResponse {
+    remaining: f64,
+    #[serde(rename = "todayLimit")]
+    today_limit: Option<f64>,
+    #[serde(rename = "todayRemaining")]
+    today_remaining: Option<f64>,
+}
+
+async fn fetch_su8_usage_snapshot(
+    provider: codex_core::ModelProviderInfo,
+    auth: Option<CodexAuth>,
+) -> Option<Su8UsageSnapshot> {
+    let base_url = provider.base_url.clone()?.trim_end_matches('/').to_string();
+    let client = build_reqwest_client();
+    let mut request = client.get(format!("{base_url}/usage"));
+
+    if let Some(api_key) = provider.api_key().ok().flatten() {
+        request = request.bearer_auth(api_key);
+    } else if let Some(token) = provider.experimental_bearer_token.clone() {
+        request = request.bearer_auth(token);
+    } else if let Some(auth) = auth {
+        if let Ok(token) = auth.get_token() {
+            request = request.bearer_auth(token);
+        }
+        if let Some(account_id) = auth.get_account_id() {
+            request = request.header("ChatGPT-Account-ID", account_id);
+        }
+    }
+
+    if let Some(headers) = &provider.http_headers {
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+    }
+    if let Some(env_headers) = &provider.env_http_headers {
+        for (name, env_var) in env_headers {
+            if let Ok(value) = std::env::var(env_var)
+                && !value.trim().is_empty()
+            {
+                request = request.header(name, value);
+            }
+        }
+    }
+
+    let response = request.send().await.ok()?;
+    if response.status() == StatusCode::UNAUTHORIZED || response.status() == StatusCode::FORBIDDEN {
+        return None;
+    }
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload = response.json::<Su8UsageResponse>().await.ok()?;
+    Some(Su8UsageSnapshot {
+        remaining: payload.remaining,
+        today_limit: payload.today_limit,
+        today_remaining: payload.today_remaining,
+    })
 }
 
 async fn fetch_rate_limits(base_url: String, auth: CodexAuth) -> Vec<RateLimitSnapshot> {
