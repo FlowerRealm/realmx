@@ -1,3 +1,30 @@
 exports_files([
+    "Cargo.toml",
     "node-version.txt",
 ])
+
+genrule(
+    name = "cargo_version_env",
+    srcs = ["Cargo.toml"],
+    outs = ["cargo_version.env"],
+    cmd = """
+set -euo pipefail
+version="$$(grep -m1 '^version = "' $(location Cargo.toml) | cut -d'"' -f2)"
+if [[ -z "$$version" ]]; then
+  echo "failed to parse workspace version from $(location Cargo.toml)" >&2
+  exit 1
+fi
+major="$${version%%.*}"
+rest="$${version#*.}"
+minor="$${rest%%.*}"
+patch="$${rest#*.}"
+patch="$${patch%%[-+]*}"
+cat > "$@" <<EOF
+CARGO_PKG_VERSION=$$version
+CARGO_PKG_VERSION_MAJOR=$$major
+CARGO_PKG_VERSION_MINOR=$$minor
+CARGO_PKG_VERSION_PATCH=$$patch
+EOF
+""",
+    visibility = ["//visibility:public"],
+)

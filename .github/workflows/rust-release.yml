@@ -223,23 +223,23 @@ jobs:
           if-no-files-found: warn
 
       - if: ${{ runner.os == 'macOS' }}
-        name: Build macOS dmg
+        name: Prepare macOS release staging
         shell: bash
         run: |
           set -euo pipefail
 
           target="${{ matrix.target }}"
           release_dir="target/${target}/release"
-          dmg_root="${RUNNER_TEMP}/realmx-dmg-root"
-          volname="Realmx (${target})"
-          dmg_path="${release_dir}/codex-${target}.dmg"
+          stage_dir="${RUNNER_TEMP}/realmx-release/${target}"
 
-          # Package the built macOS binaries into an unsigned dmg.
+          echo "Disk usage before staging:"
+          df -h . "$RUNNER_TEMP"
+
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir"
+
           codex_binary_path="${release_dir}/codex"
           proxy_binary_path="${release_dir}/codex-responses-api-proxy"
-
-          rm -rf "$dmg_root"
-          mkdir -p "$dmg_root"
 
           if [[ ! -f "$codex_binary_path" ]]; then
             echo "Binary $codex_binary_path not found"
@@ -250,14 +250,41 @@ jobs:
             exit 1
           fi
 
-          ditto "$codex_binary_path" "${dmg_root}/codex"
-          ditto "$codex_binary_path" "${dmg_root}/realmx"
-          ditto "$proxy_binary_path" "${dmg_root}/codex-responses-api-proxy"
+          ditto "$codex_binary_path" "${stage_dir}/codex"
+          ditto "$codex_binary_path" "${stage_dir}/realmx"
+          ditto "$proxy_binary_path" "${stage_dir}/codex-responses-api-proxy"
 
-          rm -f "$dmg_path"
+          rm -rf target
+
+          echo "Disk usage after staging cleanup:"
+          df -h . "$RUNNER_TEMP"
+
+      - if: ${{ runner.os == 'macOS' }}
+        name: Build macOS dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target="${{ matrix.target }}"
+          stage_dir="${RUNNER_TEMP}/realmx-release/${target}"
+          volname="Realmx (${target})"
+          dmg_dir="${RUNNER_TEMP}/realmx-release-dmg/${target}"
+          dmg_path="${dmg_dir}/codex-${target}.dmg"
+
+          if [[ ! -d "$stage_dir" ]]; then
+            echo "Stage directory $stage_dir not found"
+            exit 1
+          fi
+
+          rm -rf "$dmg_dir"
+          mkdir -p "$dmg_dir"
+
+          echo "Disk usage before dmg build:"
+          df -h . "$RUNNER_TEMP"
+
           hdiutil create \
             -volname "$volname" \
-            -srcfolder "$dmg_root" \
+            -srcfolder "$stage_dir" \
             -format UDZO \
             -ov \
             "$dmg_path"
@@ -267,19 +294,27 @@ jobs:
             exit 1
           fi
 
+          echo "Disk usage after dmg build:"
+          df -h . "$RUNNER_TEMP"
+
       - name: Stage artifacts
         shell: bash
         run: |
           dest="dist/${{ matrix.target }}"
           mkdir -p "$dest"
 
-          cp target/${{ matrix.target }}/release/codex "$dest/codex-${{ matrix.target }}"
-          cp target/${{ matrix.target }}/release/codex "$dest/realmx-${{ matrix.target }}"
-          cp target/${{ matrix.target }}/release/codex-responses-api-proxy "$dest/codex-responses-api-proxy-${{ matrix.target }}"
-
           if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
-            cp target/${{ matrix.target }}/release/codex-${{ matrix.target }}.dmg "$dest/codex-${{ matrix.target }}.dmg"
-            cp target/${{ matrix.target }}/release/codex-${{ matrix.target }}.dmg "$dest/realmx-${{ matrix.target }}.dmg"
+            stage_dir="${RUNNER_TEMP}/realmx-release/${{ matrix.target }}"
+            cp "${stage_dir}/codex" "$dest/codex-${{ matrix.target }}"
+            cp "${stage_dir}/realmx" "$dest/realmx-${{ matrix.target }}"
+            cp "${stage_dir}/codex-responses-api-proxy" "$dest/codex-responses-api-proxy-${{ matrix.target }}"
+            dmg_dir="${RUNNER_TEMP}/realmx-release-dmg/${{ matrix.target }}"
+            cp "${dmg_dir}/codex-${{ matrix.target }}.dmg" "$dest/codex-${{ matrix.target }}.dmg"
+            cp "${dmg_dir}/codex-${{ matrix.target }}.dmg" "$dest/realmx-${{ matrix.target }}.dmg"
+          else
+            cp target/${{ matrix.target }}/release/codex "$dest/codex-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/codex "$dest/realmx-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/codex-responses-api-proxy "$dest/codex-responses-api-proxy-${{ matrix.target }}"
           fi
 
       - name: Compress artifacts

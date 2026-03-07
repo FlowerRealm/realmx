@@ -537,7 +537,7 @@ jobs:
       - name: Check npm package bootstrap
         id: npm_package_check
         env:
-          PACKAGE_NAME: '@flowerrealm/realmx-shell-tool-mcp'
+          PACKAGE_NAME: "@flowerrealm/realmx-shell-tool-mcp"
         shell: bash
         run: |
           set -euo pipefail

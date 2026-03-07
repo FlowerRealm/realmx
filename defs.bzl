@@ -84,11 +84,15 @@ def codex_rust_crate(
         "INSTA_SNAPSHOT_PATH": "src",
     }
 
+    crate_data = DEP_DATA.get(native.package_name())
+    crate_version = crate_data.get("version", "0.0.0")
+    version_env_files = ["//codex-rs:cargo_version_env"]
+
     rustc_env = {
         "BAZEL_PACKAGE": native.package_name(),
     } | rustc_env
 
-    binaries = DEP_DATA.get(native.package_name())["binaries"]
+    binaries = crate_data["binaries"]
 
     lib_srcs = crate_srcs or native.glob(["src/**/*.rs"], exclude = binaries.values(), allow_empty = True)
 
@@ -101,7 +105,7 @@ def codex_rust_crate(
             deps = all_crate_deps(build = True),
             data = build_script_data,
             # Some build script deps sniff version-related env vars...
-            version = "0.0.0",
+            version = crate_version,
         )
 
         maybe_deps += [name + "-build-script"]
@@ -119,6 +123,8 @@ def codex_rust_crate(
             edition = crate_edition,
             rustc_flags = rustc_flags_extra,
             rustc_env = rustc_env,
+            rustc_env_files = version_env_files,
+            version = crate_version,
             visibility = ["//visibility:public"],
         )
 
@@ -129,6 +135,8 @@ def codex_rust_crate(
             deps = all_crate_deps(normal = True, normal_dev = True) + maybe_deps + deps_extra,
             rustc_flags = rustc_flags_extra,
             rustc_env = rustc_env,
+            rustc_env_files = version_env_files,
+            version = crate_version,
             data = test_data_extra,
             tags = test_tags,
         )
@@ -149,7 +157,10 @@ def codex_rust_crate(
             deps = all_crate_deps() + maybe_deps + deps_extra,
             edition = crate_edition,
             rustc_flags = rustc_flags_extra,
+            rustc_env = rustc_env,
+            rustc_env_files = version_env_files,
             srcs = native.glob(["src/**/*.rs"]),
+            version = crate_version,
             visibility = ["//visibility:public"],
         )
 
@@ -177,6 +188,8 @@ def codex_rust_crate(
             # Bazel workspace-prefixed (`codex-rs/core/tests/...`) for snapshot parity.
             rustc_flags = rustc_flags_extra + ["--remap-path-prefix=codex-rs="],
             rustc_env = rustc_env,
+            rustc_env_files = version_env_files,
+            version = crate_version,
             # Important: do not merge `test_env` here. Its unit-test-only
             # `INSTA_WORKSPACE_ROOT="."` can point integration tests at the
             # runfiles cwd and cause false `.snap.new` churn on Linux.
