@@ -231,7 +231,14 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     "warning:".style(self.yellow).style(self.bold)
                 );
             }
-            EventMsg::SkillUsed(_) => {}
+            EventMsg::SkillUsed(event) => {
+                ts_msg!(
+                    self,
+                    "{} Using skill: {}",
+                    "•".style(self.dimmed),
+                    event.name
+                );
+            }
             EventMsg::ModelReroute(_) => {}
             EventMsg::DeprecationNotice(DeprecationNoticeEvent { summary, details }) => {
                 ts_msg!(
