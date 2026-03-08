@@ -233,7 +233,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     .await;
             }
         }
-        EventMsg::Warning(_warning_event) => {}
+        EventMsg::Warning(_) | EventMsg::SkillUsed(_) => {}
         EventMsg::ModelReroute(event) => {
             if let ApiVersion::V2 = api_version {
                 let notification = ModelReroutedNotification {

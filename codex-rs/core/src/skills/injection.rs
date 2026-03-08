@@ -17,6 +17,7 @@ use tokio::fs;
 #[derive(Debug, Default)]
 pub(crate) struct SkillInjections {
     pub(crate) items: Vec<ResponseItem>,
+    pub(crate) used_skills: Vec<SkillMetadata>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -32,6 +33,7 @@ pub(crate) async fn build_skill_injections(
 
     let mut result = SkillInjections {
         items: Vec::with_capacity(mentioned_skills.len()),
+        used_skills: Vec::with_capacity(mentioned_skills.len()),
         warnings: Vec::new(),
     };
     let mut invocations = Vec::new();
@@ -40,6 +42,7 @@ pub(crate) async fn build_skill_injections(
         match fs::read_to_string(&skill.path_to_skills_md).await {
             Ok(contents) => {
                 emit_skill_injected_metric(otel, skill, "ok");
+                result.used_skills.push(skill.clone());
                 invocations.push(SkillInvocation {
                     skill_name: skill.name.clone(),
                     skill_scope: skill.scope,
@@ -490,9 +493,16 @@ fn is_mention_name_char(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CodexAuth;
+    use crate::analytics_client::AnalyticsEventsClient;
+    use crate::analytics_client::TrackEventsContext;
+    use crate::config::ConfigBuilder;
+    use crate::test_support::auth_manager_from_auth;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use std::collections::HashSet;
+    use std::sync::Arc;
+    use tempfile::tempdir;
 
     fn make_skill(name: &str, path: &str) -> SkillMetadata {
         SkillMetadata {
@@ -525,6 +535,41 @@ mod tests {
         connector_slug_counts: &HashMap<String, usize>,
     ) -> Vec<SkillMetadata> {
         collect_explicit_skill_mentions(inputs, skills, disabled_paths, connector_slug_counts)
+    }
+
+    #[tokio::test]
+    async fn build_skill_injections_tracks_successful_used_skills() {
+        let dir = tempdir().expect("tempdir");
+        let skill_path = dir.path().join("SKILL.md");
+        fs::write(&skill_path, "# test skill")
+            .await
+            .expect("write skill");
+        let skill = make_skill("alpha-skill", &skill_path.to_string_lossy());
+        let config = Arc::new(
+            ConfigBuilder::default()
+                .codex_home(dir.path().to_path_buf())
+                .build()
+                .await
+                .expect("config"),
+        );
+        let auth_manager = auth_manager_from_auth(CodexAuth::from_api_key("test"));
+        let analytics = AnalyticsEventsClient::new(config, auth_manager);
+
+        let injections = build_skill_injections(
+            std::slice::from_ref(&skill),
+            None,
+            &analytics,
+            TrackEventsContext {
+                model_slug: "test-model".to_string(),
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+            },
+        )
+        .await;
+
+        assert_eq!(injections.warnings, Vec::<String>::new());
+        assert_eq!(injections.used_skills, vec![skill]);
+        assert_eq!(injections.items.len(), 1);
     }
 
     #[test]

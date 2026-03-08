@@ -231,6 +231,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     "warning:".style(self.yellow).style(self.bold)
                 );
             }
+            EventMsg::SkillUsed(_) => {}
             EventMsg::ModelReroute(_) => {}
             EventMsg::DeprecationNotice(DeprecationNoticeEvent { summary, details }) => {
                 ts_msg!(
@@ -942,6 +943,7 @@ impl EventProcessorWithHumanOutput {
                 | EventMsg::ListCustomPromptsResponse(_)
                 | EventMsg::ListSkillsResponse(_)
                 | EventMsg::ListRemoteSkillsResponse(_)
+                | EventMsg::SkillUsed(_)
                 | EventMsg::RemoteSkillDownloaded(_)
                 | EventMsg::RawResponseItem(_)
                 | EventMsg::UserMessage(_)
@@ -971,6 +973,7 @@ impl EventProcessorWithHumanOutput {
             msg,
             EventMsg::Error(_)
                 | EventMsg::Warning(_)
+                | EventMsg::SkillUsed(_)
                 | EventMsg::DeprecationNotice(_)
                 | EventMsg::StreamError(_)
                 | EventMsg::TurnComplete(_)

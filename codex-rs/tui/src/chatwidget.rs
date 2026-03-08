@@ -132,6 +132,7 @@ use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::protocol::SkillMetadata as ProtocolSkillMetadata;
+use codex_protocol::protocol::SkillUsedEvent;
 use codex_protocol::protocol::StreamErrorEvent;
 use codex_protocol::protocol::TerminalInteractionEvent;
 use codex_protocol::protocol::TokenUsage;
@@ -1937,6 +1938,14 @@ impl ChatWidget {
 
     fn on_warning(&mut self, message: impl Into<String>) {
         self.add_to_history(history_cell::new_warning_event(message.into()));
+        self.request_redraw();
+    }
+
+    fn on_skill_used(&mut self, SkillUsedEvent { name, .. }: SkillUsedEvent) {
+        self.add_to_history(history_cell::new_info_event(
+            format!("Using skill: {name}"),
+            None,
+        ));
         self.request_redraw();
     }
 
@@ -4821,6 +4830,7 @@ impl ChatWidget {
                 self.on_rate_limit_snapshot(ev.rate_limits);
             }
             EventMsg::Warning(WarningEvent { message }) => self.on_warning(message),
+            EventMsg::SkillUsed(ev) => self.on_skill_used(ev),
             EventMsg::ModelReroute(_) => {}
             EventMsg::Error(ErrorEvent {
                 message,

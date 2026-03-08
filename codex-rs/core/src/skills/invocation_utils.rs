@@ -9,6 +9,9 @@ use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::skills::SkillLoadOutcome;
 use crate::skills::SkillMetadata;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::SkillInvocationType;
+use codex_protocol::protocol::SkillUsedEvent;
 
 pub(crate) fn build_implicit_skill_path_indexes(
     skills: Vec<SkillMetadata>,
@@ -67,12 +70,18 @@ pub(crate) async fn maybe_emit_implicit_skill_invocation(
     ) else {
         return;
     };
+    let skill_used = SkillUsedEvent {
+        name: candidate.name.clone(),
+        invocation_type: SkillInvocationType::Implicit,
+    };
     let invocation = SkillInvocation {
         skill_name: candidate.name,
         skill_scope: candidate.scope,
         skill_path: candidate.path_to_skills_md,
         invocation_type: InvocationType::Implicit,
     };
+    sess.send_event(turn_context, EventMsg::SkillUsed(skill_used))
+        .await;
     let skill_scope = match invocation.skill_scope {
         codex_protocol::protocol::SkillScope::User => "user",
         codex_protocol::protocol::SkillScope::Repo => "repo",

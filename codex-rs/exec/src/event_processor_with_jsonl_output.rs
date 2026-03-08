@@ -177,6 +177,7 @@ impl EventProcessorWithJsonOutput {
                 };
                 vec![ThreadEvent::ItemCompleted(ItemCompletedEvent { item })]
             }
+            protocol::EventMsg::SkillUsed(_) => vec![],
             protocol::EventMsg::StreamError(ev) => {
                 let message = match &ev.additional_details {
                     Some(details) if !details.trim().is_empty() => {

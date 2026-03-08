@@ -242,8 +242,10 @@ use crate::protocol::SessionNetworkProxyRuntime;
 use crate::protocol::SkillDependencies as ProtocolSkillDependencies;
 use crate::protocol::SkillErrorInfo;
 use crate::protocol::SkillInterface as ProtocolSkillInterface;
+use crate::protocol::SkillInvocationType;
 use crate::protocol::SkillMetadata as ProtocolSkillMetadata;
 use crate::protocol::SkillToolDependency as ProtocolSkillToolDependency;
+use crate::protocol::SkillUsedEvent;
 use crate::protocol::StreamErrorEvent;
 use crate::protocol::Submission;
 use crate::protocol::TokenCountEvent;
@@ -5267,6 +5269,7 @@ pub(crate) async fn run_turn(
     );
     let SkillInjections {
         items: skill_items,
+        used_skills,
         warnings: skill_warnings,
     } = build_skill_injections(
         &mentioned_skills,
@@ -5279,6 +5282,17 @@ pub(crate) async fn run_turn(
     for message in skill_warnings {
         sess.send_event(&turn_context, EventMsg::Warning(WarningEvent { message }))
             .await;
+    }
+
+    for skill in used_skills {
+        sess.send_event(
+            &turn_context,
+            EventMsg::SkillUsed(SkillUsedEvent {
+                name: skill.name,
+                invocation_type: SkillInvocationType::Explicit,
+            }),
+        )
+        .await;
     }
 
     let plugin_items =
@@ -6214,6 +6228,7 @@ fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         },
         EventMsg::Error(_)
         | EventMsg::Warning(_)
+        | EventMsg::SkillUsed(_)
         | EventMsg::RealtimeConversationStarted(_)
         | EventMsg::RealtimeConversationRealtime(_)
         | EventMsg::RealtimeConversationClosed(_)

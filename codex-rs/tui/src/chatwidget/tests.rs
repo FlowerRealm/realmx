@@ -86,7 +86,9 @@ use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SkillInvocationType;
 use codex_protocol::protocol::SkillScope;
+use codex_protocol::protocol::SkillUsedEvent;
 use codex_protocol::protocol::StreamErrorEvent;
 use codex_protocol::protocol::TerminalInteractionEvent;
 use codex_protocol::protocol::ThreadRolledBackEvent;
@@ -9403,6 +9405,43 @@ async fn warning_event_adds_warning_history_cell() {
 }
 
 #[tokio::test]
+async fn skill_used_event_adds_info_history_cell() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.handle_codex_event(Event {
+        id: "sub-1".into(),
+        msg: EventMsg::SkillUsed(SkillUsedEvent {
+            name: "slides".to_string(),
+            invocation_type: SkillInvocationType::Explicit,
+        }),
+    });
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected one info history cell");
+    let rendered = lines_to_single_string(&cells[0]);
+    assert!(
+        rendered.contains("Using skill: slides"),
+        "info cell missing content: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn skill_used_event_history_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.handle_codex_event(Event {
+        id: "sub-1".into(),
+        msg: EventMsg::SkillUsed(SkillUsedEvent {
+            name: "slides".to_string(),
+            invocation_type: SkillInvocationType::Explicit,
+        }),
+    });
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected one info history cell");
+    let combined = lines_to_single_string(&cells[0]);
+    assert_snapshot!("skill_used_event_history_snapshot", combined);
+}
+
+#[tokio::test]
 async fn status_line_invalid_items_warn_once() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.tui_status_line = Some(vec![
@@ -9500,6 +9539,7 @@ async fn su8_usage_request_normalizes_trailing_slash() {
     let provider = codex_core::ModelProviderInfo {
         name: "SU8".to_string(),
         base_url: Some("https://example.test/v1/".to_string()),
+        api_key: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -9525,6 +9565,7 @@ async fn su8_usage_request_preserves_query_params() {
     let provider = codex_core::ModelProviderInfo {
         name: "SU8".to_string(),
         base_url: Some("https://example.test/v1".to_string()),
+        api_key: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -9553,6 +9594,7 @@ async fn su8_usage_request_config_env_headers_override_static_headers() {
     let provider = codex_core::ModelProviderInfo {
         name: "SU8".to_string(),
         base_url: Some("https://example.test/v1".to_string()),
+        api_key: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -9593,6 +9635,7 @@ async fn su8_usage_request_config_drops_chatgpt_fallback_when_env_key_missing() 
     let provider = codex_core::ModelProviderInfo {
         name: "SU8".to_string(),
         base_url: Some("https://example.test/v1".to_string()),
+        api_key: None,
         env_key: Some("MISSING_SU8_API_KEY".to_string()),
         env_key_instructions: None,
         experimental_bearer_token: None,
