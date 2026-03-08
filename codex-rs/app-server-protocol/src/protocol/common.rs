@@ -783,6 +783,7 @@ server_notification_definitions! {
     ThreadUnarchived => "thread/unarchived" (v2::ThreadUnarchivedNotification),
     ThreadClosed => "thread/closed" (v2::ThreadClosedNotification),
     SkillsChanged => "skills/changed" (v2::SkillsChangedNotification),
+    SkillUsed => "skill/used" (v2::SkillUsedNotification),
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (v2::ThreadTokenUsageUpdatedNotification),
     TurnStarted => "turn/started" (v2::TurnStartedNotification),

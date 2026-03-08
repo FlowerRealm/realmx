@@ -64,6 +64,8 @@ use codex_app_server_protocol::ReasoningTextDeltaNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequestPayload;
+use codex_app_server_protocol::SkillInvocationType as V2SkillInvocationType;
+use codex_app_server_protocol::SkillUsedNotification;
 use codex_app_server_protocol::SkillsChangedNotification;
 use codex_app_server_protocol::TerminalInteractionNotification;
 use codex_app_server_protocol::ThreadItem;
@@ -233,7 +235,27 @@ pub(crate) async fn apply_bespoke_event_handling(
                     .await;
             }
         }
-        EventMsg::Warning(_) | EventMsg::SkillUsed(_) => {}
+        EventMsg::Warning(_) => {}
+        EventMsg::SkillUsed(event) => {
+            if let ApiVersion::V2 = api_version {
+                let notification = SkillUsedNotification {
+                    thread_id: conversation_id.to_string(),
+                    turn_id: event_turn_id.clone(),
+                    name: event.name,
+                    invocation_type: match event.invocation_type {
+                        codex_protocol::protocol::SkillInvocationType::Explicit => {
+                            V2SkillInvocationType::Explicit
+                        }
+                        codex_protocol::protocol::SkillInvocationType::Implicit => {
+                            V2SkillInvocationType::Implicit
+                        }
+                    },
+                };
+                outgoing
+                    .send_server_notification(ServerNotification::SkillUsed(notification))
+                    .await;
+            }
+        }
         EventMsg::ModelReroute(event) => {
             if let ApiVersion::V2 = api_version {
                 let notification = ModelReroutedNotification {
@@ -3242,6 +3264,48 @@ mod tests {
         .await;
 
         assert!(rx.try_recv().is_err(), "no messages expected");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_handle_skill_used_emits_v2_notification() -> Result<()> {
+        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let outgoing = Arc::new(OutgoingMessageSender::new(tx));
+        let outgoing = ThreadScopedOutgoingMessageSender::new(
+            outgoing,
+            vec![ConnectionId(1)],
+            ThreadId::new(),
+        );
+        let conversation_id = ThreadId::new();
+
+        handle_event(
+            conversation_id,
+            Event {
+                id: "turn-1".to_string(),
+                msg: EventMsg::SkillUsed(codex_protocol::protocol::SkillUsedEvent {
+                    name: "slides".to_string(),
+                    invocation_type: codex_protocol::protocol::SkillInvocationType::Explicit,
+                }),
+            },
+            ApiVersion::V2,
+            &outgoing,
+        )
+        .await;
+
+        let msg = recv_broadcast_message(&mut rx).await?;
+        match msg {
+            OutgoingMessage::AppServerNotification(ServerNotification::SkillUsed(notification)) => {
+                assert_eq!(notification.thread_id, conversation_id.to_string());
+                assert_eq!(notification.turn_id, "turn-1");
+                assert_eq!(notification.name, "slides");
+                assert_eq!(
+                    notification.invocation_type,
+                    V2SkillInvocationType::Explicit
+                );
+            }
+            other => bail!("unexpected message: {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "no extra messages expected");
         Ok(())
     }
 }

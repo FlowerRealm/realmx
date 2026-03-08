@@ -1969,6 +1969,31 @@
           "type": "object"
         },
         {
+          "description": "A skill was used during the current turn.",
+          "properties": {
+            "invocation_type": {
+              "$ref": "#/definitions/v2/SkillInvocationType"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "skill_used"
+              ],
+              "title": "SkillUsedEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "invocation_type",
+            "name",
+            "type"
+          ],
+          "title": "SkillUsedEventMsg",
+          "type": "object"
+        },
+        {
           "description": "Realtime conversation lifecycle start event.",
           "properties": {
             "session_id": {
@@ -6953,6 +6978,26 @@
             "params"
           ],
           "title": "Skills/changedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skill/used"
+              ],
+              "title": "Skill/usedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/SkillUsedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Skill/usedNotification",
           "type": "object"
         },
         {
@@ -13864,6 +13909,13 @@
         },
         "type": "object"
       },
+      "SkillInvocationType": {
+        "enum": [
+          "explicit",
+          "implicit"
+        ],
+        "type": "string"
+      },
       "SkillMetadata": {
         "properties": {
           "dependencies": {
@@ -13964,6 +14016,31 @@
           "type",
           "value"
         ],
+        "type": "object"
+      },
+      "SkillUsedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "invocationType": {
+            "$ref": "#/definitions/v2/SkillInvocationType"
+          },
+          "name": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationType",
+          "name",
+          "threadId",
+          "turnId"
+        ],
+        "title": "SkillUsedNotification",
         "type": "object"
       },
       "SkillsChangedNotification": {

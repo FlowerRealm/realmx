@@ -653,6 +653,31 @@
           "type": "object"
         },
         {
+          "description": "A skill was used during the current turn.",
+          "properties": {
+            "invocation_type": {
+              "$ref": "#/definitions/SkillInvocationType"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "skill_used"
+              ],
+              "title": "SkillUsedEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "invocation_type",
+            "name",
+            "type"
+          ],
+          "title": "SkillUsedEventMsg",
+          "type": "object"
+        },
+        {
           "description": "Realtime conversation lifecycle start event.",
           "properties": {
             "session_id": {
@@ -5809,6 +5834,13 @@
       },
       "type": "object"
     },
+    "SkillInvocationType": {
+      "enum": [
+        "explicit",
+        "implicit"
+      ],
+      "type": "string"
+    },
     "SkillMetadata": {
       "properties": {
         "dependencies": {
@@ -6463,6 +6495,31 @@
         "type"
       ],
       "title": "WarningEventMsg",
+      "type": "object"
+    },
+    {
+      "description": "A skill was used during the current turn.",
+      "properties": {
+        "invocation_type": {
+          "$ref": "#/definitions/SkillInvocationType"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "skill_used"
+          ],
+          "title": "SkillUsedEventMsgType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocation_type",
+        "name",
+        "type"
+      ],
+      "title": "SkillUsedEventMsg",
       "type": "object"
     },
     {

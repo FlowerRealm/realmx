@@ -1543,6 +1543,36 @@
         }
       ]
     },
+    "SkillInvocationType": {
+      "enum": [
+        "explicit",
+        "implicit"
+      ],
+      "type": "string"
+    },
+    "SkillUsedNotification": {
+      "properties": {
+        "invocationType": {
+          "$ref": "#/definitions/SkillInvocationType"
+        },
+        "name": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocationType",
+        "name",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "SkillsChangedNotification": {
       "description": "Notification emitted when watched local skill files change.\n\nTreat this as an invalidation signal and re-run `skills/list` with the client's current parameters when refreshed skill metadata is needed.",
       "type": "object"
@@ -3316,6 +3346,26 @@
         "params"
       ],
       "title": "Skills/changedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "skill/used"
+          ],
+          "title": "Skill/usedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SkillUsedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Skill/usedNotification",
       "type": "object"
     },
     {
