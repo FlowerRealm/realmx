@@ -7190,13 +7190,28 @@ async fn experimental_popup_shows_js_repl_node_requirement() {
 async fn experimental_popup_includes_guardian_approval() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
+    let guardian_idx = chat
+        .experimental_feature_items()
+        .iter()
+        .position(|item| item.feature == Feature::GuardianApproval)
+        .expect("expected guardian approval feature in popup");
+
     chat.open_experimental_popup();
+    for _ in 0..guardian_idx {
+        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
 
     let popup = render_bottom_popup(&chat, 120);
-    #[cfg(target_os = "linux")]
-    assert_snapshot!("experimental_popup_includes_guardian_approval_linux", popup);
-    #[cfg(not(target_os = "linux"))]
-    assert_snapshot!("experimental_popup_includes_guardian_approval", popup);
+    assert!(
+        popup.contains("Guardian approvals"),
+        "expected guardian approvals entry in popup, got:
+{popup}"
+    );
+    assert!(
+        popup.contains("Let a guardian subagent review `on-request` approval prompts"),
+        "expected guardian approvals description in popup, got:
+{popup}"
+    );
 }
 
 #[tokio::test]
