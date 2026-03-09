@@ -1261,6 +1261,7 @@ fn format_mcp_invocation(invocation: &McpInvocation) -> String {
 mod tests {
     use super::format_skill_invocation_type;
     use super::should_print_final_message_to_stdout;
+    use codex_protocol::protocol::SkillInvocationType;
     use pretty_assertions::assert_eq;
 
     #[test]

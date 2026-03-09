@@ -1,6 +1,6 @@
 {
   "name": "@flowerrealm/realmx-responses-api-proxy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "Apache-2.0",
   "bin": {
     "codex-responses-api-proxy": "bin/codex-responses-api-proxy.js"

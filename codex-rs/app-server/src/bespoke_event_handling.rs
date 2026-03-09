@@ -237,24 +237,14 @@ pub(crate) async fn apply_bespoke_event_handling(
         }
         EventMsg::Warning(_) => {}
         EventMsg::SkillUsed(event) => {
-            if let ApiVersion::V2 = api_version {
-                let notification = SkillUsedNotification {
-                    thread_id: conversation_id.to_string(),
-                    turn_id: event_turn_id.clone(),
-                    name: event.name,
-                    invocation_type: match event.invocation_type {
-                        codex_protocol::protocol::SkillInvocationType::Explicit => {
-                            V2SkillInvocationType::Explicit
-                        }
-                        codex_protocol::protocol::SkillInvocationType::Implicit => {
-                            V2SkillInvocationType::Implicit
-                        }
-                    },
-                };
-                outgoing
-                    .send_server_notification(ServerNotification::SkillUsed(notification))
-                    .await;
-            }
+            handle_skill_used(
+                conversation_id,
+                event_turn_id,
+                event,
+                api_version,
+                &outgoing,
+            )
+            .await;
         }
         EventMsg::ModelReroute(event) => {
             if let ApiVersion::V2 = api_version {
@@ -1896,6 +1886,33 @@ async fn handle_error(
     state.turn_summary.last_error = Some(error);
 }
 
+async fn handle_skill_used(
+    conversation_id: ThreadId,
+    event_turn_id: String,
+    event: codex_protocol::protocol::SkillUsedEvent,
+    api_version: ApiVersion,
+    outgoing: &ThreadScopedOutgoingMessageSender,
+) {
+    if let ApiVersion::V2 = api_version {
+        let notification = SkillUsedNotification {
+            thread_id: conversation_id.to_string(),
+            turn_id: event_turn_id,
+            name: event.name,
+            invocation_type: match event.invocation_type {
+                codex_protocol::protocol::SkillInvocationType::Explicit => {
+                    V2SkillInvocationType::Explicit
+                }
+                codex_protocol::protocol::SkillInvocationType::Implicit => {
+                    V2SkillInvocationType::Implicit
+                }
+            },
+        };
+        outgoing
+            .send_server_notification(ServerNotification::SkillUsed(notification))
+            .await;
+    }
+}
+
 async fn on_patch_approval_response(
     call_id: String,
     receiver: oneshot::Receiver<ClientRequestResult>,
@@ -3278,14 +3295,12 @@ mod tests {
         );
         let conversation_id = ThreadId::new();
 
-        handle_event(
+        handle_skill_used(
             conversation_id,
-            Event {
-                id: "turn-1".to_string(),
-                msg: EventMsg::SkillUsed(codex_protocol::protocol::SkillUsedEvent {
-                    name: "slides".to_string(),
-                    invocation_type: codex_protocol::protocol::SkillInvocationType::Explicit,
-                }),
+            "turn-1".to_string(),
+            codex_protocol::protocol::SkillUsedEvent {
+                name: "slides".to_string(),
+                invocation_type: codex_protocol::protocol::SkillInvocationType::Explicit,
             },
             ApiVersion::V2,
             &outgoing,
