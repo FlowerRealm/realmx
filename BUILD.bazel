@@ -28,13 +28,4 @@ alias(
     actual = "@rbe_platform",
 )
 
-alias(
-    name = "coreaudio_clang_builtin_headers_include_directory",
-    actual = select({
-        "@rules_rs//rs/experimental/platforms/config:aarch64-apple-darwin": "@llvm//toolchain:macos_aarch64/clang_builtin_headers_include_directory",
-        "@rules_rs//rs/experimental/platforms/config:x86_64-apple-darwin": "@llvm//toolchain:macos_x86_64/clang_builtin_headers_include_directory",
-        "//conditions:default": "@llvm//:builtin_headers",
-    }),
-)
-
 exports_files(["AGENTS.md"])

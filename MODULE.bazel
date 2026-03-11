@@ -147,16 +147,26 @@ crate.annotation(
     # Provide the hermetic SDK path so the build script doesn't try to invoke an unhermetic `xcrun --show-sdk-path`.
     build_script_data = [
         "@macos_sdk//sysroot",
-        "@@//:coreaudio_clang_builtin_headers_include_directory",
     ],
     build_script_env = {
         "COREAUDIO_SDK_PATH": "$(location @macos_sdk//sysroot)",
-        "BINDGEN_EXTRA_CLANG_ARGS": "-isystem $(execpath @@//:coreaudio_clang_builtin_headers_include_directory)",
         "LIBCLANG_PATH": "$(location @llvm-project//clang:libclang_interface_output)",
+    },
+    build_script_env_select = {
+        "aarch64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-isystem $(execpath @llvm//toolchain:macos_aarch64/clang_builtin_headers_include_directory)\"}",
+        "x86_64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-isystem $(execpath @llvm//toolchain:macos_x86_64/clang_builtin_headers_include_directory)\"}",
     },
     build_script_tools = [
         "@llvm-project//clang:libclang_interface_output",
     ],
+    build_script_tools_select = {
+        "aarch64-apple-darwin": [
+            "@llvm//toolchain:macos_aarch64/clang_builtin_headers_include_directory",
+        ],
+        "x86_64-apple-darwin": [
+            "@llvm//toolchain:macos_x86_64/clang_builtin_headers_include_directory",
+        ],
+    },
     crate = "coreaudio-sys",
     gen_build_script = "on",
     patch_args = ["-p1"],
