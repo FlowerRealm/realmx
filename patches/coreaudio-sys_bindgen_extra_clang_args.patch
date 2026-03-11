@@ -1,0 +1,21 @@
+diff --git a/build.rs b/build.rs
+index 71e1cbe..5dcb3c7 100644
+--- a/build.rs
++++ b/build.rs
+@@ -120,6 +120,15 @@ fn build(sdk_path: Option<&str>, target: &str) {
+     if let Some(sdk_path) = sdk_path {
+         builder = builder.clang_args(&["-isysroot", sdk_path]);
+     }
++
++    if let Ok(extra_clang_args) = env::var("BINDGEN_EXTRA_CLANG_ARGS") {
++        let args: Vec<_> = extra_clang_args
++            .split_ascii_whitespace()
++            .filter(|arg| !arg.is_empty())
++            .collect();
++        if !args.is_empty() {
++            builder = builder.clang_args(&args);
++        }
++    }
+     if target.contains("apple-ios") {
+         // time.h as has a variable called timezone that conflicts with some of the objective-c
+         // calls from NSCalendar.h in the Foundation framework. This removes that one variable.

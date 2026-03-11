@@ -159,6 +159,10 @@ crate.annotation(
     ],
     crate = "coreaudio-sys",
     gen_build_script = "on",
+    patch_args = ["-p1"],
+    patches = [
+        "//patches:coreaudio-sys_bindgen_extra_clang_args.patch",
+    ],
 )
 
 inject_repo(crate, "llvm", "llvm-project", "macos_sdk")
