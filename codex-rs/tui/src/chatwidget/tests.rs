@@ -7583,8 +7583,16 @@ async fn experimental_popup_includes_guardian_approval() {
     let guardian_description = guardian_stage
         .experimental_menu_description()
         .expect("expected guardian approval experimental description");
+    let guardian_idx = chat
+        .experimental_feature_items()
+        .iter()
+        .position(|item| item.feature == Feature::GuardianApproval)
+        .expect("expected guardian approval feature in experimental popup items");
 
     chat.open_experimental_popup();
+    for _ in 0..guardian_idx {
+        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
 
     let popup = render_bottom_popup(&chat, 120);
     let normalized_popup = popup.split_whitespace().collect::<Vec<_>>().join(" ");
