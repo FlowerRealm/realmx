@@ -5,6 +5,8 @@
 //! booleans through multiple types, call sites consult a single `Features`
 //! container attached to `Config`.
 
+use crate::auth::AuthManager;
+use crate::auth::CodexAuth;
 use crate::config::Config;
 use crate::config::ConfigToml;
 use crate::config::profile::ConfigProfile;
@@ -83,6 +85,8 @@ pub enum Feature {
     // Experimental
     /// Enable JavaScript REPL tools backed by a persistent Node kernel.
     JsRepl,
+    /// Enable a minimal JavaScript mode backed by Node's built-in vm runtime.
+    CodeMode,
     /// Only expose js_repl tools directly to the model.
     JsReplToolsOnly,
     /// Use the single unified PTY-backed exec tool.
@@ -93,6 +97,10 @@ pub enum Feature {
     ApplyPatchFreeform,
     /// Allow requesting additional filesystem permissions while staying sandboxed.
     RequestPermissions,
+    /// Enable Claude-style lifecycle hooks loaded from hooks.json files.
+    CodexHooks,
+    /// Expose the built-in request_permissions tool.
+    RequestPermissionsTool,
     /// Allow the model to request web searches that fetch live content.
     WebSearchRequest,
     /// Allow the model to request web searches that fetch cached content.
@@ -100,8 +108,9 @@ pub enum Feature {
     WebSearchCached,
     /// Legacy search-tool feature flag kept for backward compatibility.
     SearchTool,
-    /// Use the bubblewrap-based Linux sandbox pipeline.
-    UseLinuxSandboxBwrap,
+    /// Use the legacy Landlock Linux sandbox fallback instead of the default
+    /// bubblewrap pipeline.
+    UseLegacyLandlock,
     /// Allow the model to request approval and propose exec rules.
     RequestRule,
     /// Enable Windows sandbox (restricted token) on Windows.
@@ -122,7 +131,7 @@ pub enum Feature {
     MemoryTool,
     /// Append additional AGENTS.md guidance to user instructions.
     ChildAgentsMd,
-    /// Allow `detail: "original"` image outputs on supported models.
+    /// Allow the model to request `detail: "original"` image outputs on supported models.
     ImageDetailOriginal,
     /// Enforce UTF8 output in Powershell.
     PowershellUtf8,
@@ -130,8 +139,12 @@ pub enum Feature {
     EnableRequestCompression,
     /// Enable collab tools.
     Collab,
+    /// Enable CSV-backed agent job tools.
+    SpawnCsv,
     /// Enable apps.
     Apps,
+    /// Enable discoverable tool suggestions for apps.
+    ToolSuggest,
     /// Enable plugins.
     Plugins,
     /// Allow the model to invoke the built-in image generation tool.
@@ -147,7 +160,7 @@ pub enum Feature {
     Steer,
     /// Allow request_user_input in Default collaboration mode.
     DefaultModeRequestUserInput,
-    /// Enable guardian subagent approvals.
+    /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
     /// Kept for config backward compatibility; behavior is always collaboration-modes-enabled.
@@ -249,6 +262,31 @@ impl Features {
 
     pub fn enabled(&self, f: Feature) -> bool {
         self.enabled.contains(&f)
+    }
+
+    pub async fn apps_enabled(&self, auth_manager: Option<&AuthManager>) -> bool {
+        if !self.enabled(Feature::Apps) {
+            return false;
+        }
+
+        let auth = match auth_manager {
+            Some(auth_manager) => auth_manager.auth().await,
+            None => None,
+        };
+        self.apps_enabled_for_auth(auth.as_ref())
+    }
+
+    pub fn apps_enabled_cached(&self, auth_manager: Option<&AuthManager>) -> bool {
+        let auth = auth_manager.and_then(AuthManager::auth_cached);
+        self.apps_enabled_for_auth(auth.as_ref())
+    }
+
+    pub(crate) fn apps_enabled_for_auth(&self, auth: Option<&CodexAuth>) -> bool {
+        self.enabled(Feature::Apps) && auth.is_some_and(CodexAuth::is_chatgpt_auth)
+    }
+
+    pub fn use_legacy_landlock(&self) -> bool {
+        self.enabled(Feature::UseLegacyLandlock)
     }
 
     pub fn enable(&mut self, f: Feature) -> &mut Self {
@@ -385,6 +423,9 @@ impl Features {
     }
 
     pub(crate) fn normalize_dependencies(&mut self) {
+        if self.enabled(Feature::SpawnCsv) && !self.enabled(Feature::Collab) {
+            self.enable(Feature::Collab);
+        }
         if self.enabled(Feature::JsReplToolsOnly) && !self.enabled(Feature::JsRepl) {
             tracing::warn!("js_repl_tools_only requires js_repl; disabling js_repl_tools_only");
             self.disable(Feature::JsReplToolsOnly);
@@ -509,6 +550,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::CodeMode,
+        key: "code_mode",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::JsReplToolsOnly,
         key: "js_repl_tools_only",
         stage: Stage::UnderDevelopment,
@@ -582,16 +629,21 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::UseLinuxSandboxBwrap,
-        key: "use_linux_sandbox_bwrap",
-        #[cfg(target_os = "linux")]
-        stage: Stage::Experimental {
-            name: "Bubblewrap sandbox",
-            menu_description: "Try the new linux sandbox based on bubblewrap.",
-            announcement: "NEW: Linux bubblewrap sandbox offers stronger filesystem and network controls than Landlock alone, including keeping .git and .codex read-only inside writable workspaces. Enable it in /experimental and restart Codex to try it.",
-        },
-        #[cfg(not(target_os = "linux"))]
+        id: Feature::CodexHooks,
+        key: "codex_hooks",
         stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::RequestPermissionsTool,
+        key: "request_permissions_tool",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::UseLegacyLandlock,
+        key: "use_legacy_landlock",
+        stage: Stage::Stable,
         default_enabled: false,
     },
     FeatureSpec {
@@ -647,6 +699,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::SpawnCsv,
+        key: "spawn_csv",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::Apps,
         key: "apps",
         stage: Stage::Experimental {
@@ -654,6 +712,12 @@ pub const FEATURES: &[FeatureSpec] = &[
             menu_description: "Use a connected ChatGPT App using \"$\". Install Apps via /apps command. Restart Codex after enabling.",
             announcement: "NEW: Use ChatGPT Apps (Connectors) in Codex via $ mentions. Enable in /experimental and restart Codex!",
         },
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ToolSuggest,
+        key: "tool_suggest",
+        stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
     FeatureSpec {
@@ -702,8 +766,8 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::GuardianApproval,
         key: "guardian_approval",
         stage: Stage::Experimental {
-            name: "Guardian approvals",
-            menu_description: "Let a guardian subagent review `on-request` approval prompts instead of showing them to you, including sandbox escapes and blocked network access.",
+            name: "Automatic approval review",
+            menu_description: "Dispatch `on-request` approval prompts (for e.g. sandbox escapes or blocked network access) to a carefully-prompted security reviewer subagent rather than blocking the agent on your input.",
             announcement: "",
         },
         default_enabled: false,
@@ -866,24 +930,10 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn use_linux_sandbox_bwrap_is_experimental_on_linux() {
-        assert!(matches!(
-            Feature::UseLinuxSandboxBwrap.stage(),
-            Stage::Experimental { .. }
-        ));
-        assert_eq!(Feature::UseLinuxSandboxBwrap.default_enabled(), false);
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn use_linux_sandbox_bwrap_is_under_development_off_linux() {
-        assert_eq!(
-            Feature::UseLinuxSandboxBwrap.stage(),
-            Stage::UnderDevelopment
-        );
-        assert_eq!(Feature::UseLinuxSandboxBwrap.default_enabled(), false);
+    fn use_legacy_landlock_is_stable_and_disabled_by_default() {
+        assert_eq!(Feature::UseLegacyLandlock.stage(), Stage::Stable);
+        assert_eq!(Feature::UseLegacyLandlock.default_enabled(), false);
     }
 
     #[test]
@@ -909,15 +959,39 @@ mod tests {
         let stage = spec.stage;
 
         assert!(matches!(stage, Stage::Experimental { .. }));
-        assert_eq!(stage.experimental_menu_name(), Some("Guardian approvals"));
+        assert_eq!(
+            stage.experimental_menu_name(),
+            Some("Automatic approval review")
+        );
         assert_eq!(
             stage.experimental_menu_description().map(str::to_owned),
             Some(
-                "Let a guardian subagent review `on-request` approval prompts instead of showing them to you, including sandbox escapes and blocked network access.".to_string()
+                "Dispatch `on-request` approval prompts (for e.g. sandbox escapes or blocked network access) to a carefully-prompted security reviewer subagent rather than blocking the agent on your input.".to_string()
             )
         );
         assert_eq!(stage.experimental_announcement(), None);
         assert_eq!(Feature::GuardianApproval.default_enabled(), false);
+    }
+
+    #[test]
+    fn request_permissions_is_under_development() {
+        assert_eq!(Feature::RequestPermissions.stage(), Stage::UnderDevelopment);
+        assert_eq!(Feature::RequestPermissions.default_enabled(), false);
+    }
+
+    #[test]
+    fn request_permissions_tool_is_under_development() {
+        assert_eq!(
+            Feature::RequestPermissionsTool.stage(),
+            Stage::UnderDevelopment
+        );
+        assert_eq!(Feature::RequestPermissionsTool.default_enabled(), false);
+    }
+
+    #[test]
+    fn tool_suggest_is_under_development() {
+        assert_eq!(Feature::ToolSuggest.stage(), Stage::UnderDevelopment);
+        assert_eq!(Feature::ToolSuggest.default_enabled(), false);
     }
 
     #[test]
@@ -927,8 +1001,53 @@ mod tests {
     }
 
     #[test]
+    fn image_detail_original_feature_is_under_development() {
+        assert_eq!(
+            Feature::ImageDetailOriginal.stage(),
+            Stage::UnderDevelopment
+        );
+        assert_eq!(Feature::ImageDetailOriginal.default_enabled(), false);
+    }
+
+    #[test]
     fn collab_is_legacy_alias_for_multi_agent() {
         assert_eq!(feature_for_key("multi_agent"), Some(Feature::Collab));
         assert_eq!(feature_for_key("collab"), Some(Feature::Collab));
+    }
+
+    #[test]
+    fn spawn_csv_is_under_development() {
+        assert_eq!(Feature::SpawnCsv.stage(), Stage::UnderDevelopment);
+        assert_eq!(Feature::SpawnCsv.default_enabled(), false);
+    }
+
+    #[test]
+    fn spawn_csv_normalization_enables_multi_agent_one_way() {
+        let mut spawn_csv_features = Features::with_defaults();
+        spawn_csv_features.enable(Feature::SpawnCsv);
+        spawn_csv_features.normalize_dependencies();
+        assert_eq!(spawn_csv_features.enabled(Feature::SpawnCsv), true);
+        assert_eq!(spawn_csv_features.enabled(Feature::Collab), true);
+
+        let mut collab_features = Features::with_defaults();
+        collab_features.enable(Feature::Collab);
+        collab_features.normalize_dependencies();
+        assert_eq!(collab_features.enabled(Feature::Collab), true);
+        assert_eq!(collab_features.enabled(Feature::SpawnCsv), false);
+    }
+
+    #[test]
+    fn apps_require_feature_flag_and_chatgpt_auth() {
+        let mut features = Features::with_defaults();
+        assert!(!features.apps_enabled_for_auth(None));
+
+        features.enable(Feature::Apps);
+        assert!(!features.apps_enabled_for_auth(None));
+
+        let api_key_auth = CodexAuth::from_api_key("test-api-key");
+        assert!(!features.apps_enabled_for_auth(Some(&api_key_auth)));
+
+        let chatgpt_auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+        assert!(features.apps_enabled_for_auth(Some(&chatgpt_auth)));
     }
 }
