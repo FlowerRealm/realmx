@@ -153,8 +153,8 @@ crate.annotation(
         "LIBCLANG_PATH": "$(location @llvm-project//clang:libclang_interface_output)",
     },
     build_script_env_select = {
-        "aarch64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-isystem $(execpath @llvm//toolchain:macos_aarch64/clang_builtin_headers_include_directory)\"}",
-        "x86_64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-isystem $(execpath @llvm//toolchain:macos_x86_64/clang_builtin_headers_include_directory)\"}",
+        "aarch64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-resource-dir $(execpath @llvm//toolchain:macos_aarch64/clang_builtin_headers_include_directory)/..\"}",
+        "x86_64-apple-darwin": "{\"BINDGEN_EXTRA_CLANG_ARGS\":\"-resource-dir $(execpath @llvm//toolchain:macos_x86_64/clang_builtin_headers_include_directory)/..\"}",
     },
     build_script_tools = [
         "@llvm-project//clang:libclang_interface_output",
