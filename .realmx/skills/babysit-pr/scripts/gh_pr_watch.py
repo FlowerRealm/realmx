@@ -212,7 +212,7 @@ def parse_pr_spec(pr_spec):
 
 def pr_view_fields():
     return (
-        "number,url,state,mergedAt,closedAt,headRefName,headRefOid,"
+        "number,url,state,mergedAt,closedAt,author,headRefName,headRefOid,"
         "baseRepository,baseRepositoryOwner,headRepository,headRepositoryOwner,"
         "mergeable,mergeStateStatus,reviewDecision"
     )
@@ -249,6 +249,9 @@ def resolve_pr(pr_spec, repo_override=None):
         "number": int(data["number"]),
         "url": pr_url,
         "repo": repo,
+        "author": str((data.get("author") or {}).get("login") or "")
+        if isinstance(data.get("author"), dict)
+        else "",
         "head_sha": str(data.get("headRefOid") or ""),
         "head_branch": str(data.get("headRefName") or ""),
         "state": state,
@@ -566,12 +569,12 @@ def is_trusted_human_review_author(item, authenticated_login):
     return association in TRUSTED_AUTHOR_ASSOCIATIONS
 
 
-def is_pending_review_author(item, authenticated_login):
+def is_pending_review_author(item, authenticated_login, pr_author_login=None):
     author = str(item.get("author") or "")
     if not author:
         return False
     if authenticated_login and author == authenticated_login:
-        return False
+        return authenticated_login != pr_author_login
     if is_bot_login(author):
         return is_actionable_review_bot_login(author)
     association = str(item.get("author_association") or "").upper()
@@ -691,7 +694,11 @@ def fetch_review_thread_comments(thread):
     }
 
 
-def extract_unresolved_review_comments(review_threads, authenticated_login=None):
+def extract_unresolved_review_comments(
+    review_threads,
+    authenticated_login=None,
+    pr_author_login=None,
+):
     pending = []
     for thread in review_threads:
         if not isinstance(thread, dict) or thread.get("isResolved"):
@@ -704,7 +711,7 @@ def extract_unresolved_review_comments(review_threads, authenticated_login=None)
             if not isinstance(node, dict):
                 continue
             item = normalize_review_thread_comment(node, thread_id)
-            if not is_pending_review_author(item, authenticated_login):
+            if not is_pending_review_author(item, authenticated_login, pr_author_login):
                 continue
             reviewer_comments.append(item)
         reviewer_comments.sort(
@@ -727,7 +734,11 @@ def fetch_pending_review_comments(pr, authenticated_login=None):
         for thread in fetch_review_threads(pr)
         if str(thread.get("id") or "") and not thread.get("isResolved")
     ]
-    return extract_unresolved_review_comments(review_threads, authenticated_login)
+    return extract_unresolved_review_comments(
+        review_threads,
+        authenticated_login,
+        pr.get("author"),
+    )
 
 
 def fetch_new_review_items(pr, state, fresh_state, authenticated_login=None):
@@ -912,10 +923,20 @@ def collect_snapshot(args):
         fresh_state=fresh_state,
         authenticated_login=authenticated_login,
     )
-    pending_review_comments = fetch_pending_review_comments(
-        pr,
-        authenticated_login=authenticated_login,
-    )
+    snapshot_warnings = []
+    try:
+        pending_review_comments = fetch_pending_review_comments(
+            pr,
+            authenticated_login=authenticated_login,
+        )
+    except GhCommandError as err:
+        pending_review_comments = []
+        snapshot_warnings.append(
+            {
+                "kind": "pending_review_comments_unavailable",
+                "message": str(err),
+            }
+        )
     blocking_review_items = combine_review_blocking_items(
         new_review_items,
         pending_review_comments,
@@ -950,6 +971,8 @@ def collect_snapshot(args):
             "max_flaky_retries": args.max_flaky_retries,
         },
     }
+    if snapshot_warnings:
+        snapshot["warnings"] = snapshot_warnings
     return snapshot, state_path
 
 

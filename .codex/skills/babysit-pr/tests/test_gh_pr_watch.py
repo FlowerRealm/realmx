@@ -129,6 +129,7 @@ class GhPrWatchTests(unittest.TestCase):
         pending = gh_pr_watch.extract_unresolved_review_comments(
             review_threads,
             authenticated_login="FlowerRealm",
+            pr_author_login="FlowerRealm",
         )
 
         self.assertEqual(
@@ -158,6 +159,52 @@ class GhPrWatchTests(unittest.TestCase):
                     "line": 561,
                     "url": "https://example.com/review-comment-13",
                 },
+            ],
+        )
+
+    def test_extract_unresolved_review_comments_keeps_operator_feedback_when_not_pr_author(self):
+        review_threads = [
+            {
+                "id": "THREAD_1",
+                "isResolved": False,
+                "comments": {
+                    "nodes": [
+                        {
+                            "databaseId": 11,
+                            "author": {"login": "reviewer-member"},
+                            "authorAssociation": "MEMBER",
+                            "body": "Please keep my unresolved feedback visible.",
+                            "createdAt": "2026-03-14T12:00:00Z",
+                            "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
+                            "line": 573,
+                            "url": "https://example.com/review-comment-11",
+                        }
+                    ]
+                },
+            }
+        ]
+
+        pending = gh_pr_watch.extract_unresolved_review_comments(
+            review_threads,
+            authenticated_login="reviewer-member",
+            pr_author_login="FlowerRealm",
+        )
+
+        self.assertEqual(
+            pending,
+            [
+                {
+                    "kind": "review_comment",
+                    "id": "11",
+                    "thread_id": "THREAD_1",
+                    "author": "reviewer-member",
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-14T12:00:00Z",
+                    "body": "Please keep my unresolved feedback visible.",
+                    "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
+                    "line": 573,
+                    "url": "https://example.com/review-comment-11",
+                }
             ],
         )
 
@@ -459,6 +506,86 @@ class GhPrWatchTests(unittest.TestCase):
                     "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
                     "line": 691,
                     "url": "https://example.com/review-comment-11",
+                }
+            ],
+        )
+
+    def test_collect_snapshot_falls_back_when_pending_review_comments_fail(self):
+        pr = {
+            "repo": "FlowerRealm/realmx",
+            "number": 12,
+            "author": "FlowerRealm",
+            "head_sha": "abc123",
+            "head_branch": "feat/use-realmx-config-dir",
+            "state": "OPEN",
+            "merged": False,
+            "closed": False,
+            "mergeable": "MERGEABLE",
+            "merge_state_status": "CLEAN",
+            "review_decision": "",
+        }
+        args = SimpleNamespace(
+            pr="auto",
+            repo=None,
+            state_file="/tmp/test-gh-pr-watch-state.json",
+            max_flaky_retries=3,
+        )
+        state = {
+            "seen_issue_comment_ids": [],
+            "seen_review_comment_ids": [],
+            "seen_review_ids": [],
+            "retries_by_sha": {},
+        }
+        new_review_items = [
+            {
+                "kind": "review_comment",
+                "id": "11",
+                "thread_id": "",
+            }
+        ]
+
+        with (
+            mock.patch.object(gh_pr_watch, "resolve_pr", return_value=pr),
+            mock.patch.object(
+                gh_pr_watch,
+                "load_state",
+                return_value=(state, True),
+            ),
+            mock.patch.object(gh_pr_watch, "save_state"),
+            mock.patch.object(gh_pr_watch, "get_pr_checks", return_value=[]),
+            mock.patch.object(
+                gh_pr_watch,
+                "get_workflow_runs_for_sha",
+                return_value=[],
+            ),
+            mock.patch.object(
+                gh_pr_watch,
+                "get_authenticated_login",
+                return_value="FlowerRealm",
+            ),
+            mock.patch.object(
+                gh_pr_watch,
+                "fetch_new_review_items",
+                return_value=new_review_items,
+            ),
+            mock.patch.object(
+                gh_pr_watch,
+                "fetch_pending_review_comments",
+                side_effect=gh_pr_watch.GhCommandError("GraphQL failed"),
+            ),
+            mock.patch.object(gh_pr_watch.time, "time", return_value=1234567890),
+        ):
+            snapshot, state_path = gh_pr_watch.collect_snapshot(args)
+
+        self.assertEqual(state_path, Path("/tmp/test-gh-pr-watch-state.json"))
+        self.assertEqual(snapshot["pending_review_comments"], [])
+        self.assertEqual(snapshot["blocking_review_items"], new_review_items)
+        self.assertEqual(
+            snapshot["warnings"],
+            [
+                {
+                    "kind": "pending_review_comments_unavailable",
+                    "message": "GraphQL failed",
                 }
             ],
         )
