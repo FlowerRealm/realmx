@@ -756,10 +756,7 @@ def recommend_actions(
 ):
     actions = []
     if pr["closed"] or pr["merged"]:
-        if blocking_review_items:
-            actions.append("process_review_comment")
-        actions.append("stop_pr_closed")
-        return unique_actions(actions)
+        return ["stop_pr_closed"]
 
     if is_pr_ready_to_merge(pr, checks_summary, blocking_review_items):
         actions.append("stop_ready_to_merge")

@@ -161,6 +161,45 @@ class GhPrWatchTests(unittest.TestCase):
             ["process_review_comment"],
         )
 
+    def test_closed_pr_stops_without_review_processing_actions(self):
+        pr = {
+            "closed": True,
+            "merged": False,
+            "mergeable": "UNKNOWN",
+            "merge_state_status": "UNKNOWN",
+            "review_decision": "CHANGES_REQUESTED",
+        }
+        checks_summary = {
+            "all_terminal": True,
+            "failed_count": 0,
+            "pending_count": 0,
+        }
+
+        self.assertEqual(
+            gh_pr_watch.recommend_actions(
+                pr,
+                checks_summary,
+                [],
+                [
+                    {
+                        "kind": "review_comment",
+                        "id": "99",
+                        "thread_id": "THREAD_CLOSED",
+                    }
+                ],
+                [
+                    {
+                        "kind": "review_comment",
+                        "id": "99",
+                        "thread_id": "THREAD_CLOSED",
+                    }
+                ],
+                0,
+                3,
+            ),
+            ["stop_pr_closed"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
