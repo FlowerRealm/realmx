@@ -756,8 +756,8 @@ impl ModelClientSession {
         level = "info",
         skip_all,
         fields(
-            provider = %self.client.state.provider.name,
-            wire_api = %self.client.state.provider.wire_api,
+            provider = %self.client.provider().name,
+            wire_api = %self.client.provider().wire_api,
             transport = "responses_websocket",
             api.path = "responses",
             turn.has_metadata_header = turn_metadata_header.is_some()
@@ -826,7 +826,7 @@ impl ModelClientSession {
         skip_all,
         fields(
             model = %model_info.slug,
-            wire_api = %self.client.state.provider.wire_api,
+            wire_api = %self.client.provider().wire_api,
             transport = "responses_http",
             http.method = "POST",
             api.path = "responses",
@@ -904,7 +904,7 @@ impl ModelClientSession {
         skip_all,
         fields(
             model = %model_info.slug,
-            wire_api = %self.client.state.provider.wire_api,
+            wire_api = %self.client.provider().wire_api,
             transport = "responses_websocket",
             api.path = "responses",
             turn.has_metadata_header = turn_metadata_header.is_some(),

@@ -242,6 +242,7 @@ impl ModelProviderInfo {
         ModelProviderInfo {
             name: OPENAI_PROVIDER_NAME.into(),
             base_url,
+            api_key: None,
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
