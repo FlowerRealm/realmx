@@ -573,6 +573,8 @@ def is_pending_review_author(item, authenticated_login, pr_author_login=None):
     author = str(item.get("author") or "")
     if not author:
         return False
+    if pr_author_login and author == pr_author_login:
+        return False
     if authenticated_login and author == authenticated_login:
         return authenticated_login != pr_author_login
     if is_bot_login(author):

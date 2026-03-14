@@ -208,6 +208,36 @@ class GhPrWatchTests(unittest.TestCase):
             ],
         )
 
+    def test_extract_unresolved_review_comments_ignores_pr_author_follow_up_replies(self):
+        review_threads = [
+            {
+                "id": "THREAD_1",
+                "isResolved": False,
+                "comments": {
+                    "nodes": [
+                        {
+                            "databaseId": 11,
+                            "author": {"login": "FlowerRealm"},
+                            "authorAssociation": "OWNER",
+                            "body": "I am on it.",
+                            "createdAt": "2026-03-14T12:10:00Z",
+                            "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
+                            "line": 580,
+                            "url": "https://example.com/review-comment-11",
+                        }
+                    ]
+                },
+            }
+        ]
+
+        pending = gh_pr_watch.extract_unresolved_review_comments(
+            review_threads,
+            authenticated_login="reviewer-member",
+            pr_author_login="FlowerRealm",
+        )
+
+        self.assertEqual(pending, [])
+
     def test_ready_to_merge_waits_for_blocking_review_items(self):
         pr = {
             "closed": False,

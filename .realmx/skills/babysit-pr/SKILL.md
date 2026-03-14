@@ -87,7 +87,7 @@ The watcher surfaces review items from:
 
 It intentionally surfaces Codex reviewer bot feedback (for example comments/reviews from `chatgpt-codex-connector[bot]`) in addition to human reviewer feedback. Most unrelated bot noise should still be ignored.
 For safety, the watcher only auto-surfaces trusted human review authors (for example repo OWNER/MEMBER/COLLABORATOR, plus the authenticated operator) and approved review bots such as Codex.
-When the authenticated operator is also the PR author, the watcher's unresolved-thread view may ignore that author's own follow-up replies so "I am on it" acknowledgements do not block merge forever; non-author operators should still see their own unresolved reviewer feedback.
+The watcher's unresolved-thread view ignores the PR author's own follow-up replies so "I am on it" acknowledgements do not block merge forever; non-author operators should still see their own unresolved reviewer feedback.
 On a fresh watcher state file, existing pending review feedback may be surfaced immediately (not only comments that arrive after monitoring starts). This is intentional so already-open review comments are not missed.
 
 When you agree with a comment and it is actionable:
