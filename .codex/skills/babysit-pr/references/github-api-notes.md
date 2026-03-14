@@ -41,6 +41,12 @@ Reruns only failed jobs (and dependencies) for a workflow run.
   - `gh api repos/{owner}/{repo}/pulls/<pr_number>/comments?per_page=100`
 - Review submissions:
   - `gh api repos/{owner}/{repo}/pulls/<pr_number>/reviews?per_page=100`
+- Unresolved review threads:
+  - `gh api graphql -f query=... -F owner=<owner> -F name=<repo> -F number=<pr_number>`
+
+The watcher uses unresolved review threads to keep inline review comments
+blocking until the thread is actually resolved, instead of treating a surfaced
+comment as "handled" just because it was already seen once.
 
 ## JSON fields consumed by the watcher
 
