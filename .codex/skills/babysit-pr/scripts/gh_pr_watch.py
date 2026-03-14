@@ -54,6 +54,26 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
         nodes {
           id
           isResolved
+          comments(first: 100) {
+            nodes {
+              id
+              databaseId
+              author {
+                login
+              }
+              authorAssociation
+              body
+              createdAt
+              path
+              line
+              originalLine
+              url
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
         }
         pageInfo {
           hasNextPage
@@ -616,11 +636,25 @@ def fetch_review_threads(pr):
     return review_threads
 
 
-def fetch_review_thread_comments(thread_id):
-    after = None
-    comments = []
-    is_resolved = False
+def fetch_review_thread_comments(thread):
+    if not isinstance(thread, dict):
+        raise GhCommandError("Expected review thread payload to be an object")
+    thread_id = str(thread.get("id") or "")
+    if not thread_id:
+        raise GhCommandError("Expected review thread payload to include an id")
+
+    connection = thread.get("comments") or {}
+    nodes = connection.get("nodes") or []
+    if not isinstance(nodes, list):
+        raise GhCommandError("Expected review thread comments.nodes to be a list")
+
+    comments = list(nodes)
+    is_resolved = bool(thread.get("isResolved"))
+    page_info = connection.get("pageInfo") or {}
+    after = page_info.get("endCursor") if page_info.get("hasNextPage") else None
     while True:
+        if not after:
+            break
         args = [
             "api",
             "graphql",
@@ -628,9 +662,9 @@ def fetch_review_thread_comments(thread_id):
             f"query={REVIEW_THREAD_COMMENTS_QUERY}",
             "-F",
             f"threadId={thread_id}",
+            "-F",
+            f"after={after}",
         ]
-        if after:
-            args.extend(["-F", f"after={after}"])
         payload = gh_json(args)
         if not isinstance(payload, dict):
             raise GhCommandError("Unexpected payload from review thread comments GraphQL query")
@@ -689,9 +723,9 @@ def extract_unresolved_review_comments(review_threads, authenticated_login=None)
 
 def fetch_pending_review_comments(pr, authenticated_login=None):
     review_threads = [
-        fetch_review_thread_comments(str(thread.get("id") or ""))
+        fetch_review_thread_comments(thread)
         for thread in fetch_review_threads(pr)
-        if str(thread.get("id") or "")
+        if str(thread.get("id") or "") and not thread.get("isResolved")
     ]
     return extract_unresolved_review_comments(review_threads, authenticated_login)
 

@@ -339,30 +339,28 @@ class GhPrWatchTests(unittest.TestCase):
         self.assertEqual(events[0][1]["next_poll_seconds"], 30)
         self.assertEqual(events[1][1]["next_poll_seconds"], 60)
 
-    def test_fetch_review_thread_comments_paginates_until_exhausted(self):
+    def test_fetch_review_thread_comments_reuses_embedded_page_before_paginating(self):
+        thread = {
+            "id": "THREAD_1",
+            "isResolved": False,
+            "comments": {
+                "nodes": [
+                    {
+                        "databaseId": 11,
+                        "body": "first",
+                    }
+                ],
+                "pageInfo": {
+                    "hasNextPage": True,
+                    "endCursor": "CURSOR_1",
+                },
+            },
+        }
+
         with mock.patch.object(
             gh_pr_watch,
             "gh_json",
             side_effect=[
-                {
-                    "data": {
-                        "node": {
-                            "isResolved": False,
-                            "comments": {
-                                "nodes": [
-                                    {
-                                        "databaseId": 11,
-                                        "body": "first",
-                                    }
-                                ],
-                                "pageInfo": {
-                                    "hasNextPage": True,
-                                    "endCursor": "CURSOR_1",
-                                },
-                            },
-                        }
-                    }
-                },
                 {
                     "data": {
                         "node": {
@@ -383,14 +381,86 @@ class GhPrWatchTests(unittest.TestCase):
                     }
                 },
             ],
-        ):
-            thread = gh_pr_watch.fetch_review_thread_comments("THREAD_1")
+        ) as mocked_gh_json:
+            hydrated_thread = gh_pr_watch.fetch_review_thread_comments(thread)
 
-        self.assertEqual(thread["id"], "THREAD_1")
-        self.assertFalse(thread["isResolved"])
+        self.assertEqual(mocked_gh_json.call_count, 1)
+        self.assertEqual(hydrated_thread["id"], "THREAD_1")
+        self.assertFalse(hydrated_thread["isResolved"])
         self.assertEqual(
-            [comment["databaseId"] for comment in thread["comments"]["nodes"]],
+            [comment["databaseId"] for comment in hydrated_thread["comments"]["nodes"]],
             [11, 12],
+        )
+
+    def test_fetch_pending_review_comments_only_hydrates_unresolved_threads(self):
+        resolved_thread = {
+            "id": "THREAD_RESOLVED",
+            "isResolved": True,
+            "comments": {
+                "nodes": [],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
+                },
+            },
+        }
+        unresolved_thread = {
+            "id": "THREAD_OPEN",
+            "isResolved": False,
+            "comments": {
+                "nodes": [
+                    {
+                        "databaseId": 11,
+                        "author": {"login": "reviewer-member"},
+                        "authorAssociation": "MEMBER",
+                        "body": "Still unresolved.",
+                        "createdAt": "2026-03-14T13:20:00Z",
+                        "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
+                        "line": 691,
+                        "url": "https://example.com/review-comment-11",
+                    }
+                ],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
+                },
+            },
+        }
+
+        with (
+            mock.patch.object(
+                gh_pr_watch,
+                "fetch_review_threads",
+                return_value=[resolved_thread, unresolved_thread],
+            ),
+            mock.patch.object(
+                gh_pr_watch,
+                "fetch_review_thread_comments",
+                side_effect=lambda thread: thread,
+            ) as mocked_fetch_review_thread_comments,
+        ):
+            pending = gh_pr_watch.fetch_pending_review_comments(
+                {"repo": "FlowerRealm/realmx", "number": 12},
+                authenticated_login="FlowerRealm",
+            )
+
+        mocked_fetch_review_thread_comments.assert_called_once_with(unresolved_thread)
+        self.assertEqual(
+            pending,
+            [
+                {
+                    "kind": "review_comment",
+                    "id": "11",
+                    "thread_id": "THREAD_OPEN",
+                    "author": "reviewer-member",
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-14T13:20:00Z",
+                    "body": "Still unresolved.",
+                    "path": ".realmx/skills/babysit-pr/scripts/gh_pr_watch.py",
+                    "line": 691,
+                    "url": "https://example.com/review-comment-11",
+                }
+            ],
         )
 
 
