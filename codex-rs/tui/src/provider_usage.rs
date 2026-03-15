@@ -711,7 +711,7 @@ fn executable_extensions() -> Vec<String> {
             .split(';')
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase())
+            .map(str::to_ascii_lowercase)
             .collect()
     }
 
