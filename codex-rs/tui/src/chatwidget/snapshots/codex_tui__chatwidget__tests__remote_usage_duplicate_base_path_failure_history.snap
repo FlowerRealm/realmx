@@ -2,5 +2,4 @@
 source: tui/src/chatwidget/tests.rs
 expression: rendered
 ---
-Error: Remote usage failed for provider `test-provider`: request.url duplicates provider base path; provider `base_url` already ends with `/codex/v1`. Use `{{baseUrl}}/usage` instead.
-
+Error: Remote usage failed for provider `openai`: request.url duplicates provider base path; provider `base_url` already ends with `/codex/v1`. Use `{{baseUrl}}/usage` instead.

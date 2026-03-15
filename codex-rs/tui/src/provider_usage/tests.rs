@@ -1,7 +1,10 @@
 use super::*;
+use codex_core::config::ConfigBuilder;
+use codex_protocol::config_types::TrustLevel;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[test]
 fn request_placeholders_replace_url_headers_and_body() {
@@ -187,4 +190,31 @@ fn invalid_rows_payload_becomes_failed_refresh() {
         panic!("expected failed refresh");
     };
     assert!(message.contains("extractor returned an invalid payload"));
+}
+
+#[tokio::test]
+async fn provider_usage_enabled_prefers_current_trusted_cwd_over_stale_project_layer() {
+    let codex_home = tempfile::tempdir().expect("temp dir");
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("config");
+    let project_root = tempfile::tempdir().expect("project root");
+    let providers_dir = project_root.path().join(".codex/providers/openai");
+    std::fs::create_dir_all(&providers_dir).expect("create providers dir");
+    std::fs::write(
+        providers_dir.join("usage.js"),
+        "({ request: { url: 'https://example.test' }, extractor: () => null })",
+    )
+    .expect("write usage script");
+
+    config.cwd = project_root.path().to_path_buf();
+    config.active_project.trust_level = Some(TrustLevel::Trusted);
+
+    assert!(provider_usage_enabled(&config));
+    assert_eq!(
+        provider_usage_poll_interval(&config),
+        Some(Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS))
+    );
 }

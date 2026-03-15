@@ -432,6 +432,9 @@ fn trusted_project_root(config: &Config) -> Option<PathBuf> {
     if !config.active_project.is_trusted() {
         return None;
     }
+    let cwd = config.cwd.as_path();
+    let cwd_project_root =
+        resolve_root_git_project_for_trust(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let project_root = config
         .config_layer_stack
         .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
@@ -442,10 +445,12 @@ fn trusted_project_root(config: &Config) -> Option<PathBuf> {
             }
             _ => None,
         });
-    project_root.or_else(|| {
-        let cwd = config.cwd.as_path();
-        resolve_root_git_project_for_trust(cwd).or_else(|| Some(cwd.to_path_buf()))
-    })
+    if let Some(project_root) = project_root
+        && (cwd.starts_with(&project_root) || cwd_project_root == project_root)
+    {
+        return Some(project_root);
+    }
+    Some(cwd_project_root)
 }
 
 fn provider_usage_script_path(config: &Config, provider_id: &str) -> Result<PathBuf, String> {
