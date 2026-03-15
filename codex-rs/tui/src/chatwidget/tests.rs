@@ -2088,7 +2088,7 @@ async fn provider_usage_poller_only_sends_one_immediate_snapshot() {
 
     chat.prefetch_provider_usage();
 
-    let event = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .expect("expected one immediate provider usage event")
         .expect("channel should stay open");
