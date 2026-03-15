@@ -10,6 +10,10 @@
 
 use std::path::PathBuf;
 
+use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::StatusLineItem;
+use crate::history_cell::HistoryCell;
+use crate::provider_usage::ProviderUsageRefreshResult;
 use codex_chatgpt::connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_protocol::ThreadId;
@@ -17,11 +21,6 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
-use serde::Deserialize;
-
-use crate::bottom_pane::ApprovalRequest;
-use crate::bottom_pane::StatusLineItem;
-use crate::history_cell::HistoryCell;
 
 use codex_core::ModelProviderInfo;
 use codex_core::config::types::ApprovalsReviewer;
@@ -133,8 +132,8 @@ pub(crate) enum AppEvent {
     /// Result of refreshing rate limits
     RateLimitSnapshotFetched(RateLimitSnapshot),
 
-    /// Result of refreshing SU8 usage snapshot.
-    Su8UsageSnapshotFetched(Option<Su8UsageSnapshot>),
+    /// Result of refreshing provider usage snapshot.
+    ProviderUsageSnapshotFetched(Option<ProviderUsageRefreshResult>),
 
     /// Result of prefetching connectors.
     ConnectorsLoaded {
@@ -208,6 +207,22 @@ pub(crate) enum AppEvent {
     /// Remove a custom provider entry.
     RemoveModelProvider {
         id: String,
+    },
+
+    /// Open the provider usage script editor for a provider.
+    OpenProviderUsageScriptEditor {
+        id: String,
+    },
+
+    /// Persist a project-local provider usage script.
+    PersistProviderUsageScript {
+        provider_id: String,
+        script: String,
+    },
+
+    /// Delete a project-local provider usage script.
+    DeleteProviderUsageScript {
+        provider_id: String,
     },
 
     /// Persist the default provider selection and refresh runtime config.
@@ -502,13 +517,4 @@ pub(crate) enum FeedbackCategory {
     Bug,
     SafetyCheck,
     Other,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct Su8UsageSnapshot {
-    pub(crate) remaining: f64,
-    #[serde(rename = "todayLimit")]
-    pub(crate) today_limit: Option<f64>,
-    #[serde(rename = "todayRemaining")]
-    pub(crate) today_remaining: Option<f64>,
 }

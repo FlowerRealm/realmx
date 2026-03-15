@@ -30,6 +30,78 @@ When Realmx knows which client started the turn, the legacy notify JSON payload 
 
 The generated JSON Schema for `config.toml` lives at `codex-rs/core/config.schema.json`.
 
+## Provider Usage Scripts
+
+Realmx can poll provider-specific usage data with a project-local script instead of storing the
+request in `config.toml`.
+
+- Script path: `.codex/providers/<provider-id>/usage.js`
+- Scope: trusted projects only
+- Editor: run `/provider`, select a provider, then press `u`
+- Default content: empty file
+- Runtime: Node.js (`CODEX_JS_REPL_NODE_PATH`, `js_repl_node_path`, or `node` from `PATH`)
+
+The script should evaluate to an object expression in the `ccswitch` style, for example:
+
+```js
+({
+  request: {
+    url: "{{baseUrl}}/usage",
+    method: "GET",
+    headers: {
+      Authorization: "Bearer {{apiKey}}",
+    },
+  },
+
+  extractor: function (response) {
+    return [
+      {
+        remaining: Number(response.remaining),
+        used: Number(response.used),
+        unit: "USD",
+      },
+    ];
+  },
+})
+```
+
+Supported placeholders inside `request` string fields:
+
+- `{{baseUrl}}`
+- `{{apiKey}}`
+- `{{providerId}}`
+- `{{providerName}}`
+- `{{bearerToken}}`
+- `{{accessToken}}`
+- `{{accountId}}`
+- `{{userId}}`
+
+`{{baseUrl}}` expands to the provider `base_url` exactly as configured. If your provider already
+uses a base URL like `https://example.com/codex/v1`, append only the endpoint suffix such as
+`{{baseUrl}}/usage`; do not repeat `/codex/v1` in `request.url`.
+
+Request rules:
+
+- `request.url` is required
+- `request.method` is optional and defaults to `GET`
+- `request.headers`, `request.body`, `request.bodyText`, and `request.bodyJson` are optional
+- `request.bodyText` and `request.bodyJson` are mutually exclusive
+
+`extractor(response)` receives the parsed JSON response body when the response is valid JSON.
+Otherwise it receives the raw response text string.
+
+Supported `extractor()` return values:
+
+- A `ccswitch`-style rows array with fields such as `planName`, `remaining`, `used`, `total`, `unit`, `isValid`, and `extra`
+- `null` to skip this poll cycle
+- An error object such as `{ isValid: false, invalidMessage, invalidCode }`
+
+Status line setup:
+
+- The only provider-usage status item is `remote-usage`
+- Older ids such as `provider-usage-remaining` or `su8-remaining` are normalized to `remote-usage` when read
+- When remote usage refresh fails, Realmx records the error in the transcript, shows it in `/status`, and stops polling until configuration changes restart it
+
 ## SQLite State DB
 
 Realmx stores the SQLite-backed state DB under `sqlite_home` (config key) or the

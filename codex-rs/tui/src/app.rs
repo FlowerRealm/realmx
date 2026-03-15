@@ -2734,8 +2734,8 @@ impl App {
             AppEvent::RateLimitSnapshotFetched(snapshot) => {
                 self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
             }
-            AppEvent::Su8UsageSnapshotFetched(snapshot) => {
-                self.chat_widget.on_su8_usage_snapshot(snapshot);
+            AppEvent::ProviderUsageSnapshotFetched(snapshot) => {
+                self.chat_widget.on_provider_usage_snapshot(snapshot);
             }
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
@@ -2767,6 +2767,9 @@ impl App {
             }
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
+            }
+            AppEvent::OpenProviderUsageScriptEditor { id } => {
+                self.chat_widget.open_provider_usage_script_editor(id);
             }
             AppEvent::OpenFullAccessConfirmation {
                 preset,
@@ -3162,6 +3165,68 @@ impl App {
                         tracing::error!(error = %err, "failed to remove model provider");
                         self.chat_widget
                             .add_error_message(format!("Failed to remove provider `{id}`: {err}"));
+                    }
+                }
+            }
+            AppEvent::PersistProviderUsageScript {
+                provider_id,
+                script,
+            } => match crate::provider_usage::save_provider_usage_script(
+                &self.config,
+                &provider_id,
+                script,
+            )
+            .await
+            {
+                Ok(path) => {
+                    if let Err(err) = self.refresh_config_after_provider_change().await {
+                        self.chat_widget.add_error_message(format!(
+                            "Usage script saved but failed to reload config: {err}"
+                        ));
+                    } else {
+                        self.chat_widget.add_info_message(
+                            format!(
+                                "Saved usage script for provider {provider_id} to {}",
+                                path.display()
+                            ),
+                            None,
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(error = %err, "failed to persist provider usage script");
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to save usage script for provider `{provider_id}`: {err}"
+                    ));
+                }
+            },
+            AppEvent::DeleteProviderUsageScript { provider_id } => {
+                match crate::provider_usage::delete_provider_usage_script(
+                    &self.config,
+                    &provider_id,
+                )
+                .await
+                {
+                    Ok(path) => {
+                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                            self.chat_widget.add_error_message(format!(
+                                "Usage script deleted but failed to reload config: {err}"
+                            ));
+                        } else {
+                            self.chat_widget.add_info_message(
+                                format!(
+                                    "Removed usage script override for provider {provider_id} from {}",
+                                    path.display()
+                                ),
+                                None,
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to delete provider usage script");
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to delete usage script for provider `{provider_id}`: {err}"
+                        ));
                     }
                 }
             }

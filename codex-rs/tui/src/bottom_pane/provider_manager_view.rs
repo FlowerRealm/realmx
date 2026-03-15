@@ -22,6 +22,7 @@ use ratatui::widgets::Wrap;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::provider_usage::can_edit_provider_usage_scripts;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 use crate::selection_list::selection_option_row;
@@ -172,6 +173,7 @@ pub(crate) struct ProviderManagerView {
     selected_idx: usize,
     default_provider_id: String,
     builtin_ids: HashSet<String>,
+    can_edit_usage_scripts: bool,
     complete: bool,
     error: Option<String>,
     mode: Mode,
@@ -203,6 +205,7 @@ impl ProviderManagerView {
             selected_idx,
             default_provider_id: config.model_provider_id.clone(),
             builtin_ids,
+            can_edit_usage_scripts: can_edit_provider_usage_scripts(config),
             complete: false,
             error: None,
             mode: Mode::List,
@@ -349,11 +352,25 @@ impl ProviderManagerView {
         }
     }
 
+    fn edit_usage_script(&mut self) {
+        let Some(row) = self.selected_row() else {
+            return;
+        };
+        if !self.can_edit_usage_scripts {
+            self.error =
+                Some("Usage scripts can only be edited inside a trusted project.".to_string());
+            return;
+        }
+        self.app_event_tx
+            .send(AppEvent::OpenProviderUsageScriptEditor { id: row.id.clone() });
+        self.complete = true;
+    }
+
     fn render_list(&self, area: Rect, buf: &mut Buffer) {
         let mut column = ColumnRenderable::new();
         column.push(Line::from("Manage providers".bold()));
         column.push(Line::from(
-            "Enter switches default provider. n creates. e edits custom. d deletes custom.".dim(),
+            "Enter switches default provider. n creates. e edits custom. u edits usage script. d deletes custom.".dim(),
         ));
         column.push(Line::from(
             "Editing only saves config. It does not switch the default provider.".dim(),
@@ -526,6 +543,11 @@ impl BottomPaneView for ProviderManagerView {
                     modifiers: KeyModifiers::NONE,
                     ..
                 } => self.delete_selected(),
+                KeyEvent {
+                    code: KeyCode::Char('u'),
+                    modifiers: KeyModifiers::NONE,
+                    ..
+                } => self.edit_usage_script(),
                 KeyEvent {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,

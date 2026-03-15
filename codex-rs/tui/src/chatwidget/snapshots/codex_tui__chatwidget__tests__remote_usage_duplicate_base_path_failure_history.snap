@@ -1,0 +1,5 @@
+---
+source: tui/src/chatwidget/tests.rs
+expression: rendered
+---
+■ Remote usage failed for provider `test-provider`: request.url duplicates provider base path; provider `base_url` already ends with `/codex/v1`. Use `{{baseUrl}}/usage` instead.

@@ -2,6 +2,7 @@ use crate::history_cell::CompositeHistoryCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::with_border_with_inner_width;
+use crate::provider_usage::ProviderUsageSnapshot;
 use crate::version::CODEX_CLI_VERSION;
 use chrono::DateTime;
 use chrono::Local;
@@ -74,6 +75,7 @@ struct StatusHistoryCell {
     forked_from: Option<String>,
     token_usage: StatusTokenUsageData,
     rate_limits: StatusRateLimitData,
+    provider_usage: Option<ProviderUsageSnapshot>,
 }
 
 #[cfg(test)]
@@ -103,6 +105,7 @@ pub(crate) fn new_status_output(
         thread_name,
         forked_from,
         snapshots,
+        None,
         plan_type,
         now,
         model_name,
@@ -121,6 +124,7 @@ pub(crate) fn new_status_output_with_rate_limits(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: &[RateLimitSnapshotDisplay],
+    provider_usage: Option<&ProviderUsageSnapshot>,
     plan_type: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
@@ -137,6 +141,7 @@ pub(crate) fn new_status_output_with_rate_limits(
         thread_name,
         forked_from,
         rate_limits,
+        provider_usage,
         plan_type,
         now,
         model_name,
@@ -158,6 +163,7 @@ impl StatusHistoryCell {
         thread_name: Option<String>,
         forked_from: Option<ThreadId>,
         rate_limits: &[RateLimitSnapshotDisplay],
+        provider_usage: Option<&ProviderUsageSnapshot>,
         plan_type: Option<PlanType>,
         now: DateTime<Local>,
         model_name: &str,
@@ -267,6 +273,7 @@ impl StatusHistoryCell {
             forked_from,
             token_usage,
             rate_limits,
+            provider_usage: provider_usage.cloned(),
         }
     }
 
@@ -407,6 +414,43 @@ impl StatusHistoryCell {
             StatusRateLimitData::Missing => push_label(labels, seen, "Limits"),
         }
     }
+
+    fn collect_provider_usage_labels(&self, seen: &mut BTreeSet<String>, labels: &mut Vec<String>) {
+        let Some(provider_usage) = self.provider_usage.as_ref() else {
+            return;
+        };
+
+        if provider_usage.plans.is_empty() {
+            push_label(labels, seen, "Remote usage");
+            return;
+        }
+
+        for (index, plan) in provider_usage.plans.iter().enumerate() {
+            push_label(labels, seen, &plan.status_label(index));
+        }
+    }
+
+    fn provider_usage_lines(&self, formatter: &FieldFormatter) -> Vec<Line<'static>> {
+        let Some(provider_usage) = self.provider_usage.as_ref() else {
+            return Vec::new();
+        };
+
+        if let Some(message) = provider_usage.error_message.as_ref() {
+            return vec![formatter.line("Remote usage", vec![Span::from(message.clone()).dim()])];
+        }
+
+        provider_usage
+            .plans
+            .iter()
+            .enumerate()
+            .filter_map(|(index, plan)| {
+                let label = plan.status_label(index);
+                plan.summary_text().map(|summary| {
+                    Line::from(formatter.full_spans(&label, vec![Span::from(summary)]))
+                })
+            })
+            .collect()
+    }
 }
 
 impl HistoryCell for StatusHistoryCell {
@@ -467,6 +511,7 @@ impl HistoryCell for StatusHistoryCell {
             push_label(&mut labels, &mut seen, "Context window");
         }
 
+        self.collect_provider_usage_labels(&mut seen, &mut labels);
         self.collect_rate_limit_labels(&mut seen, &mut labels);
 
         let formatter = FieldFormatter::from_labels(labels.iter().map(String::as_str));
@@ -535,6 +580,7 @@ impl HistoryCell for StatusHistoryCell {
             lines.push(formatter.line("Context window", spans));
         }
 
+        lines.extend(self.provider_usage_lines(&formatter));
         lines.extend(self.rate_limit_lines(available_inner_width, &formatter));
 
         let content_width = lines.iter().map(line_display_width).max().unwrap_or(0);
