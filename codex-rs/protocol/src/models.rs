@@ -610,12 +610,14 @@ impl DeveloperInstructions {
         DeveloperInstructions::from_permissions_with_network(
             sandbox_mode,
             network_access,
-            approval_policy,
-            guardian_approval_enabled,
-            exec_policy,
+            DeveloperInstructions::from(
+                approval_policy,
+                guardian_approval_enabled,
+                exec_policy,
+                exec_permission_approvals_enabled,
+                request_permissions_tool_enabled,
+            ),
             writable_roots,
-            exec_permission_approvals_enabled,
-            request_permissions_tool_enabled,
         )
     }
 
@@ -636,12 +638,8 @@ impl DeveloperInstructions {
     fn from_permissions_with_network(
         sandbox_mode: SandboxMode,
         network_access: NetworkAccess,
-        approval_policy: AskForApproval,
-        guardian_approval_enabled: bool,
-        exec_policy: &Policy,
+        permission_instructions: DeveloperInstructions,
         writable_roots: Option<Vec<WritableRoot>>,
-        exec_permission_approvals_enabled: bool,
-        request_permissions_tool_enabled: bool,
     ) -> Self {
         let start_tag = DeveloperInstructions::new("<permissions instructions>");
         let end_tag = DeveloperInstructions::new("</permissions instructions>");
@@ -650,13 +648,7 @@ impl DeveloperInstructions {
                 sandbox_mode,
                 network_access,
             ))
-            .concat(DeveloperInstructions::from(
-                approval_policy,
-                guardian_approval_enabled,
-                exec_policy,
-                exec_permission_approvals_enabled,
-                request_permissions_tool_enabled,
-            ))
+            .concat(permission_instructions)
             .concat(DeveloperInstructions::from_writable_roots(writable_roots))
             .concat(end_tag)
     }
@@ -1919,12 +1911,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                false,
+                &Policy::empty(),
+                false,
+                false,
+            ),
             None,
-            false,
-            false,
         );
 
         let text = instructions.into_text();
@@ -1974,12 +1968,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            false,
-            &exec_policy,
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                false,
+                &exec_policy,
+                false,
+                false,
+            ),
             None,
-            false,
-            false,
         );
 
         let text = instructions.into_text();
@@ -1993,12 +1989,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::UnlessTrusted,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::UnlessTrusted,
+                false,
+                &Policy::empty(),
+                false,
+                true,
+            ),
             None,
-            false,
-            true,
         );
 
         let text = instructions.into_text();
@@ -2011,12 +2009,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnFailure,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnFailure,
+                false,
+                &Policy::empty(),
+                false,
+                true,
+            ),
             None,
-            false,
-            true,
         );
 
         let text = instructions.into_text();
@@ -2029,12 +2029,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                false,
+                &Policy::empty(),
+                true,
+                false,
+            ),
             None,
-            true,
-            false,
         );
 
         let text = instructions.into_text();
@@ -2047,12 +2049,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                false,
+                &Policy::empty(),
+                false,
+                true,
+            ),
             None,
-            false,
-            true,
         );
 
         let text = instructions.into_text();
@@ -2067,12 +2071,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            true,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                true,
+                &Policy::empty(),
+                false,
+                false,
+            ),
             None,
-            false,
-            false,
         );
 
         let text = instructions.into_text();
@@ -2085,12 +2091,14 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            AskForApproval::OnRequest,
-            false,
-            &Policy::empty(),
+            DeveloperInstructions::from(
+                AskForApproval::OnRequest,
+                false,
+                &Policy::empty(),
+                true,
+                true,
+            ),
             None,
-            true,
-            true,
         );
 
         let text = instructions.into_text();
