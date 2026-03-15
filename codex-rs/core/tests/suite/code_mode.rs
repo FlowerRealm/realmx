@@ -30,9 +30,7 @@ use wiremock::MockServer;
 fn custom_tool_output_items(req: &ResponsesRequest, call_id: &str) -> Vec<Value> {
     match req.custom_tool_call_output(call_id).get("output") {
         Some(Value::Array(items)) => items.clone(),
-        Some(Value::String(text)) => {
-            vec![serde_json::json!({ "type": "input_text", "text": text })]
-        }
+        Some(Value::String(text)) => code_mode_output_text_to_items(text),
         _ => panic!("custom tool output should be serialized as text or content items"),
     }
 }
@@ -57,11 +55,26 @@ fn tool_names(body: &Value) -> Vec<String> {
 fn function_tool_output_items(req: &ResponsesRequest, call_id: &str) -> Vec<Value> {
     match req.function_call_output(call_id).get("output") {
         Some(Value::Array(items)) => items.clone(),
-        Some(Value::String(text)) => {
-            vec![serde_json::json!({ "type": "input_text", "text": text })]
-        }
+        Some(Value::String(text)) => code_mode_output_text_to_items(text),
         _ => panic!("function tool output should be serialized as text or content items"),
     }
+}
+
+// Code mode text-only outputs can be serialized either as one combined string
+// or as header/body content items depending on truncation/normalization.
+fn code_mode_output_text_to_items(text: &str) -> Vec<Value> {
+    let Some((header, body)) = text.split_once("Output:\n") else {
+        return vec![serde_json::json!({ "type": "input_text", "text": text })];
+    };
+
+    let mut items = vec![serde_json::json!({
+        "type": "input_text",
+        "text": format!("{header}Output:\n"),
+    })];
+    if !body.is_empty() {
+        items.push(serde_json::json!({ "type": "input_text", "text": body }));
+    }
+    items
 }
 
 fn text_item(items: &[Value], index: usize) -> &str {

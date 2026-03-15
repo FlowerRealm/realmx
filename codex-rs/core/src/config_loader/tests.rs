@@ -28,6 +28,7 @@ use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
+#[cfg(unix)]
 use std::path::PathBuf;
 use tempfile::tempdir;
 use toml::Value as TomlValue;

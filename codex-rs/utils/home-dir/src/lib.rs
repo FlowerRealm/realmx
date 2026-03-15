@@ -160,6 +160,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::io::ErrorKind;
+    #[cfg(unix)]
     use std::path::PathBuf;
     use tempfile::TempDir;
 
