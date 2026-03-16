@@ -64,6 +64,7 @@ impl ProviderUsageScriptEditorView {
                 provider_id: self.provider_id.clone(),
                 script,
             });
+        self.complete = true;
     }
 
     fn delete(&mut self) {
@@ -354,14 +355,14 @@ mod tests {
     }
 
     #[test]
-    fn save_shortcut_keeps_editor_open_until_user_dismisses_it() {
+    fn save_shortcut_submits_event_and_closes_editor() {
         let (tx, mut rx) = unbounded_channel();
         let mut view =
             ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
 
         view.handle_key_event(key_event(KeyCode::Char('s'), KeyModifiers::CONTROL));
 
-        assert!(!view.complete);
+        assert!(view.complete);
         let event = rx.try_recv().expect("expected save event");
         let AppEvent::PersistProviderUsageScript {
             provider_id,
