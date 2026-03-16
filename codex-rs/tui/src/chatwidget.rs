@@ -6292,11 +6292,14 @@ impl ChatWidget {
     }
 
     fn should_prefetch_provider_usage(&self) -> bool {
-        self.provider_usage_enabled()
+        self.configured_status_line_items()
+            .iter()
+            .any(|item| item == &StatusLineItem::RemoteUsage.to_string())
     }
 
     fn provider_usage_enabled(&self) -> bool {
         crate::provider_usage::provider_usage_enabled(&self.config)
+            || crate::provider_usage_compat::is_legacy_su8_provider(&self.config.model_provider_id)
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {

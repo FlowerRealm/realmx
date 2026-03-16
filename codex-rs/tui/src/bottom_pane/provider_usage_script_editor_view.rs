@@ -247,8 +247,11 @@ impl Renderable for ProviderUsageScriptEditorView {
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;
+    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
-    use tempfile::tempdir;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use std::path::PathBuf;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn key_event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -256,15 +259,38 @@ mod tests {
     }
 
     fn editor_state(has_existing_script: bool) -> ProviderUsageEditorState {
-        let project_root = tempdir().expect("temp dir");
         ProviderUsageEditorState {
             provider_id: "openai".to_string(),
             provider_name: "OpenAI".to_string(),
-            script_path: project_root.path().join(".codex/providers/openai/usage.js"),
+            script_path: PathBuf::from("/tmp/project/.codex/providers/openai/usage.js"),
             initial_contents:
                 "({ request: { url: 'https://example.test' }, extractor: () => null })".to_string(),
             has_existing_script,
         }
+    }
+
+    fn render_snapshot(view: &ProviderUsageScriptEditorView, width: u16) -> String {
+        let height = view.desired_height(width);
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| {
+                        let symbol = buf[(x, y)].symbol();
+                        if symbol.is_empty() {
+                            ' '
+                        } else {
+                            symbol.chars().next().unwrap_or(' ')
+                        }
+                    })
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
@@ -313,5 +339,18 @@ mod tests {
             Some("Press Ctrl+R again to delete this usage script.")
         );
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn delete_confirmation_snapshot() {
+        let (tx, _rx) = unbounded_channel();
+        let mut view =
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+        view.handle_key_event(key_event(KeyCode::Char('r'), KeyModifiers::CONTROL));
+
+        assert_snapshot!(
+            "provider_usage_script_editor_delete_confirmation",
+            render_snapshot(&view, 72)
+        );
     }
 }

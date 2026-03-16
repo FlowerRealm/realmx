@@ -2199,6 +2199,25 @@ async fn provider_usage_poller_starts_when_query_is_enabled() {
 }
 
 #[tokio::test]
+async fn provider_usage_poller_is_gated_on_visible_status_items() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    let _project_root = setup_provider_usage_project(
+        &mut chat,
+        "openai",
+        "({ request: { url: 'https://example.test' }, extractor: () => null })",
+    );
+    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+
+    chat.prefetch_provider_usage();
+    assert!(chat.provider_usage_poller.is_none());
+
+    chat.config.tui_status_line = Some(vec!["remote-usage".to_string()]);
+    chat.prefetch_provider_usage();
+    assert!(chat.provider_usage_poller.is_some());
+    chat.stop_provider_usage_poller();
+}
+
+#[tokio::test]
 async fn worked_elapsed_from_resets_when_timer_restarts() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     assert_eq!(chat.worked_elapsed_from(5), 5);
@@ -10750,6 +10769,16 @@ async fn remote_usage_appends_default_status_item() {
 }
 
 #[tokio::test]
+async fn legacy_su8_provider_appends_remote_usage_default_item() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+
+    let items = chat.configured_status_line_items();
+
+    assert!(items.iter().any(|item| item == "remote-usage"));
+}
+
+#[tokio::test]
 async fn remote_usage_status_line_value_renders_summary() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.on_provider_usage_snapshot(Some(
@@ -10812,6 +10841,18 @@ async fn legacy_remote_usage_ids_map_to_remote_usage() {
         chat.configured_status_line_items(),
         vec![StatusLineItem::RemoteUsage.to_string()]
     );
+}
+
+#[tokio::test]
+async fn legacy_remote_usage_ids_keep_provider_usage_poller_enabled() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.model_provider_id = "su8".to_string();
+    chat.config.tui_status_line = Some(vec!["su8-remaining".to_string()]);
+
+    chat.prefetch_provider_usage();
+
+    assert!(chat.provider_usage_poller.is_some());
+    chat.stop_provider_usage_poller();
 }
 
 #[tokio::test]

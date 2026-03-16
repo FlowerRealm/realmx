@@ -1,0 +1,19 @@
+---
+source: tui/src/bottom_pane/provider_usage_script_editor_view.rs
+assertion_line: 351
+expression: "render_snapshot(&view, 72)"
+---
+Edit remote usage script: OpenAI (openai)
+/tmp/project/.codex/providers/openai/usage.js
+Ctrl+S saves. Press Ctrl+R twice to delete. Esc cancels.
+({ request: { url: 'https://example.test' }, extractor: () => null })
+
+
+
+
+
+
+
+
+
+Press Ctrl+R again to delete this usage script.

@@ -369,8 +369,19 @@ pub(crate) async fn fetch_provider_usage_snapshot(
     config: Config,
     auth: Option<CodexAuth>,
 ) -> Option<ProviderUsageRefreshResult> {
-    let path = active_provider_usage_script_path(&config)?;
-    fetch_scripted_provider_usage_snapshot(&config, &path, auth.as_ref()).await
+    if let Some(path) = active_provider_usage_script_path(&config) {
+        return fetch_scripted_provider_usage_snapshot(&config, &path, auth.as_ref()).await;
+    }
+
+    if crate::provider_usage_compat::is_legacy_su8_provider(&config.model_provider_id) {
+        return crate::provider_usage_compat::fetch_legacy_su8_provider_usage_snapshot(
+            config.model_provider.clone(),
+            auth,
+        )
+        .await;
+    }
+
+    None
 }
 
 pub(crate) fn format_usage_amount(value: f64, unit: Option<&str>) -> String {
