@@ -64,7 +64,6 @@ impl ProviderUsageScriptEditorView {
                 provider_id: self.provider_id.clone(),
                 script,
             });
-        self.complete = true;
     }
 
     fn delete(&mut self) {
@@ -352,5 +351,26 @@ mod tests {
             "provider_usage_script_editor_delete_confirmation",
             render_snapshot(&view, 72)
         );
+    }
+
+    #[test]
+    fn save_shortcut_keeps_editor_open_until_user_dismisses_it() {
+        let (tx, mut rx) = unbounded_channel();
+        let mut view =
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+
+        view.handle_key_event(key_event(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+        assert!(!view.complete);
+        let event = rx.try_recv().expect("expected save event");
+        let AppEvent::PersistProviderUsageScript {
+            provider_id,
+            script,
+        } = event
+        else {
+            panic!("expected persist provider usage script event");
+        };
+        assert_eq!(provider_id, "openai");
+        assert!(script.contains("https://example.test"));
     }
 }

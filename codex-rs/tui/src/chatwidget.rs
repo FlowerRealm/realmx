@@ -6292,9 +6292,11 @@ impl ChatWidget {
     }
 
     fn should_prefetch_provider_usage(&self) -> bool {
-        self.configured_status_line_items()
-            .iter()
-            .any(|item| item == &StatusLineItem::RemoteUsage.to_string())
+        self.provider_usage_enabled()
+            && self
+                .configured_status_line_items()
+                .iter()
+                .any(|item| item == &StatusLineItem::RemoteUsage.to_string())
     }
 
     fn provider_usage_enabled(&self) -> bool {

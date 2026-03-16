@@ -2203,6 +2203,16 @@ async fn provider_usage_poller_is_gated_on_visible_status_items() {
 }
 
 #[tokio::test]
+async fn provider_usage_poller_does_not_start_without_usage_source() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.tui_status_line = Some(vec!["remote-usage".to_string()]);
+
+    chat.prefetch_provider_usage();
+
+    assert!(chat.provider_usage_poller.is_none());
+}
+
+#[tokio::test]
 async fn worked_elapsed_from_resets_when_timer_restarts() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     assert_eq!(chat.worked_elapsed_from(5), 5);
