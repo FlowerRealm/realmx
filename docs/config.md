@@ -62,7 +62,7 @@ The script should evaluate to an object expression in the `ccswitch` style, for 
       },
     ];
   },
-})
+});
 ```
 
 Supported placeholders inside `request` string fields:
