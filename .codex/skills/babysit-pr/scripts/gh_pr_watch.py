@@ -213,7 +213,8 @@ def parse_pr_spec(pr_spec):
 def pr_view_fields():
     return (
         "number,url,state,mergedAt,closedAt,author,headRefName,headRefOid,"
-        "headRepository,headRepositoryOwner,mergeable,mergeStateStatus,reviewDecision"
+        "headRepository,headRepositoryOwner,isCrossRepository,"
+        "mergeable,mergeStateStatus,reviewDecision"
     )
 
 
@@ -282,15 +283,12 @@ def repo_slug_from_pr_view_fields(repository, repository_owner):
 
 
 def extract_repo_from_pr_view(data):
-    return (
-        repo_slug_from_pr_view_fields(
-            data.get("baseRepository"),
-            data.get("baseRepositoryOwner"),
-        )
-        or repo_slug_from_pr_view_fields(
-            data.get("headRepository"),
-            data.get("headRepositoryOwner"),
-        )
+    if data.get("isCrossRepository"):
+        return None
+
+    return repo_slug_from_pr_view_fields(
+        data.get("headRepository"),
+        data.get("headRepositoryOwner"),
     )
 def extract_repo_from_pr_url(pr_url):
     parsed = urlparse(pr_url)
