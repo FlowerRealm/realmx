@@ -2199,6 +2199,40 @@ async fn provider_usage_poller_runs_without_visible_status_item() {
 }
 
 #[tokio::test]
+async fn prefetch_provider_usage_clears_stale_snapshot_before_refresh() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    let _project_root = setup_provider_usage_project(
+        &mut chat,
+        "openai",
+        "({ request: { url: 'https://example.test' }, extractor: () => null })",
+    );
+    chat.on_provider_usage_snapshot(Some(
+        crate::provider_usage::ProviderUsageRefreshResult::Updated(
+            crate::provider_usage::ProviderUsageSnapshot {
+                plans: vec![crate::provider_usage::ProviderUsagePlan {
+                    plan_name: None,
+                    remaining: Some(12.345),
+                    used: Some(12.5),
+                    total: Some(20.0),
+                    unit: Some("USD".to_string()),
+                    extra: None,
+                }],
+                error_message: None,
+            },
+        ),
+    ));
+
+    chat.prefetch_provider_usage();
+
+    assert_eq!(
+        chat.status_line_value_for_item(&StatusLineItem::RemoteUsage),
+        None
+    );
+    assert!(chat.provider_usage_poller.is_some());
+    chat.stop_provider_usage_poller();
+}
+
+#[tokio::test]
 async fn provider_usage_poller_does_not_start_without_usage_source() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.tui_status_line = Some(vec!["remote-usage".to_string()]);

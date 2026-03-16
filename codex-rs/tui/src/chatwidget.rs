@@ -6260,9 +6260,9 @@ impl ChatWidget {
 
     fn prefetch_provider_usage(&mut self) {
         self.stop_provider_usage_poller();
+        self.provider_usage = None;
 
         if !self.should_prefetch_provider_usage() {
-            self.provider_usage = None;
             self.refresh_status_line();
             return;
         }
