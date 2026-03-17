@@ -1285,8 +1285,10 @@ impl App {
                 None
             };
             if let Some(label) = permissions_history_label {
-                self.chat_widget
-                    .add_info_message(format!("Permissions updated to {label}"), None);
+                self.chat_widget.add_info_message(
+                    format!("Permissions updated to {label}"),
+                    /*hint*/ None,
+                );
             }
         }
 
@@ -3471,8 +3473,10 @@ impl App {
                                 "Provider removed but failed to reload config: {err}"
                             ));
                         } else {
-                            self.chat_widget
-                                .add_info_message(format!("Removed provider {id}"), None);
+                            self.chat_widget.add_info_message(
+                                format!("Removed provider {id}"),
+                                /*hint*/ None,
+                            );
                         }
                     }
                     Err(err) => {
@@ -3496,8 +3500,10 @@ impl App {
                                 "Provider switched but failed to reload config: {err}"
                             ));
                         } else {
-                            self.chat_widget
-                                .add_info_message(format!("Provider changed to {id}"), None);
+                            self.chat_widget.add_info_message(
+                                format!("Provider changed to {id}"),
+                                /*hint*/ None,
+                            );
                         }
                     }
                     Err(err) => {

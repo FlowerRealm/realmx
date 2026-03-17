@@ -2171,7 +2171,7 @@ impl ChatWidget {
         };
         self.add_to_history(history_cell::new_info_event(
             format!("Using skill ({invocation_type}): {name}"),
-            None,
+            /*hint*/ None,
         ));
         self.request_redraw();
     }
@@ -4462,7 +4462,7 @@ impl ChatWidget {
                         self.config.active_profile.as_deref(),
                     ),
                     crate::settings::data::SettingsScreen::Root,
-                    None,
+                    /*selected_item_key*/ None,
                 );
             }
             SlashCommand::Personality => {
@@ -8142,6 +8142,7 @@ impl ChatWidget {
         self.config.service_tier
     }
 
+    #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
     fn current_realtime_audio_device_name(&self, kind: RealtimeAudioDeviceKind) -> Option<String> {
         match kind {
             RealtimeAudioDeviceKind::Microphone => self.config.realtime_audio.microphone.clone(),
