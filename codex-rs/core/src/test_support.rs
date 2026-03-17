@@ -27,6 +27,7 @@ static TEST_MODEL_PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     let file_contents = include_str!("../models.json");
     let mut response: ModelsResponse = serde_json::from_str(file_contents)
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
+    response.models = ModelsManager::with_derived_aliases_for_tests(response.models);
     response.models.sort_by(|a, b| a.priority.cmp(&b.priority));
     let mut presets: Vec<ModelPreset> = response.models.into_iter().map(Into::into).collect();
     ModelPreset::mark_default_by_picker_visibility(&mut presets);

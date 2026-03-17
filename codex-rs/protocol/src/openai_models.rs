@@ -233,6 +233,8 @@ const fn default_effective_context_window_percent() -> i64 {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ModelInfo {
     pub slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_model_slug: Option<String>,
     pub display_name: String,
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,6 +289,10 @@ pub struct ModelInfo {
 }
 
 impl ModelInfo {
+    pub fn api_model_slug(&self) -> &str {
+        self.api_model_slug.as_deref().unwrap_or(&self.slug)
+    }
+
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
         let context_limit = self
             .context_window
@@ -512,6 +518,7 @@ mod tests {
     fn test_model(spec: Option<ModelMessages>) -> ModelInfo {
         ModelInfo {
             slug: "test-model".to_string(),
+            api_model_slug: None,
             display_name: "Test Model".to_string(),
             description: None,
             default_reasoning_level: None,
@@ -702,6 +709,7 @@ mod tests {
     fn model_info_defaults_availability_nux_to_none_when_omitted() {
         let model: ModelInfo = serde_json::from_value(serde_json::json!({
             "slug": "test-model",
+            "api_model_slug": null,
             "display_name": "Test Model",
             "description": null,
             "supported_reasoning_levels": [],

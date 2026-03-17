@@ -32,6 +32,9 @@ use tracing::instrument;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
+pub const GPT_5_4_MODEL: &str = "gpt-5.4";
+pub const GPT_5_4_ONE_MILLION_MODEL: &str = "gpt-5.4[1m]";
+const GPT_5_4_ONE_MILLION_CONTEXT_WINDOW: i64 = 1_050_000;
 
 /// Strategy for refreshing available models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +121,7 @@ impl ModelsManager {
             CatalogMode::Default
         };
         let remote_models = model_catalog
-            .map(|catalog| catalog.models)
+            .map(|catalog| Self::with_derived_aliases(catalog.models))
             .unwrap_or_else(|| {
                 Self::load_remote_models_from_file()
                     .unwrap_or_else(|err| panic!("failed to load bundled models.json: {err}"))
@@ -271,6 +274,33 @@ impl ModelsManager {
         model_info::with_config_overrides(model_info, config)
     }
 
+    fn with_derived_aliases(mut models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+        let Some(base_index) = models.iter().position(|model| model.slug == GPT_5_4_MODEL) else {
+            return models;
+        };
+        let mut alias = models[base_index].clone();
+        alias.slug = GPT_5_4_ONE_MILLION_MODEL.to_string();
+        alias.api_model_slug = Some(GPT_5_4_MODEL.to_string());
+        alias.display_name = GPT_5_4_ONE_MILLION_MODEL.to_string();
+        alias.description = Some("Latest frontier agentic coding model with 1M context.".into());
+        alias.context_window = Some(GPT_5_4_ONE_MILLION_CONTEXT_WINDOW);
+
+        if let Some(existing_index) = models
+            .iter()
+            .position(|model| model.slug == GPT_5_4_ONE_MILLION_MODEL)
+        {
+            models[existing_index] = alias;
+        } else {
+            models.push(alias);
+        }
+
+        models
+    }
+
+    pub(crate) fn with_derived_aliases_for_tests(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+        Self::with_derived_aliases(models)
+    }
+
     /// Refresh models if the provided ETag differs from the cached ETag.
     ///
     /// Uses `Online` strategy to fetch latest models when ETags differ.
@@ -360,7 +390,7 @@ impl ModelsManager {
     /// Replace the cached remote models and rebuild the derived presets list.
     async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
         let mut existing_models = Self::load_remote_models_from_file().unwrap_or_default();
-        for model in models {
+        for model in Self::with_derived_aliases(models) {
             if let Some(existing_index) = existing_models
                 .iter()
                 .position(|existing| existing.slug == model.slug)
@@ -376,7 +406,7 @@ impl ModelsManager {
     fn load_remote_models_from_file() -> Result<Vec<ModelInfo>, std::io::Error> {
         let file_contents = include_str!("../../models.json");
         let response: ModelsResponse = serde_json::from_str(file_contents)?;
-        Ok(response.models)
+        Ok(Self::with_derived_aliases(response.models))
     }
 
     /// Attempt to satisfy the refresh from the cache when it matches the provider and TTL.
@@ -460,12 +490,12 @@ impl ModelsManager {
         model: &str,
         config: &Config,
     ) -> ModelInfo {
-        let candidates: &[ModelInfo] = if let Some(model_catalog) = config.model_catalog.as_ref() {
-            &model_catalog.models
-        } else {
-            &[]
-        };
-        Self::construct_model_info_from_candidates(model, candidates, config)
+        let candidates = config
+            .model_catalog
+            .as_ref()
+            .map(|model_catalog| Self::with_derived_aliases(model_catalog.models.clone()))
+            .unwrap_or_else(|| Self::load_remote_models_from_file().unwrap_or_default());
+        Self::construct_model_info_from_candidates(model, &candidates, config)
     }
 }
 

@@ -3,6 +3,8 @@ use crate::CodexAuth;
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::ConfigBuilder;
 use crate::model_provider_info::WireApi;
+use crate::models_manager::manager::GPT_5_4_MODEL;
+use crate::models_manager::manager::GPT_5_4_ONE_MILLION_MODEL;
 use chrono::Utc;
 use codex_protocol::openai_models::ModelsResponse;
 use core_test_support::responses::mount_models_once;
@@ -142,6 +144,40 @@ async fn get_model_info_uses_custom_catalog() {
     assert!(model_info.supports_image_detail_original);
     assert!(!model_info.supports_parallel_tool_calls);
     assert!(!model_info.used_fallback_model_metadata);
+}
+
+#[tokio::test]
+async fn gpt_5_4_one_million_alias_is_available_with_canonical_api_slug() {
+    let codex_home = tempdir().expect("temp dir");
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("load default test config");
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let manager = ModelsManager::new(
+        codex_home.path().to_path_buf(),
+        auth_manager,
+        None,
+        CollaborationModesConfig::default(),
+    );
+
+    let available = manager.list_models(RefreshStrategy::Offline).await;
+    assert!(
+        available
+            .iter()
+            .any(|preset| preset.model == GPT_5_4_ONE_MILLION_MODEL),
+        "expected derived 1M alias in available models"
+    );
+
+    let model_info = manager
+        .get_model_info(GPT_5_4_ONE_MILLION_MODEL, &config)
+        .await;
+    assert_eq!(model_info.slug, GPT_5_4_ONE_MILLION_MODEL);
+    assert_eq!(model_info.display_name, GPT_5_4_ONE_MILLION_MODEL);
+    assert_eq!(model_info.context_window, Some(1_050_000));
+    assert_eq!(model_info.api_model_slug.as_deref(), Some(GPT_5_4_MODEL));
+    assert_eq!(model_info.api_model_slug(), GPT_5_4_MODEL);
 }
 
 #[tokio::test]

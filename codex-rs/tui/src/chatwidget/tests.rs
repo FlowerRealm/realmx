@@ -7827,6 +7827,15 @@ async fn model_selection_popup_snapshot() {
 }
 
 #[tokio::test]
+async fn fast_status_indicator_is_shown_for_gpt_5_4_one_million_alias() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4[1m]")).await;
+    chat.set_service_tier(Some(ServiceTier::Fast));
+    set_chatgpt_auth(&mut chat);
+
+    assert!(chat.should_show_fast_status(chat.current_model(), chat.current_service_tier(),));
+}
+
+#[tokio::test]
 async fn personality_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
     chat.thread_id = Some(ThreadId::new());

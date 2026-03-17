@@ -71,6 +71,8 @@ use codex_core::git_info::current_branch_name;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::git_info::local_git_branches;
 use codex_core::mcp::McpManager;
+use codex_core::models_manager::manager::GPT_5_4_MODEL;
+use codex_core::models_manager::manager::GPT_5_4_ONE_MILLION_MODEL;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_core::plugins::PluginsManager;
 use codex_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
@@ -321,7 +323,6 @@ use strum::IntoEnumIterator;
 const USER_SHELL_COMMAND_HELP_TITLE: &str = "Prefix a command with ! to run it locally";
 const USER_SHELL_COMMAND_HELP_HINT: &str = "Example: !ls";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const FAST_STATUS_MODEL: &str = "gpt-5.4";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 3] =
     ["model-with-reasoning", "context-remaining", "current-dir"];
 const SU8_PROVIDER_ID: &str = "su8";
@@ -8134,7 +8135,7 @@ impl ChatWidget {
         model: &str,
         service_tier: Option<ServiceTier>,
     ) -> bool {
-        model == FAST_STATUS_MODEL
+        matches!(model, GPT_5_4_MODEL | GPT_5_4_ONE_MILLION_MODEL)
             && matches!(service_tier, Some(ServiceTier::Fast))
             && self
                 .auth_manager
