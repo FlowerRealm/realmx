@@ -180,6 +180,27 @@ async fn gpt_5_4_one_million_alias_is_available_with_canonical_api_slug() {
     assert_eq!(model_info.api_model_slug(), GPT_5_4_MODEL);
 }
 
+#[test]
+fn derived_aliases_preserve_server_supplied_gpt_5_4_one_million_entry() {
+    let mut server_alias = remote_model("gpt-5.4[1m]", "Server Alias", 7);
+    server_alias.api_model_slug = Some("server-api-slug".to_string());
+    server_alias.context_window = Some(2_000_000);
+    server_alias.description = Some("server supplied alias".to_string());
+
+    let models = ModelsManager::with_derived_aliases_for_tests(vec![
+        remote_model(GPT_5_4_MODEL, "Base", 1),
+        server_alias.clone(),
+    ]);
+
+    assert_eq!(models.len(), 2);
+    assert_eq!(
+        models
+            .iter()
+            .find(|model| model.slug == GPT_5_4_ONE_MILLION_MODEL),
+        Some(&server_alias)
+    );
+}
+
 #[tokio::test]
 async fn get_model_info_matches_namespaced_suffix() {
     let codex_home = tempdir().expect("temp dir");

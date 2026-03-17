@@ -278,22 +278,19 @@ impl ModelsManager {
         let Some(base_index) = models.iter().position(|model| model.slug == GPT_5_4_MODEL) else {
             return models;
         };
+        if models
+            .iter()
+            .any(|model| model.slug == GPT_5_4_ONE_MILLION_MODEL)
+        {
+            return models;
+        }
         let mut alias = models[base_index].clone();
         alias.slug = GPT_5_4_ONE_MILLION_MODEL.to_string();
         alias.api_model_slug = Some(GPT_5_4_MODEL.to_string());
         alias.display_name = GPT_5_4_ONE_MILLION_MODEL.to_string();
         alias.description = Some("Latest frontier agentic coding model with 1M context.".into());
         alias.context_window = Some(GPT_5_4_ONE_MILLION_CONTEXT_WINDOW);
-
-        if let Some(existing_index) = models
-            .iter()
-            .position(|model| model.slug == GPT_5_4_ONE_MILLION_MODEL)
-        {
-            models[existing_index] = alias;
-        } else {
-            models.push(alias);
-        }
-
+        models.push(alias);
         models
     }
 
