@@ -363,6 +363,12 @@ enum CancelLoginError {
     NotFound,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CanceledLoginKind {
+    Chatgpt,
+    OAuth,
+}
+
 enum AppListLoadResult {
     Accessible(Result<Vec<AppInfo>, String>),
     Directory(Result<Vec<AppInfo>, String>),
@@ -1410,13 +1416,17 @@ impl CodexMessageProcessor {
     async fn cancel_login_common(
         &mut self,
         login_id: Uuid,
-    ) -> std::result::Result<(), CancelLoginError> {
+    ) -> std::result::Result<CanceledLoginKind, CancelLoginError> {
         let mut guard = self.active_login.lock().await;
         if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
             if let Some(active) = guard.take() {
+                let kind = match &active.kind {
+                    ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
+                    ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
+                };
                 drop(active);
+                return Ok(kind);
             }
-            return Ok(());
         }
         Err(CancelLoginError::NotFound)
     }
@@ -1429,12 +1439,26 @@ impl CodexMessageProcessor {
         let login_id = params.login_id;
         match Uuid::parse_str(&login_id) {
             Ok(uuid) => {
-                let status = match self.cancel_login_common(uuid).await {
-                    Ok(()) => CancelLoginAccountStatus::Canceled,
+                let cancel_outcome = self.cancel_login_common(uuid).await;
+                let canceled_oauth = matches!(cancel_outcome, Ok(CanceledLoginKind::OAuth));
+                let status = match &cancel_outcome {
+                    Ok(_) => CancelLoginAccountStatus::Canceled,
                     Err(CancelLoginError::NotFound) => CancelLoginAccountStatus::NotFound,
                 };
                 let response = CancelLoginAccountResponse { status };
                 self.outgoing.send_response(request_id, response).await;
+
+                if canceled_oauth {
+                    self.outgoing
+                        .send_server_notification(ServerNotification::AccountLoginCompleted(
+                            AccountLoginCompletedNotification {
+                                login_id: Some(login_id),
+                                success: false,
+                                error: Some("OAuth login canceled".to_string()),
+                            },
+                        ))
+                        .await;
+                }
             }
             Err(_) => {
                 let error = JSONRPCErrorError {
