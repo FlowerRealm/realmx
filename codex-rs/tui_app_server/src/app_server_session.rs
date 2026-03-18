@@ -228,6 +228,15 @@ impl AppServerSession {
                     true,
                 )
             }
+            Some(Account::Oauth {}) => (
+                Some(AuthMode::Oauth),
+                None,
+                Some(TelemetryAuthMode::ApiKey),
+                Some(StatusAccountDisplay::ApiKey),
+                None,
+                FeedbackAudience::External,
+                false,
+            ),
             None => (
                 None,
                 None,
@@ -675,6 +684,7 @@ pub(crate) fn status_account_display_from_auth_mode(
 ) -> Option<StatusAccountDisplay> {
     match auth_mode {
         Some(AuthMode::ApiKey) => Some(StatusAccountDisplay::ApiKey),
+        Some(AuthMode::Oauth) => Some(StatusAccountDisplay::ApiKey),
         Some(AuthMode::Chatgpt) | Some(AuthMode::ChatgptAuthTokens) => {
             Some(StatusAccountDisplay::ChatGpt {
                 email: None,

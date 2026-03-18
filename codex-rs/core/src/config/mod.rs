@@ -621,9 +621,6 @@ impl ConfigBuilder {
         if let Err(err) = maybe_migrate_inline_model_provider_api_keys(&codex_home).await {
             tracing::warn!(error = %err, "failed to migrate inline model provider api keys");
         }
-        if let Err(err) = maybe_migrate_guardian_approval_alias(&codex_home).await {
-            tracing::warn!(error = %err, "failed to migrate guardian_approval feature alias");
-        }
         if let Err(err) = maybe_migrate_smart_approvals_alias(&codex_home).await {
             tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
         }
@@ -891,9 +888,6 @@ pub async fn load_config_as_toml_with_cli_overrides(
 ) -> std::io::Result<ConfigToml> {
     if let Err(err) = maybe_migrate_inline_model_provider_api_keys(codex_home).await {
         tracing::warn!(error = %err, "failed to migrate inline model provider api keys");
-    }
-    if let Err(err) = maybe_migrate_guardian_approval_alias(codex_home).await {
-        tracing::warn!(error = %err, "failed to migrate guardian_approval feature alias");
     }
     if let Err(err) = maybe_migrate_smart_approvals_alias(codex_home).await {
         tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
