@@ -1,0 +1,13 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / tui
+subtitle: Browse and edit settings under `tui` in user config.toml.
+Write scope: 1
+Edit this section: 1
+disable_paste_burst: 1
+file_opener: 1
+theme: 1
+notification_method: 0

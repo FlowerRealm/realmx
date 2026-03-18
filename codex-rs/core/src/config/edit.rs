@@ -711,7 +711,8 @@ fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlIt
     toml_value_to_item(&value)
 }
 
-fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
+/// Convert a `toml::Value` into the `toml_edit` item used by config persistence.
+pub fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
     match value {
         TomlValue::Table(table) => {
             let mut table_item = TomlTable::new();
@@ -972,6 +973,21 @@ impl ConfigEditsBuilder {
         } else {
             self.edits.push(ConfigEdit::ClearPath { segments });
         }
+        self
+    }
+
+    pub fn clear_feature_override(mut self, key: &str) -> Self {
+        let segments = if let Some(profile) = self.profile.as_ref() {
+            vec![
+                "profiles".to_string(),
+                profile.clone(),
+                "features".to_string(),
+                key.to_string(),
+            ]
+        } else {
+            vec!["features".to_string(), key.to_string()]
+        };
+        self.edits.push(ConfigEdit::ClearPath { segments });
         self
     }
 

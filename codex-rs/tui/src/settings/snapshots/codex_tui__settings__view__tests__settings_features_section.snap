@@ -1,0 +1,12 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / features
+subtitle: Browse and edit settings under `features` in user config.toml.
+Write scope: 1
+JavaScript REPL: 1
+Guardian Approvals: 1
+default_mode_request_user_input: 1
+suppress_unstable_features_warning: 1

@@ -22,7 +22,7 @@ use super::textarea::TextArea;
 use super::textarea::TextAreaState;
 
 /// Callback invoked when the user submits a custom prompt.
-pub(crate) type PromptSubmitted = Box<dyn Fn(String) + Send + Sync>;
+pub(crate) type PromptSubmitted = Box<dyn Fn(String) -> Result<(), String> + Send + Sync>;
 
 /// Minimal multi-line text input view to collect custom review instructions.
 pub(crate) struct CustomPromptView {
@@ -34,6 +34,7 @@ pub(crate) struct CustomPromptView {
     // UI state
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
+    error_message: Option<String>,
     complete: bool,
 }
 
@@ -51,8 +52,16 @@ impl CustomPromptView {
             on_submit,
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
+            error_message: None,
             complete: false,
         }
+    }
+
+    pub(crate) fn with_initial_text(mut self, initial_text: String) -> Self {
+        if !initial_text.is_empty() {
+            self.textarea.insert_str(&initial_text);
+        }
+        self
     }
 }
 
@@ -71,8 +80,15 @@ impl BottomPaneView for CustomPromptView {
             } => {
                 let text = self.textarea.text().trim().to_string();
                 if !text.is_empty() {
-                    (self.on_submit)(text);
-                    self.complete = true;
+                    match (self.on_submit)(text) {
+                        Ok(()) => {
+                            self.error_message = None;
+                            self.complete = true;
+                        }
+                        Err(error_message) => {
+                            self.error_message = Some(error_message);
+                        }
+                    }
                 }
             }
             KeyEvent {
@@ -108,7 +124,8 @@ impl BottomPaneView for CustomPromptView {
 impl Renderable for CustomPromptView {
     fn desired_height(&self, width: u16) -> u16 {
         let extra_top: u16 = if self.context_label.is_some() { 1 } else { 0 };
-        1u16 + extra_top + self.input_height(width) + 3u16
+        let extra_error: u16 = if self.error_message.is_some() { 1 } else { 0 };
+        1u16 + extra_top + self.input_height(width) + extra_error + 3u16
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -188,7 +205,22 @@ impl Renderable for CustomPromptView {
             }
         }
 
-        let hint_blank_y = input_area.y.saturating_add(input_height);
+        let error_y = input_area.y.saturating_add(input_height);
+        if let Some(error_message) = &self.error_message
+            && error_y < area.y.saturating_add(area.height)
+        {
+            Paragraph::new(Line::from(vec![gutter(), error_message.clone().red()])).render(
+                Rect {
+                    x: area.x,
+                    y: error_y,
+                    width: area.width,
+                    height: 1,
+                },
+                buf,
+            );
+        }
+
+        let hint_blank_y = error_y.saturating_add(u16::from(self.error_message.is_some()));
         if hint_blank_y < area.y.saturating_add(area.height) {
             let blank_area = Rect {
                 x: area.x,

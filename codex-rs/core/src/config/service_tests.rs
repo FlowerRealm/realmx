@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::edit::toml_value_to_item;
 use anyhow::Result;
 use codex_app_server_protocol::AppConfig;
 use codex_app_server_protocol::AppToolApproval;
@@ -8,6 +9,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use tempfile::tempdir;
+use toml_edit::Item as TomlItem;
 
 #[test]
 fn toml_value_to_item_handles_nested_config_tables() {

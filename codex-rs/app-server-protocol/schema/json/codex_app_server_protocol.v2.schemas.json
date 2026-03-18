@@ -2292,6 +2292,7 @@
       "enum": [
         "pendingInit",
         "running",
+        "interrupted",
         "completed",
         "errored",
         "shutdown",
@@ -3651,6 +3652,9 @@
     },
     "DynamicToolSpec": {
       "properties": {
+        "deferLoading": {
+          "type": "boolean"
+        },
         "description": {
           "type": "string"
         },
@@ -6157,6 +6161,12 @@
     },
     "PluginMarketplaceEntry": {
       "properties": {
+        "displayName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },

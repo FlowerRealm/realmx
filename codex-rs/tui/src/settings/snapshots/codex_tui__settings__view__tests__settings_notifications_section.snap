@@ -1,0 +1,13 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / notifications
+subtitle: Browse and edit settings under `notifications` in user config.toml.
+Write scope: 1
+check_for_update_on_startup: 1
+external_command: 1
+hide_full_access_warning: 1
+notification_method: 1
+notifications: 1

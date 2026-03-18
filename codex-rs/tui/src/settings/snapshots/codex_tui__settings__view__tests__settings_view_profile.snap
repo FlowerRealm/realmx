@@ -1,0 +1,13 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings
+subtitle: Browse settings sections for the active profile `dev`.
+Write scope: 1
+model: 1
+audio: 0
+audio.microphone: 0
+service_tier: 0
+include_apply_patch_tool: 0

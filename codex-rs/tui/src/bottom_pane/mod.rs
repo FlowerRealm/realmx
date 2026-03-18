@@ -76,7 +76,6 @@ mod chat_composer;
 mod chat_composer_history;
 mod command_popup;
 pub mod custom_prompt_view;
-mod experimental_features_view;
 mod file_search_popup;
 mod footer;
 mod list_selection_view;
@@ -149,8 +148,6 @@ use codex_protocol::custom_prompts::CustomPrompt;
 
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;
-pub(crate) use experimental_features_view::ExperimentalFeatureItem;
-pub(crate) use experimental_features_view::ExperimentalFeaturesView;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use list_selection_view::SelectionItem;
 
@@ -321,11 +318,6 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub fn set_audio_device_selection_enabled(&mut self, enabled: bool) {
-        self.composer.set_audio_device_selection_enabled(enabled);
-        self.request_redraw();
-    }
-
     pub fn set_voice_transcription_enabled(&mut self, enabled: bool) {
         self.composer.set_voice_transcription_enabled(enabled);
         self.request_redraw();
@@ -369,6 +361,13 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    fn pop_completed_view(&mut self) {
+        self.view_stack.pop();
+        if self.view_stack.is_empty() {
+            self.on_active_view_complete();
+        }
+    }
+
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         // Do not globally intercept space; only composer handles hold-to-talk.
@@ -409,16 +408,14 @@ impl BottomPane {
             };
 
             if ctrl_c_completed {
-                self.view_stack.pop();
-                self.on_active_view_complete();
+                self.pop_completed_view();
                 if let Some(next_view) = self.view_stack.last()
                     && next_view.is_in_paste_burst()
                 {
                     self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
                 }
             } else if view_complete {
-                self.view_stack.clear();
-                self.on_active_view_complete();
+                self.pop_completed_view();
             } else if view_in_paste_burst {
                 self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
             }
@@ -471,8 +468,7 @@ impl BottomPane {
             let event = view.on_ctrl_c();
             if matches!(event, CancellationEvent::Handled) {
                 if view.is_complete() {
-                    self.view_stack.pop();
-                    self.on_active_view_complete();
+                    self.pop_completed_view();
                 }
                 self.show_quit_shortcut_hint(key_hint::ctrl(KeyCode::Char('c')));
                 self.request_redraw();
@@ -493,7 +489,7 @@ impl BottomPane {
         if let Some(view) = self.view_stack.last_mut() {
             let needs_redraw = view.handle_paste(pasted);
             if view.is_complete() {
-                self.on_active_view_complete();
+                self.pop_completed_view();
             }
             if needs_redraw {
                 self.request_redraw();
@@ -704,14 +700,14 @@ impl BottomPane {
 
     pub(crate) fn show_esc_backtrack_hint(&mut self) {
         self.esc_backtrack_hint = true;
-        self.composer.set_esc_backtrack_hint(true);
+        self.composer.set_esc_backtrack_hint(/*show*/ true);
         self.request_redraw();
     }
 
     pub(crate) fn clear_esc_backtrack_hint(&mut self) {
         if self.esc_backtrack_hint {
             self.esc_backtrack_hint = false;
-            self.composer.set_esc_backtrack_hint(false);
+            self.composer.set_esc_backtrack_hint(/*show*/ false);
             self.request_redraw();
         }
     }
@@ -733,7 +729,7 @@ impl BottomPane {
                     ));
                 }
                 if let Some(status) = self.status.as_mut() {
-                    status.set_interrupt_hint_visible(true);
+                    status.set_interrupt_hint_visible(/*visible*/ true);
                 }
                 self.sync_status_inline_message();
                 self.request_redraw();
@@ -947,7 +943,7 @@ impl BottomPane {
         );
         self.pause_status_timer_for_modal();
         self.set_composer_input_enabled(
-            false,
+            /*enabled*/ false,
             Some("Answer the questions to continue.".to_string()),
         );
         self.push_view(Box::new(modal));
@@ -1008,7 +1004,7 @@ impl BottomPane {
             );
             self.pause_status_timer_for_modal();
             self.set_composer_input_enabled(
-                false,
+                /*enabled*/ false,
                 Some("Respond to the tool suggestion to continue.".to_string()),
             );
             self.push_view(Box::new(view));
@@ -1024,7 +1020,7 @@ impl BottomPane {
         );
         self.pause_status_timer_for_modal();
         self.set_composer_input_enabled(
-            false,
+            /*enabled*/ false,
             Some("Respond to the MCP server request to continue.".to_string()),
         );
         self.push_view(Box::new(modal));
@@ -1032,7 +1028,7 @@ impl BottomPane {
 
     fn on_active_view_complete(&mut self) {
         self.resume_status_timer_after_modal();
-        self.set_composer_input_enabled(true, None);
+        self.set_composer_input_enabled(/*enabled*/ true, /*placeholder*/ None);
     }
 
     fn pause_status_timer_for_modal(&mut self) {
@@ -1135,12 +1131,15 @@ impl BottomPane {
         } else {
             let mut flex = FlexRenderable::new();
             if let Some(status) = &self.status {
-                flex.push(0, RenderableItem::Borrowed(status));
+                flex.push(/*flex*/ 0, RenderableItem::Borrowed(status));
             }
             // Avoid double-surfacing the same summary and avoid adding an extra
             // row while the status line is already visible.
             if self.status.is_none() && !self.unified_exec_footer.is_empty() {
-                flex.push(0, RenderableItem::Borrowed(&self.unified_exec_footer));
+                flex.push(
+                    /*flex*/ 0,
+                    RenderableItem::Borrowed(&self.unified_exec_footer),
+                );
             }
             let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
             let has_pending_input = !self.pending_input_preview.queued_messages.is_empty()
@@ -1149,19 +1148,25 @@ impl BottomPane {
                 self.status.is_some() || !self.unified_exec_footer.is_empty();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
             if has_inline_previews && has_status_or_footer {
-                flex.push(0, RenderableItem::Owned("".into()));
+                flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            flex.push(1, RenderableItem::Borrowed(&self.pending_thread_approvals));
+            flex.push(
+                /*flex*/ 1,
+                RenderableItem::Borrowed(&self.pending_thread_approvals),
+            );
             if has_pending_thread_approvals && has_pending_input {
-                flex.push(0, RenderableItem::Owned("".into()));
+                flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            flex.push(1, RenderableItem::Borrowed(&self.pending_input_preview));
+            flex.push(
+                /*flex*/ 1,
+                RenderableItem::Borrowed(&self.pending_input_preview),
+            );
             if !has_inline_previews && has_status_or_footer {
-                flex.push(0, RenderableItem::Owned("".into()));
+                flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
             let mut flex2 = FlexRenderable::new();
-            flex2.push(1, RenderableItem::Owned(flex.into()));
-            flex2.push(0, RenderableItem::Borrowed(&self.composer));
+            flex2.push(/*flex*/ 1, RenderableItem::Owned(flex.into()));
+            flex2.push(/*flex*/ 0, RenderableItem::Borrowed(&self.composer));
             RenderableItem::Owned(Box::new(flex2))
         }
     }

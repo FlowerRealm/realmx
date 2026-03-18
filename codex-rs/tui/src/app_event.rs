@@ -21,6 +21,10 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
+use serde::Deserialize;
+
+use crate::settings::data::SettingsScope;
+use crate::settings::data::SettingsScreen;
 
 use codex_core::ModelProviderInfo;
 use codex_core::config::types::ApprovalsReviewer;
@@ -240,11 +244,6 @@ pub(crate) enum AppEvent {
         service_tier: Option<ServiceTier>,
     },
 
-    /// Open the device picker for a realtime microphone or speaker.
-    OpenRealtimeAudioDeviceSelection {
-        kind: RealtimeAudioDeviceKind,
-    },
-
     /// Persist the selected realtime microphone or speaker to top-level config.
     #[cfg_attr(
         any(target_os = "linux", not(feature = "voice-input")),
@@ -258,6 +257,34 @@ pub(crate) enum AppEvent {
     /// Restart the selected realtime microphone or speaker locally.
     RestartRealtimeAudioDevice {
         kind: RealtimeAudioDeviceKind,
+    },
+
+    /// Open a /settings screen.
+    OpenSettings {
+        scope: SettingsScope,
+        screen: SettingsScreen,
+        selected_item_key: Option<String>,
+    },
+
+    /// Open the write-scope picker inside /settings.
+    OpenSettingsScopePicker {
+        current_scope: SettingsScope,
+        current_screen: SettingsScreen,
+    },
+
+    /// Open an editor for one config key inside /settings.
+    OpenSettingEditor {
+        key_path: String,
+        scope: SettingsScope,
+        screen: SettingsScreen,
+    },
+
+    /// Persist a value change made from /settings.
+    SaveSettingValue {
+        key_path: String,
+        scope: SettingsScope,
+        screen: SettingsScreen,
+        value: Option<toml::Value>,
     },
 
     /// Open the reasoning selection popup after picking a model.

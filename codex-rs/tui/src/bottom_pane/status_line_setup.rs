@@ -211,7 +211,7 @@ impl StatusLineSetupView {
                 if !used_ids.insert(item_id.clone()) {
                     continue;
                 }
-                items.push(Self::status_line_select_item(item, true));
+                items.push(Self::status_line_select_item(item, /*enabled*/ true));
             }
         }
 
@@ -220,7 +220,7 @@ impl StatusLineSetupView {
             if used_ids.contains(&item_id) {
                 continue;
             }
-            items.push(Self::status_line_select_item(item, false));
+            items.push(Self::status_line_select_item(item, /*enabled*/ false));
         }
 
         Self {

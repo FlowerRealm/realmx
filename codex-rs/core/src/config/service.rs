@@ -2,6 +2,7 @@ use super::ConfigToml;
 use super::deserialize_config_toml_with_base;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::config::edit::toml_value_to_item;
 use crate::config::managed_features::validate_explicit_feature_settings_in_config_toml;
 use crate::config::managed_features::validate_feature_requirements_in_config_toml;
 use crate::config_loader::CloudRequirementsLoader;
@@ -37,7 +38,6 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::task;
 use toml::Value as TomlValue;
-use toml_edit::Item as TomlItem;
 
 #[derive(Debug, Error)]
 pub enum ConfigServiceError {
@@ -183,7 +183,10 @@ impl ConfigService {
             origins: layers.origins(),
             layers: params.include_layers.then(|| {
                 layers
-                    .get_layers(ConfigLayerStackOrdering::HighestPrecedenceFirst, true)
+                    .get_layers(
+                        ConfigLayerStackOrdering::HighestPrecedenceFirst,
+                        /*include_disabled*/ true,
+                    )
                     .iter()
                     .map(|layer| layer.as_layer())
                     .collect()
@@ -571,44 +574,6 @@ fn clear_path(root: &mut TomlValue, segments: &[String]) -> Result<bool, MergeEr
     };
 
     Ok(parent.remove(last).is_some())
-}
-
-fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
-    match value {
-        TomlValue::Table(table) => {
-            let mut table_item = toml_edit::Table::new();
-            table_item.set_implicit(false);
-            for (key, val) in table {
-                table_item.insert(key, toml_value_to_item(val)?);
-            }
-            Ok(TomlItem::Table(table_item))
-        }
-        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
-    }
-}
-
-fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
-    match value {
-        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
-        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Array(items) => {
-            let mut array = toml_edit::Array::new();
-            for item in items {
-                array.push(toml_value_to_value(item)?);
-            }
-            Ok(toml_edit::Value::Array(array))
-        }
-        TomlValue::Table(table) => {
-            let mut inline = toml_edit::InlineTable::new();
-            for (key, val) in table {
-                inline.insert(key, toml_value_to_value(val)?);
-            }
-            Ok(toml_edit::Value::InlineTable(inline))
-        }
-    }
 }
 
 fn validate_config(value: &TomlValue) -> Result<(), toml::de::Error> {

@@ -212,7 +212,7 @@ pub async fn load_config_layers_state(
                     return Err(io_error_from_config_error(
                         io::ErrorKind::InvalidData,
                         config_error,
-                        None,
+                        /*source*/ None,
                     ));
                 }
                 return Err(err);
@@ -826,6 +826,7 @@ async fn load_project_layers(
         else {
             continue;
         };
+
         let project_config_abs = AbsolutePathBuf::from_absolute_path(&project_config_dir)?;
         let project_config_normalized = normalize_path(project_config_abs.as_path())
             .unwrap_or_else(|_| project_config_abs.to_path_buf());
@@ -854,7 +855,7 @@ async fn load_project_layers(
                             &project_config_abs,
                             &layer_dir,
                             TomlValue::Table(toml::map::Map::new()),
-                            true,
+                            /*config_toml_exists*/ true,
                         ));
                         continue;
                     }
@@ -866,7 +867,7 @@ async fn load_project_layers(
                     &project_config_abs,
                     &layer_dir,
                     config,
-                    true,
+                    /*config_toml_exists*/ true,
                 );
                 layers.push(entry);
             }
@@ -880,7 +881,7 @@ async fn load_project_layers(
                         &project_config_abs,
                         &layer_dir,
                         TomlValue::Table(toml::map::Map::new()),
-                        false,
+                        /*config_toml_exists*/ false,
                     ));
                 } else {
                     let config_file_display = config_file.as_path().display();

@@ -1,0 +1,16 @@
+---
+source: tui/src/settings/view.rs
+expression: scope_picker_summary(&params)
+---
+title: Write scope
+subtitle: Choose where /settings saves changes.
+item: User config
+  description: Write to your top-level config.toml.
+  current: false
+  disabled: false
+  disabled_reason: 
+item: Active profile
+  description: Write under [profiles.project].
+  current: true
+  disabled: false
+  disabled_reason: 

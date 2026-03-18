@@ -1,0 +1,11 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / auth
+subtitle: Browse and edit settings under `auth` in user config.toml.
+Write scope: 1
+chatgpt_workspace_id: 1
+credentials_store: 1
+login_method: 1

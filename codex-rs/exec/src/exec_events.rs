@@ -231,6 +231,7 @@ pub enum CollabTool {
 pub enum CollabAgentStatus {
     PendingInit,
     Running,
+    Interrupted,
     Completed,
     Errored,
     Shutdown,

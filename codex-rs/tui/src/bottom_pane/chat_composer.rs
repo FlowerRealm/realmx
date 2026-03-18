@@ -406,7 +406,6 @@ pub(crate) struct ChatComposer {
     fast_command_enabled: bool,
     personality_command_enabled: bool,
     realtime_conversation_enabled: bool,
-    audio_device_selection_enabled: bool,
     windows_degraded_sandbox_active: bool,
     status_line_value: Option<Line<'static>>,
     status_line_enabled: bool,
@@ -444,7 +443,6 @@ impl ChatComposer {
             fast_command_enabled: self.fast_command_enabled,
             personality_command_enabled: self.personality_command_enabled,
             realtime_conversation_enabled: self.realtime_conversation_enabled,
-            audio_device_selection_enabled: self.audio_device_selection_enabled,
             allow_elevate_sandbox: self.windows_degraded_sandbox_active,
         }
     }
@@ -528,7 +526,6 @@ impl ChatComposer {
             fast_command_enabled: false,
             personality_command_enabled: false,
             realtime_conversation_enabled: false,
-            audio_device_selection_enabled: false,
             windows_degraded_sandbox_active: false,
             status_line_value: None,
             status_line_enabled: false,
@@ -616,10 +613,6 @@ impl ChatComposer {
         self.realtime_conversation_enabled = enabled;
     }
 
-    pub fn set_audio_device_selection_enabled(&mut self, enabled: bool) {
-        self.audio_device_selection_enabled = enabled;
-    }
-
     /// Compatibility shim for tests that still toggle the removed steer mode flag.
     #[cfg(test)]
     pub fn set_steer_enabled(&mut self, _enabled: bool) {}
@@ -674,7 +667,12 @@ impl ChatComposer {
         };
         let [composer_rect, popup_rect] =
             Layout::vertical([Constraint::Min(3), popup_constraint]).areas(area);
-        let mut textarea_rect = composer_rect.inset(Insets::tlbr(1, LIVE_PREFIX_COLS, 1, 1));
+        let mut textarea_rect = composer_rect.inset(Insets::tlbr(
+            /*top*/ 1,
+            LIVE_PREFIX_COLS,
+            /*bottom*/ 1,
+            /*right*/ 1,
+        ));
         let remote_images_height = self
             .remote_images_lines(textarea_rect.width)
             .len()
@@ -1037,7 +1035,7 @@ impl ChatComposer {
         self.bind_mentions_from_snapshot(mention_bindings);
         self.relabel_attached_images_and_update_placeholders();
         self.selected_remote_image_index = None;
-        self.textarea.set_cursor(0);
+        self.textarea.set_cursor(/*pos*/ 0);
         self.sync_popups();
     }
 
@@ -2092,14 +2090,14 @@ impl ChatComposer {
     ///
     /// The returned string **does not** include the leading `@`.
     fn current_at_token(textarea: &TextArea) -> Option<String> {
-        Self::current_prefixed_token(textarea, '@', false)
+        Self::current_prefixed_token(textarea, '@', /*allow_empty*/ false)
     }
 
     fn current_mention_token(&self) -> Option<String> {
         if !self.mentions_enabled() {
             return None;
         }
-        Self::current_prefixed_token(&self.textarea, '$', true)
+        Self::current_prefixed_token(&self.textarea, '$', /*allow_empty*/ true)
     }
 
     /// Replace the active `@token` (the one under the cursor) with `path`.
@@ -2329,7 +2327,7 @@ impl ChatComposer {
                         r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
                     );
                     self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                        history_cell::new_info_event(message, None),
+                        history_cell::new_info_event(message, /*hint*/ None),
                     )));
                     self.set_text_content_with_mention_bindings(
                         original_input.clone(),
@@ -2481,7 +2479,9 @@ impl ChatComposer {
             return (result, true);
         }
 
-        if let Some((text, text_elements)) = self.prepare_submission_text(true) {
+        if let Some((text, text_elements)) =
+            self.prepare_submission_text(/*record_history*/ true)
+        {
             if should_queue {
                 (
                     InputResult::Queued {
@@ -2788,7 +2788,7 @@ impl ChatComposer {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => self.handle_submission(false),
+            } => self.handle_submission(/*should_queue*/ false),
             input => self.handle_input_basic(input),
         }
     }
@@ -3473,7 +3473,6 @@ impl ChatComposer {
                     let fast_command_enabled = self.fast_command_enabled;
                     let personality_command_enabled = self.personality_command_enabled;
                     let realtime_conversation_enabled = self.realtime_conversation_enabled;
-                    let audio_device_selection_enabled = self.audio_device_selection_enabled;
                     let mut command_popup = CommandPopup::new(
                         self.custom_prompts.clone(),
                         CommandPopupFlags {
@@ -3482,7 +3481,6 @@ impl ChatComposer {
                             fast_command_enabled,
                             personality_command_enabled,
                             realtime_conversation_enabled,
-                            audio_device_selection_enabled,
                             windows_degraded_sandbox_active: self.windows_degraded_sandbox_active,
                         },
                     );
@@ -4160,7 +4158,7 @@ impl Renderable for ChatComposer {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_with_mask(area, buf, None);
+        self.render_with_mask(area, buf, /*mask_char*/ None);
     }
 }
 
@@ -4254,7 +4252,10 @@ impl ChatComposer {
                 let right_line = if status_line_active {
                     let full =
                         mode_indicator_line(self.collaboration_mode_indicator, show_cycle_hint);
-                    let compact = mode_indicator_line(self.collaboration_mode_indicator, false);
+                    let compact = mode_indicator_line(
+                        self.collaboration_mode_indicator,
+                        /*show_cycle_hint*/ false,
+                    );
                     let full_width = full.as_ref().map(|l| l.width() as u16).unwrap_or(0);
                     if can_show_left_with_context(hint_rect, left_width, full_width) {
                         full

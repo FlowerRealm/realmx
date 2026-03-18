@@ -1,4 +1,5 @@
 use crate::config::ConfigToml;
+use crate::config::profile::ConfigProfile;
 use crate::config::types::RawMcpServerConfig;
 use crate::features::FEATURES;
 use schemars::r#gen::SchemaGenerator;
@@ -54,12 +55,19 @@ pub(crate) fn mcp_servers_schema(schema_gen: &mut SchemaGenerator) -> Schema {
 
 /// Build the config schema for `config.toml`.
 pub fn config_schema() -> RootSchema {
+    schema_generator().into_root_schema_for::<ConfigToml>()
+}
+
+pub(crate) fn profile_schema() -> RootSchema {
+    schema_generator().into_root_schema_for::<ConfigProfile>()
+}
+
+fn schema_generator() -> SchemaGenerator {
     SchemaSettings::draft07()
         .with(|settings| {
             settings.option_add_null_type = false;
         })
         .into_generator()
-        .into_root_schema_for::<ConfigToml>()
 }
 
 /// Canonicalize a JSON value by sorting its keys.

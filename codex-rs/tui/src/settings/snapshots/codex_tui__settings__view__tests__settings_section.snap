@@ -1,0 +1,11 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / audio
+subtitle: Browse and edit settings under `audio` in user config.toml.
+Write scope: 1
+Edit this section: 1
+microphone: 1
+speaker: 1

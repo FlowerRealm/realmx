@@ -31,7 +31,7 @@ pub(crate) use legacy::legacy_feature_keys;
 pub enum Stage {
     /// Features that are still under development, not ready for external use
     UnderDevelopment,
-    /// Experimental features made available to users through the `/experimental` menu
+    /// Experimental features made available to users through `/settings`
     Experimental {
         name: &'static str,
         menu_description: &'static str,
@@ -154,8 +154,6 @@ pub enum Feature {
     Plugins,
     /// Allow the model to invoke the built-in image generation tool.
     ImageGeneration,
-    /// Route apps MCP calls through the configured gateway.
-    AppsMcpGateway,
     /// Allow prompting and installing missing MCP dependencies.
     SkillMcpDependencyInstall,
     /// Prompt for missing skill env var dependencies.
@@ -182,6 +180,8 @@ pub enum Feature {
     VoiceTranscription,
     /// Enable experimental realtime voice conversation mode in the TUI.
     RealtimeConversation,
+    /// Route interactive startup to the app-server-backed TUI implementation.
+    TuiAppServer,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
     /// Use the Responses API WebSocket transport for OpenAI by default.
@@ -341,7 +341,7 @@ impl Features {
             if self.enabled(feature.id) != feature.default_enabled {
                 otel.counter(
                     "codex.feature.state",
-                    1,
+                    /*inc*/ 1,
                     &[
                         ("feature", feature.key),
                         ("value", &self.enabled(feature.id).to_string()),
@@ -558,7 +558,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "JavaScript REPL",
             menu_description: "Enable a persistent Node-backed JavaScript REPL for interactive website debugging and other inline JavaScript execution capabilities. Requires Node >= v22.22.0 installed.",
-            announcement: "NEW: JavaScript REPL is now available in /experimental. Enable it, then start a new chat or restart Codex to use it.",
+            announcement: "NEW: JavaScript REPL is now available in /settings. Enable it, then start a new chat or restart Codex to use it.",
         },
         default_enabled: false,
     },
@@ -598,7 +598,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Removed,
         default_enabled: false,
     },
-    // Experimental program. Rendered in the `/experimental` menu for users.
+    // Experimental program. Rendered in `/settings` for users.
     FeatureSpec {
         id: Feature::CodexGitCommit,
         key: "codex_git_commit",
@@ -731,7 +731,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Apps",
             menu_description: "Use a connected ChatGPT App using \"$\". Install Apps via /apps command. Restart Codex after enabling.",
-            announcement: "NEW: Use ChatGPT Apps (Connectors) in Codex via $ mentions. Enable in /experimental and restart Codex!",
+            announcement: "NEW: Use ChatGPT Apps (Connectors) in Codex via $ mentions. Enable in /settings and restart Codex!",
         },
         default_enabled: false,
     },
@@ -750,12 +750,6 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::ImageGeneration,
         key: "image_generation",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::AppsMcpGateway,
-        key: "apps_mcp_gateway",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
@@ -785,9 +779,9 @@ pub const FEATURES: &[FeatureSpec] = &[
     },
     FeatureSpec {
         id: Feature::GuardianApproval,
-        key: "smart_approvals",
+        key: "guardian_approval",
         stage: Stage::Experimental {
-            name: "Smart Approvals",
+            name: "Guardian Approvals",
             menu_description: "When Codex needs approval for higher-risk actions (e.g. sandbox escapes or blocked network access), route eligible approval requests to a carefully-prompted security reviewer subagent rather than blocking the agent on your input. This can consume significantly more tokens because it runs a subagent on every approval request.",
             announcement: "",
         },
@@ -836,6 +830,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::TuiAppServer,
+        key: "tui_app_server",
+        stage: Stage::Experimental {
+            name: "App-server TUI",
+            menu_description: "Use the app-server-backed TUI implementation.",
+            announcement: "",
+        },
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::PreventIdleSleep,
         key: "prevent_idle_sleep",
         stage: if cfg!(any(
@@ -846,7 +850,7 @@ pub const FEATURES: &[FeatureSpec] = &[
             Stage::Experimental {
                 name: "Prevent sleep while running",
                 menu_description: "Keep your computer awake while Codex is running a thread.",
-                announcement: "NEW: Prevent sleep while running is now available in /experimental.",
+                announcement: "NEW: Prevent sleep while running is now available in /settings.",
             }
         } else {
             Stage::UnderDevelopment

@@ -34,6 +34,7 @@ use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
+use crate::settings::data::SettingsScope;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
@@ -49,9 +50,11 @@ use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
+use codex_core::config::edit::toml_value_to_item;
 use codex_core::config::types::ApprovalsReviewer;
 use codex_core::config::types::ModelAvailabilityNuxConfig;
 use codex_core::config_loader::ConfigLayerStackOrdering;
+use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_core::models_manager::manager::RefreshStrategy;
 use codex_core::models_manager::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
@@ -129,23 +132,33 @@ enum ThreadInteractiveRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SmartApprovalsMode {
+struct GuardianApprovalsMode {
     approval_policy: AskForApproval,
     approvals_reviewer: ApprovalsReviewer,
     sandbox_policy: SandboxPolicy,
 }
 
-/// Enabling the Smart Approvals experiment in the TUI should also switch the
-/// current `/approvals` settings to the matching Smart Approvals mode. Users
+/// Enabling the Guardian Approvals experiment in the TUI should also switch
+/// the current `/approvals` settings to the matching Guardian Approvals mode.
+/// Users
 /// can still change `/approvals` afterward; this just assumes that opting into
 /// the experiment means they want guardian review enabled immediately.
-fn smart_approvals_mode() -> SmartApprovalsMode {
-    SmartApprovalsMode {
+fn guardian_approvals_mode() -> GuardianApprovalsMode {
+    GuardianApprovalsMode {
         approval_policy: AskForApproval::OnRequest,
         approvals_reviewer: ApprovalsReviewer::GuardianSubagent,
         sandbox_policy: SandboxPolicy::new_workspace_write_policy(),
     }
 }
+
+fn feature_for_settings_key_path(key_path: &str) -> Option<Feature> {
+    let feature_key = key_path.strip_prefix("features.")?;
+    FEATURES
+        .iter()
+        .find(|spec| spec.key == feature_key)
+        .map(|spec| spec.id)
+}
+
 /// Baseline cadence for periodic stream commit animation ticks.
 ///
 /// Smooth-mode streaming drains one line per tick, so this interval controls
@@ -235,10 +248,10 @@ fn emit_skill_load_warnings(app_event_tx: &AppEventSender, errors: &[SkillErrorI
 fn emit_project_config_warnings(app_event_tx: &AppEventSender, config: &Config) {
     let mut disabled_folders = Vec::new();
 
-    for layer in config
-        .config_layer_stack
-        .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
-    {
+    for layer in config.config_layer_stack.get_layers(
+        ConfigLayerStackOrdering::LowestPrecedenceFirst,
+        /*include_disabled*/ true,
+    ) {
         let ConfigLayerSource::Project { dot_codex_folder } = &layer.name else {
             continue;
         };
@@ -797,6 +810,7 @@ impl App {
             .await?;
         self.apply_runtime_policy_overrides(&mut config);
         self.config = config;
+        self.active_profile = self.config.active_profile.clone();
         Ok(())
     }
 
@@ -830,8 +844,24 @@ impl App {
         self.sync_running_session_provider(&config).await?;
         self.chat_widget.set_config(config.clone());
         self.config = config;
+        self.active_profile = self.config.active_profile.clone();
         self.refresh_status_line();
         Ok(())
+    }
+
+    fn settings_segments(&self, key_path: &str, scope: SettingsScope) -> Result<Vec<String>> {
+        let scope = scope.normalized(self.active_profile.as_deref());
+        let mut segments = Vec::new();
+        if matches!(scope, SettingsScope::ActiveProfile) {
+            let profile = self
+                .active_profile
+                .as_deref()
+                .ok_or_else(|| color_eyre::eyre::eyre!("No active profile is available"))?;
+            segments.push("profiles".to_string());
+            segments.push(profile.to_string());
+        }
+        segments.extend(key_path.split('.').map(ToOwned::to_owned));
+        Ok(segments)
     }
     async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
         if let Err(err) = self.refresh_in_memory_config_from_disk().await {
@@ -925,15 +955,28 @@ impl App {
     }
 
     async fn update_feature_flags(&mut self, updates: Vec<(Feature, bool)>) {
+        let scope = SettingsScope::default_for(self.active_profile.as_deref());
+        self.update_feature_flags_in_scope(updates, scope).await;
+    }
+
+    async fn update_feature_flags_in_scope(
+        &mut self,
+        updates: Vec<(Feature, bool)>,
+        scope: SettingsScope,
+    ) {
         if updates.is_empty() {
             return;
         }
 
-        let smart_approvals_mode = smart_approvals_mode();
+        let scope = scope.normalized(self.active_profile.as_deref());
+        let guardian_approvals_preset = guardian_approvals_mode();
         let mut next_config = self.config.clone();
-        let active_profile = self.active_profile.clone();
+        let scoped_profile = match scope {
+            SettingsScope::Global => None,
+            SettingsScope::ActiveProfile => self.active_profile.clone(),
+        };
         let scoped_segments = |key: &str| {
-            if let Some(profile) = active_profile.as_deref() {
+            if let Some(profile) = scoped_profile.as_deref() {
                 vec!["profiles".to_string(), profile.to_string(), key.to_string()]
             } else {
                 vec![key.to_string()]
@@ -949,16 +992,16 @@ impl App {
         let mut approvals_reviewer_override = None;
         let mut sandbox_policy_override = None;
         let mut feature_updates_to_apply = Vec::with_capacity(updates.len());
-        // Smart Approvals owns `approvals_reviewer`, but disabling the feature
-        // from inside a profile should not silently clear a value configured at
-        // the root scope.
+        // Guardian Approvals owns `approvals_reviewer`, but disabling the
+        // feature from inside a profile should not silently clear a value
+        // configured at the root scope.
         let (root_approvals_reviewer_blocks_profile_disable, profile_approvals_reviewer_configured) = {
             let effective_config = next_config.config_layer_stack.effective_config();
             let root_blocks_disable = effective_config
                 .as_table()
                 .and_then(|table| table.get("approvals_reviewer"))
                 .is_some_and(|value| value != &TomlValue::String("user".to_string()));
-            let profile_configured = active_profile.as_deref().is_some_and(|profile| {
+            let profile_configured = scoped_profile.as_deref().is_some_and(|profile| {
                 effective_config
                     .as_table()
                     .and_then(|table| table.get("profiles"))
@@ -971,21 +1014,22 @@ impl App {
         };
         let mut permissions_history_label: Option<&'static str> = None;
         let mut builder = ConfigEditsBuilder::new(&self.config.codex_home)
-            .with_profile(self.active_profile.as_deref());
+            .with_profile(scoped_profile.as_deref());
 
         for (feature, enabled) in updates {
             let feature_key = feature.key();
             let mut feature_edits = Vec::new();
             if feature == Feature::GuardianApproval
                 && !enabled
-                && self.active_profile.is_some()
+                && matches!(scope, SettingsScope::ActiveProfile)
                 && root_approvals_reviewer_blocks_profile_disable
             {
                 self.chat_widget.add_error_message(
-                        "Cannot disable Smart Approvals in this profile because `approvals_reviewer` is configured outside the active profile.".to_string(),
-                    );
+                    "Cannot disable Guardian Approvals in this profile because `approvals_reviewer` is configured outside the active profile.".to_string(),
+                );
                 continue;
             }
+
             let mut feature_config = next_config.clone();
             if let Err(err) = feature_config.features.set_enabled(feature, enabled) {
                 tracing::error!(
@@ -993,11 +1037,11 @@ impl App {
                     feature = feature_key,
                     "failed to update constrained feature flags"
                 );
-                self.chat_widget.add_error_message(format!(
-                    "Failed to update experimental feature `{feature_key}`: {err}"
-                ));
+                self.chat_widget
+                    .add_error_message(format!("Failed to update feature `{feature_key}`: {err}"));
                 continue;
             }
+
             let effective_enabled = feature_config.features.enabled(feature);
             if feature == Feature::GuardianApproval {
                 let previous_approvals_reviewer = feature_config.approvals_reviewer;
@@ -1005,16 +1049,22 @@ impl App {
                     // Persist the reviewer setting so future sessions keep the
                     // experiment's matching `/approvals` mode until the user
                     // changes it explicitly.
-                    feature_config.approvals_reviewer = smart_approvals_mode.approvals_reviewer;
+                    feature_config.approvals_reviewer =
+                        guardian_approvals_preset.approvals_reviewer;
                     feature_edits.push(ConfigEdit::SetPath {
                         segments: scoped_segments("approvals_reviewer"),
-                        value: smart_approvals_mode.approvals_reviewer.to_string().into(),
+                        value: guardian_approvals_preset
+                            .approvals_reviewer
+                            .to_string()
+                            .into(),
                     });
-                    if previous_approvals_reviewer != smart_approvals_mode.approvals_reviewer {
-                        permissions_history_label = Some("Smart Approvals");
+                    if previous_approvals_reviewer != guardian_approvals_preset.approvals_reviewer {
+                        permissions_history_label = Some("Guardian Approvals");
                     }
-                } else if !effective_enabled {
-                    if profile_approvals_reviewer_configured || self.active_profile.is_none() {
+                } else {
+                    if profile_approvals_reviewer_configured
+                        || matches!(scope, SettingsScope::Global)
+                    {
                         feature_edits.push(ConfigEdit::ClearPath {
                             segments: scoped_segments("approvals_reviewer"),
                         });
@@ -1026,24 +1076,25 @@ impl App {
                 }
                 approvals_reviewer_override = Some(feature_config.approvals_reviewer);
             }
+
             if feature == Feature::GuardianApproval && effective_enabled {
                 // The feature flag alone is not enough for the live session.
-                // We also align approval policy + sandbox to the Smart
-                // Approvals preset so enabling the experiment immediately makes
-                // guardian review observable in the current thread.
+                // We also align approval policy + sandbox to the Guardian
+                // Approvals preset so enabling the experiment immediately
+                // makes guardian review observable in the current thread.
                 if !self.try_set_approval_policy_on_config(
                     &mut feature_config,
-                    smart_approvals_mode.approval_policy,
-                    "Failed to enable Smart Approvals",
-                    "failed to set smart approvals approval policy on staged config",
+                    guardian_approvals_preset.approval_policy,
+                    "Failed to enable Guardian Approvals",
+                    "failed to set guardian approvals approval policy on staged config",
                 ) {
                     continue;
                 }
                 if !self.try_set_sandbox_policy_on_config(
                     &mut feature_config,
-                    smart_approvals_mode.sandbox_policy.clone(),
-                    "Failed to enable Smart Approvals",
-                    "failed to set smart approvals sandbox policy on staged config",
+                    guardian_approvals_preset.sandbox_policy.clone(),
+                    "Failed to enable Guardian Approvals",
+                    "failed to set guardian approvals sandbox policy on staged config",
                 ) {
                     continue;
                 }
@@ -1057,9 +1108,10 @@ impl App {
                         value: "workspace-write".into(),
                     },
                 ]);
-                approval_policy_override = Some(smart_approvals_mode.approval_policy);
-                sandbox_policy_override = Some(smart_approvals_mode.sandbox_policy.clone());
+                approval_policy_override = Some(guardian_approvals_preset.approval_policy);
+                sandbox_policy_override = Some(guardian_approvals_preset.sandbox_policy.clone());
             }
+
             next_config = feature_config;
             feature_updates_to_apply.push((feature, effective_enabled));
             builder = builder
@@ -1067,17 +1119,34 @@ impl App {
                 .set_feature_enabled(feature_key, effective_enabled);
         }
 
-        // Persist first so the live session does not diverge from disk if the
-        // config edit fails. Runtime/UI state is patched below only after the
-        // durable config update succeeds.
         if let Err(err) = builder.apply().await {
             tracing::error!(error = %err, "failed to persist feature flags");
             self.chat_widget
-                .add_error_message(format!("Failed to update experimental features: {err}"));
+                .add_error_message(format!("Failed to update feature flags: {err}"));
             return;
         }
 
+        let current_cwd = self.config.cwd.clone();
+        match self.rebuild_config_for_cwd(current_cwd).await {
+            Ok(mut refreshed_config) => {
+                self.apply_runtime_policy_overrides(&mut refreshed_config);
+                next_config.config_layer_stack = refreshed_config.config_layer_stack;
+                next_config.active_profile = refreshed_config.active_profile;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "persisted feature flags but failed to refresh config metadata from disk"
+                );
+                self.chat_widget.add_error_message(format!(
+                    "Updated feature flags, but failed to refresh config metadata: {err}"
+                ));
+            }
+        }
+
         self.config = next_config;
+        self.active_profile = self.config.active_profile.clone();
+        self.chat_widget.set_config(self.config.clone());
         for (feature, effective_enabled) in feature_updates_to_apply {
             self.chat_widget
                 .set_feature_enabled(feature, effective_enabled);
@@ -1096,67 +1165,187 @@ impl App {
         {
             tracing::error!(
                 error = %err,
-                "failed to set smart approvals sandbox policy on chat config"
+                "failed to set guardian approvals sandbox policy on chat config"
             );
             self.chat_widget
-                .add_error_message(format!("Failed to enable Smart Approvals: {err}"));
+                .add_error_message(format!("Failed to enable Guardian Approvals: {err}"));
         }
 
         if approval_policy_override.is_some()
             || approvals_reviewer_override.is_some()
             || sandbox_policy_override.is_some()
         {
-            // This uses `OverrideTurnContext` intentionally: toggling the
-            // experiment should update the active thread's effective approval
-            // settings immediately, just like a `/approvals` selection. Without
-            // this runtime patch, the config edit would only affect future
-            // sessions or turns recreated from disk.
-            let op = Op::OverrideTurnContext {
-                cwd: None,
-                approval_policy: approval_policy_override,
-                approvals_reviewer: approvals_reviewer_override,
-                sandbox_policy: sandbox_policy_override,
-                windows_sandbox_level: None,
-                model: None,
-                effort: None,
-                summary: None,
-                service_tier: None,
-                collaboration_mode: None,
-                personality: None,
-            };
-            let replay_state_op =
-                ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
-            let submitted = self.chat_widget.submit_op(op);
-            if submitted && let Some(op) = replay_state_op.as_ref() {
-                self.note_active_thread_outbound_op(op).await;
-                self.refresh_pending_thread_approvals().await;
-            }
+            self.apply_turn_context_override(
+                approval_policy_override,
+                approvals_reviewer_override,
+                sandbox_policy_override,
+            )
+            .await;
         }
 
         if windows_sandbox_changed {
-            #[cfg(target_os = "windows")]
-            {
-                let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
-                self.app_event_tx
-                    .send(AppEvent::CodexOp(Op::OverrideTurnContext {
-                        cwd: None,
-                        approval_policy: None,
-                        approvals_reviewer: None,
-                        sandbox_policy: None,
-                        windows_sandbox_level: Some(windows_sandbox_level),
-                        model: None,
-                        effort: None,
-                        summary: None,
-                        service_tier: None,
-                        collaboration_mode: None,
-                        personality: None,
-                    }));
-            }
+            self.sync_windows_sandbox_context();
         }
 
         if let Some(label) = permissions_history_label {
-            self.chat_widget
-                .add_info_message(format!("Permissions updated to {label}"), None);
+            self.chat_widget.add_info_message(
+                format!("Permissions updated to {label}"),
+                /*hint*/ None,
+            );
+        }
+    }
+
+    async fn clear_feature_override_in_scope(
+        &mut self,
+        feature: Feature,
+        scope: SettingsScope,
+    ) -> Result<()> {
+        let scope = scope.normalized(self.active_profile.as_deref());
+        let scoped_profile = match scope {
+            SettingsScope::Global => None,
+            SettingsScope::ActiveProfile => Some(
+                self.active_profile
+                    .clone()
+                    .ok_or_else(|| color_eyre::eyre::eyre!("No active profile is available"))?,
+            ),
+        };
+        let previous_enabled = self.config.features.enabled(feature);
+        let previous_reviewer = self.config.approvals_reviewer;
+        let mut builder = ConfigEditsBuilder::new(&self.config.codex_home)
+            .with_profile(scoped_profile.as_deref())
+            .clear_feature_override(feature.key());
+        if feature == Feature::GuardianApproval {
+            let mut segments = Vec::new();
+            if let Some(profile) = scoped_profile.as_deref() {
+                segments.extend(["profiles".to_string(), profile.to_string()]);
+            }
+            segments.push("approvals_reviewer".to_string());
+            builder = builder.with_edits([ConfigEdit::ClearPath { segments }]);
+        }
+
+        builder
+            .apply()
+            .await
+            .map_err(|err| color_eyre::eyre::eyre!("{err}"))?;
+        self.refresh_in_memory_config_from_disk().await?;
+        self.chat_widget.set_config(self.config.clone());
+        self.refresh_status_line();
+        self.sync_feature_runtime_after_reload(feature, previous_enabled, previous_reviewer)
+            .await;
+        Ok(())
+    }
+
+    async fn sync_feature_runtime_after_reload(
+        &mut self,
+        feature: Feature,
+        previous_enabled: bool,
+        previous_reviewer: ApprovalsReviewer,
+    ) {
+        let effective_enabled = self.config.features.enabled(feature);
+        self.chat_widget
+            .set_feature_enabled(feature, effective_enabled);
+
+        if feature == Feature::GuardianApproval {
+            self.set_approvals_reviewer_in_app_and_widget(self.config.approvals_reviewer);
+            let mut sandbox_policy_override = None;
+            if effective_enabled {
+                self.chat_widget
+                    .set_approval_policy(self.config.permissions.approval_policy.value());
+                let sandbox_policy = self.config.permissions.sandbox_policy.get().clone();
+                if let Err(err) = self.chat_widget.set_sandbox_policy(sandbox_policy.clone()) {
+                    tracing::error!(
+                        error = %err,
+                        "failed to sync guardian approvals sandbox policy after clearing feature override"
+                    );
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to apply Guardian Approvals after clearing override: {err}"
+                    ));
+                } else {
+                    sandbox_policy_override = Some(sandbox_policy);
+                }
+            }
+
+            if previous_enabled != effective_enabled
+                || previous_reviewer != self.config.approvals_reviewer
+            {
+                self.apply_turn_context_override(
+                    effective_enabled.then_some(self.config.permissions.approval_policy.value()),
+                    Some(self.config.approvals_reviewer),
+                    sandbox_policy_override,
+                )
+                .await;
+            }
+
+            let permissions_history_label = if effective_enabled {
+                (previous_reviewer != self.config.approvals_reviewer || !previous_enabled)
+                    .then_some("Guardian Approvals")
+            } else if previous_reviewer != self.config.approvals_reviewer {
+                Some("Default")
+            } else {
+                None
+            };
+            if let Some(label) = permissions_history_label {
+                self.chat_widget.add_info_message(
+                    format!("Permissions updated to {label}"),
+                    /*hint*/ None,
+                );
+            }
+        }
+
+        if matches!(
+            feature,
+            Feature::WindowsSandbox | Feature::WindowsSandboxElevated
+        ) {
+            self.sync_windows_sandbox_context();
+        }
+    }
+
+    async fn apply_turn_context_override(
+        &mut self,
+        approval_policy: Option<AskForApproval>,
+        approvals_reviewer: Option<ApprovalsReviewer>,
+        sandbox_policy: Option<SandboxPolicy>,
+    ) {
+        let op = Op::OverrideTurnContext {
+            cwd: None,
+            approval_policy,
+            approvals_reviewer,
+            sandbox_policy,
+            windows_sandbox_level: None,
+            model: None,
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        };
+        let replay_state_op =
+            ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
+        let submitted = self.chat_widget.submit_op(op);
+        if submitted && let Some(op) = replay_state_op.as_ref() {
+            self.note_active_thread_outbound_op(op).await;
+            self.refresh_pending_thread_approvals().await;
+        }
+    }
+
+    fn sync_windows_sandbox_context(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
+            self.app_event_tx
+                .send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                    cwd: None,
+                    approval_policy: None,
+                    approvals_reviewer: None,
+                    sandbox_policy: None,
+                    windows_sandbox_level: Some(windows_sandbox_level),
+                    model: None,
+                    effort: None,
+                    summary: None,
+                    service_tier: None,
+                    collaboration_mode: None,
+                    personality: None,
+                }));
         }
     }
 
@@ -1168,7 +1357,7 @@ impl App {
         }
 
         self.chat_widget
-            .add_info_message(format!("Opened {url} in your browser."), None);
+            .add_info_message(format!("Opened {url} in your browser."), /*hint*/ None);
     }
 
     fn clear_ui_header_lines_with_version(
@@ -1284,7 +1473,7 @@ impl App {
         if self.active_thread_id.is_some() {
             return;
         }
-        self.set_thread_active(thread_id, true).await;
+        self.set_thread_active(thread_id, /*active*/ true).await;
         let receiver = if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
             channel.receiver.take()
         } else {
@@ -1325,7 +1514,7 @@ impl App {
 
     async fn clear_active_thread(&mut self) {
         if let Some(active_id) = self.active_thread_id.take() {
-            self.set_thread_active(active_id, false).await;
+            self.set_thread_active(active_id, /*active*/ false).await;
         }
         self.active_thread_rx = None;
         self.refresh_pending_thread_approvals().await;
@@ -1606,7 +1795,10 @@ impl App {
             let thread_id = session.session_id;
             self.primary_thread_id = Some(thread_id);
             self.primary_session_configured = Some(session.clone());
-            self.upsert_agent_picker_thread(thread_id, None, None, false);
+            self.upsert_agent_picker_thread(
+                thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+                /*is_closed*/ false,
+            );
             self.ensure_thread_channel(thread_id);
             self.activate_thread_channel(thread_id).await;
             self.enqueue_thread_event(thread_id, event).await?;
@@ -1637,7 +1829,7 @@ impl App {
                         thread_id,
                         session_source.get_nickname(),
                         session_source.get_agent_role(),
-                        false,
+                        /*is_closed*/ false,
                     );
                 }
                 Err(_) => {
@@ -1656,7 +1848,7 @@ impl App {
 
         if self.agent_navigation.is_empty() {
             self.chat_widget
-                .add_info_message("No agents available yet.".to_string(), None);
+                .add_info_message("No agents available yet.".to_string(), /*hint*/ None);
             return;
         }
 
@@ -1779,7 +1971,7 @@ impl App {
         if is_replay_only {
             self.chat_widget.add_info_message(
                 format!("Agent thread {thread_id} is closed. Replaying saved transcript."),
-                None,
+                /*hint*/ None,
             );
         }
         self.drain_active_thread_events(tui).await?;
@@ -1932,13 +2124,15 @@ impl App {
         if let Some(event) = snapshot.session_configured {
             self.handle_codex_event_replay(event);
         }
-        self.chat_widget.set_queue_autosend_suppressed(true);
+        self.chat_widget
+            .set_queue_autosend_suppressed(/*suppressed*/ true);
         self.chat_widget
             .restore_thread_input_state(snapshot.input_state);
         for event in snapshot.events {
             self.handle_codex_event_replay(event);
         }
-        self.chat_widget.set_queue_autosend_suppressed(false);
+        self.chat_widget
+            .set_queue_autosend_suppressed(/*suppressed*/ false);
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();
         }
@@ -2053,7 +2247,7 @@ impl App {
             .as_ref()
             .is_some_and(|cmd| !cmd.is_empty())
         {
-            session_telemetry.counter("codex.status_line", 1, &[]);
+            session_telemetry.counter("codex.status_line", /*inc*/ 1, &[]);
         }
 
         let status_line_invalid_items_warned = Arc::new(AtomicBool::new(false));
@@ -2095,7 +2289,7 @@ impl App {
                         config.clone(),
                         target_session.path.clone(),
                         auth_manager.clone(),
-                        None,
+                        /*parent_trace*/ None,
                     )
                     .await
                     .wrap_err_with(|| {
@@ -2126,14 +2320,18 @@ impl App {
                 ChatWidget::new_from_existing(init, resumed.thread, resumed.session_configured)
             }
             SessionSelection::Fork(target_session) => {
-                session_telemetry.counter("codex.thread.fork", 1, &[("source", "cli_subcommand")]);
+                session_telemetry.counter(
+                    "codex.thread.fork",
+                    /*inc*/ 1,
+                    &[("source", "cli_subcommand")],
+                );
                 let forked = thread_manager
                     .fork_thread(
                         usize::MAX,
                         config.clone(),
                         target_session.path.clone(),
-                        false,
-                        None,
+                        /*persist_extended_history*/ false,
+                        /*parent_trace*/ None,
                     )
                     .await
                     .wrap_err_with(|| {
@@ -2434,13 +2632,19 @@ impl App {
                 self.start_fresh_session_with_summary_hint(tui).await;
             }
             AppEvent::ClearUi => {
-                self.clear_terminal_ui(tui, false)?;
+                self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
                 self.start_fresh_session_with_summary_hint(tui).await;
             }
             AppEvent::OpenResumePicker => {
-                match crate::resume_picker::run_resume_picker(tui, &self.config, false).await? {
+                match crate::resume_picker::run_resume_picker(
+                    tui,
+                    &self.config,
+                    /*show_all*/ false,
+                )
+                .await?
+                {
                     SessionSelection::Resume(target_session) => {
                         let current_cwd = self.config.cwd.clone();
                         let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
@@ -2450,7 +2654,7 @@ impl App {
                             target_session.thread_id,
                             &target_session.path,
                             CwdPromptAction::Resume,
-                            true,
+                            /*allow_prompt*/ true,
                         )
                         .await?
                         {
@@ -2484,7 +2688,7 @@ impl App {
                                 resume_config.clone(),
                                 target_session.path.clone(),
                                 self.auth_manager.clone(),
-                                None,
+                                /*parent_trace*/ None,
                             )
                             .await
                         {
@@ -2535,7 +2739,7 @@ impl App {
             AppEvent::ForkCurrentSession => {
                 self.session_telemetry.counter(
                     "codex.thread.fork",
-                    1,
+                    /*inc*/ 1,
                     &[("source", "slash_command")],
                 );
                 let summary = session_summary(
@@ -2553,7 +2757,13 @@ impl App {
                     if path.exists() {
                         match self
                             .server
-                            .fork_thread(usize::MAX, self.config.clone(), path.clone(), false, None)
+                            .fork_thread(
+                                usize::MAX,
+                                self.config.clone(),
+                                path.clone(),
+                                /*persist_extended_history*/ false,
+                                /*parent_trace*/ None,
+                            )
                             .await
                         {
                             Ok(forked) => {
@@ -2755,8 +2965,117 @@ impl App {
             AppEvent::UpdatePersonality(personality) => {
                 self.on_update_personality(personality);
             }
-            AppEvent::OpenRealtimeAudioDeviceSelection { kind } => {
-                self.chat_widget.open_realtime_audio_device_selection(kind);
+            AppEvent::OpenSettings {
+                scope,
+                screen,
+                selected_item_key,
+            } => {
+                self.chat_widget
+                    .open_settings(scope, screen, selected_item_key);
+            }
+            AppEvent::OpenSettingsScopePicker {
+                current_scope,
+                current_screen,
+            } => {
+                self.chat_widget
+                    .open_settings_scope_picker(current_scope, current_screen);
+            }
+            AppEvent::OpenSettingEditor {
+                key_path,
+                scope,
+                screen,
+            } => {
+                self.chat_widget
+                    .open_setting_editor(key_path, scope, screen);
+            }
+            AppEvent::SaveSettingValue {
+                key_path,
+                scope,
+                screen,
+                value,
+            } => {
+                if let Some(feature) = feature_for_settings_key_path(&key_path) {
+                    let result = match value {
+                        Some(TomlValue::Boolean(enabled)) => {
+                            self.update_feature_flags_in_scope(vec![(feature, enabled)], scope)
+                                .await;
+                            Ok(())
+                        }
+                        Some(_) => Err(color_eyre::eyre::eyre!(
+                            "Feature flags only accept `true` or `false`"
+                        )),
+                        None => self.clear_feature_override_in_scope(feature, scope).await,
+                    };
+                    match result {
+                        Ok(()) => {
+                            self.chat_widget.open_settings(
+                                scope.normalized(self.active_profile.as_deref()),
+                                screen,
+                                Some(key_path),
+                            );
+                        }
+                        Err(err) => {
+                            tracing::error!(error = %err, "failed to persist feature settings edit");
+                            self.chat_widget
+                                .add_error_message(format!("Failed to save `{key_path}`: {err}"));
+                        }
+                    }
+                    return Ok(AppRunControl::Continue);
+                }
+
+                let segments = match self.settings_segments(&key_path, scope) {
+                    Ok(segments) => segments,
+                    Err(err) => {
+                        self.chat_widget
+                            .add_error_message(format!("Failed to resolve `{key_path}`: {err}"));
+                        return Ok(AppRunControl::Continue);
+                    }
+                };
+                let edit = match value {
+                    Some(value) => match toml_value_to_item(&value) {
+                        Ok(item) => ConfigEdit::SetPath {
+                            segments,
+                            value: item,
+                        },
+                        Err(err) => {
+                            self.chat_widget
+                                .add_error_message(format!("Failed to encode `{key_path}`: {err}"));
+                            return Ok(AppRunControl::Continue);
+                        }
+                    },
+                    None => ConfigEdit::ClearPath { segments },
+                };
+
+                match ConfigEditsBuilder::new(&self.config.codex_home)
+                    .with_edits([edit])
+                    .apply()
+                    .await
+                {
+                    Ok(()) => {
+                        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+                            tracing::error!(
+                                error = %err,
+                                "saved setting but failed to refresh config from disk"
+                            );
+                            self.chat_widget.add_error_message(format!(
+                                "Saved `{key_path}`, but failed to refresh config: {err}"
+                            ));
+                            return Ok(AppRunControl::Continue);
+                        }
+                        self.chat_widget.set_config(self.config.clone());
+                        self.refresh_status_line();
+                        self.chat_widget.open_settings(
+                            scope.normalized(self.active_profile.as_deref()),
+                            screen,
+                            Some(key_path),
+                        );
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to persist settings edit");
+                        self.chat_widget
+                            .add_error_message(format!("Failed to save `{key_path}`: {err}"));
+                    }
+                }
             }
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
@@ -2811,7 +3130,7 @@ impl App {
             AppEvent::OpenWindowsSandboxFallbackPrompt { preset } => {
                 self.session_telemetry.counter(
                     "codex.windows_sandbox.fallback_prompt_shown",
-                    1,
+                    /*inc*/ 1,
                     &[],
                 );
                 self.chat_widget.clear_windows_sandbox_setup_status();
@@ -3005,7 +3324,7 @@ impl App {
                     self.chat_widget
                         .add_to_history(history_cell::new_info_event(
                             format!("Sandbox read access granted for {}", path.display()),
-                            None,
+                            /*hint*/ None,
                         ));
                 }
             },
@@ -3157,8 +3476,10 @@ impl App {
                                 "Provider removed but failed to reload config: {err}"
                             ));
                         } else {
-                            self.chat_widget
-                                .add_info_message(format!("Removed provider {id}"), None);
+                            self.chat_widget.add_info_message(
+                                format!("Removed provider {id}"),
+                                /*hint*/ None,
+                            );
                         }
                     }
                     Err(err) => {
@@ -3244,8 +3565,10 @@ impl App {
                                 "Provider switched but failed to reload config: {err}"
                             ));
                         } else {
-                            self.chat_widget
-                                .add_info_message(format!("Provider changed to {id}"), None);
+                            self.chat_widget.add_info_message(
+                                format!("Provider changed to {id}"),
+                                /*hint*/ None,
+                            );
                         }
                     }
                     Err(err) => {
@@ -3279,7 +3602,7 @@ impl App {
                             message.push_str(profile);
                             message.push_str(" profile");
                         }
-                        self.chat_widget.add_info_message(message, None);
+                        self.chat_widget.add_info_message(message, /*hint*/ None);
                     }
                     Err(err) => {
                         tracing::error!(
@@ -3313,7 +3636,7 @@ impl App {
                             message.push_str(profile);
                             message.push_str(" profile");
                         }
-                        self.chat_widget.add_info_message(message, None);
+                        self.chat_widget.add_info_message(message, /*hint*/ None);
                     }
                     Err(err) => {
                         tracing::error!(
@@ -3349,7 +3672,7 @@ impl App {
                             message.push_str(profile);
                             message.push_str(" profile");
                         }
-                        self.chat_widget.add_info_message(message, None);
+                        self.chat_widget.add_info_message(message, /*hint*/ None);
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "failed to persist fast mode selection");
@@ -3396,7 +3719,7 @@ impl App {
                             let selection = name.unwrap_or_else(|| "System default".to_string());
                             self.chat_widget.add_info_message(
                                 format!("Realtime {} set to {selection}", kind.noun()),
-                                None,
+                                /*hint*/ None,
                             );
                         }
                     }
@@ -3542,7 +3865,7 @@ impl App {
             }
             AppEvent::PersistFullAccessWarningAcknowledged => {
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
-                    .set_hide_full_access_warning(true)
+                    .set_hide_full_access_warning(/*acknowledged*/ true)
                     .apply()
                     .await
                 {
@@ -3557,7 +3880,7 @@ impl App {
             }
             AppEvent::PersistWorldWritableWarningAcknowledged => {
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
-                    .set_hide_world_writable_warning(true)
+                    .set_hide_world_writable_warning(/*acknowledged*/ true)
                     .apply()
                     .await
                 {
@@ -3572,7 +3895,7 @@ impl App {
             }
             AppEvent::PersistRateLimitSwitchPromptHidden => {
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
-                    .set_hide_rate_limit_model_nudge(true)
+                    .set_hide_rate_limit_model_nudge(/*acknowledged*/ true)
                     .apply()
                     .await
                 {
@@ -3968,7 +4291,7 @@ impl App {
                     format!(
                         "Agent thread {closed_thread_id} closed. Switched back to main thread."
                     ),
-                    None,
+                    /*hint*/ None,
                 );
             } else {
                 self.clear_active_thread().await;
@@ -4007,7 +4330,7 @@ impl App {
             thread_id,
             config_snapshot.session_source.get_nickname(),
             config_snapshot.session_source.get_agent_role(),
-            false,
+            /*is_closed*/ false,
         );
         let event = Event {
             id: String::new(),
@@ -4175,7 +4498,7 @@ impl App {
     fn reset_external_editor_state(&mut self, tui: &mut tui::Tui) {
         self.chat_widget
             .set_external_editor_state(ExternalEditorState::Closed);
-        self.chat_widget.set_footer_hint_override(None);
+        self.chat_widget.set_footer_hint_override(/*items*/ None);
         tui.frame_requester().schedule_frame();
     }
 
@@ -4239,7 +4562,7 @@ impl App {
                 if !self.chat_widget.can_run_ctrl_l_clear_now() {
                     return;
                 }
-                if let Err(err) = self.clear_terminal_ui(tui, false) {
+                if let Err(err) = self.clear_terminal_ui(tui, /*redraw_header*/ false) {
                     tracing::warn!(error = %err, "failed to clear terminal UI");
                     self.chat_widget
                         .add_error_message(format!("Failed to clear terminal UI: {err}"));
@@ -5554,11 +5877,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_feature_flags_enabling_guardian_selects_smart_approvals() -> Result<()> {
+    async fn update_feature_flags_enabling_guardian_selects_guardian_approvals() -> Result<()> {
         let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let smart_approvals = smart_approvals_mode();
+        let guardian_approvals = guardian_approvals_mode();
 
         app.update_feature_flags(vec![(Feature::GuardianApproval, true)])
             .await;
@@ -5572,11 +5895,11 @@ mod tests {
         );
         assert_eq!(
             app.config.approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(
             app.config.permissions.approval_policy.value(),
-            smart_approvals.approval_policy
+            guardian_approvals.approval_policy
         );
         assert_eq!(
             app.chat_widget
@@ -5584,7 +5907,7 @@ mod tests {
                 .permissions
                 .approval_policy
                 .value(),
-            smart_approvals.approval_policy
+            guardian_approvals.approval_policy
         );
         assert_eq!(
             app.chat_widget
@@ -5592,11 +5915,11 @@ mod tests {
                 .permissions
                 .sandbox_policy
                 .get(),
-            &smart_approvals.sandbox_policy
+            &guardian_approvals.sandbox_policy
         );
         assert_eq!(
             app.chat_widget.config_ref().approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(app.runtime_approval_policy_override, None);
         assert_eq!(app.runtime_sandbox_policy_override, None);
@@ -5604,9 +5927,9 @@ mod tests {
             op_rx.try_recv(),
             Ok(Op::OverrideTurnContext {
                 cwd: None,
-                approval_policy: Some(smart_approvals.approval_policy),
-                approvals_reviewer: Some(smart_approvals.approvals_reviewer),
-                sandbox_policy: Some(smart_approvals.sandbox_policy.clone()),
+                approval_policy: Some(guardian_approvals.approval_policy),
+                approvals_reviewer: Some(guardian_approvals.approvals_reviewer),
+                sandbox_policy: Some(guardian_approvals.sandbox_policy.clone()),
                 windows_sandbox_level: None,
                 model: None,
                 effort: None,
@@ -5626,10 +5949,10 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(rendered.contains("Permissions updated to Smart Approvals"));
+        assert!(rendered.contains("Permissions updated to Guardian Approvals"));
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-        assert!(config.contains("smart_approvals = true"));
+        assert!(config.contains("guardian_approval = true"));
         assert!(config.contains("approvals_reviewer = \"guardian_subagent\""));
         assert!(config.contains("approval_policy = \"on-request\""));
         assert!(config.contains("sandbox_mode = \"workspace-write\""));
@@ -5643,7 +5966,7 @@ mod tests {
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
-        let config_toml = "approvals_reviewer = \"guardian_subagent\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nsmart_approvals = true\n";
+        let config_toml = "approvals_reviewer = \"guardian_subagent\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
         app.config.config_layer_stack = app
@@ -5720,7 +6043,7 @@ mod tests {
         assert!(rendered.contains("Permissions updated to Default"));
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-        assert!(!config.contains("smart_approvals = true"));
+        assert!(!config.contains("guardian_approval = true"));
         assert!(!config.contains("approvals_reviewer ="));
         assert!(config.contains("approval_policy = \"on-request\""));
         assert!(config.contains("sandbox_mode = \"workspace-write\""));
@@ -5733,7 +6056,7 @@ mod tests {
         let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let smart_approvals = smart_approvals_mode();
+        let guardian_approvals = guardian_approvals_mode();
         let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
         let config_toml = "approvals_reviewer = \"user\"\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
@@ -5752,15 +6075,15 @@ mod tests {
         assert!(app.config.features.enabled(Feature::GuardianApproval));
         assert_eq!(
             app.config.approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(
             app.chat_widget.config_ref().approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(
             app.config.permissions.approval_policy.value(),
-            smart_approvals.approval_policy
+            guardian_approvals.approval_policy
         );
         assert_eq!(
             app.chat_widget
@@ -5768,15 +6091,15 @@ mod tests {
                 .permissions
                 .sandbox_policy
                 .get(),
-            &smart_approvals.sandbox_policy
+            &guardian_approvals.sandbox_policy
         );
         assert_eq!(
             op_rx.try_recv(),
             Ok(Op::OverrideTurnContext {
                 cwd: None,
-                approval_policy: Some(smart_approvals.approval_policy),
-                approvals_reviewer: Some(smart_approvals.approvals_reviewer),
-                sandbox_policy: Some(smart_approvals.sandbox_policy.clone()),
+                approval_policy: Some(guardian_approvals.approval_policy),
+                approvals_reviewer: Some(guardian_approvals.approvals_reviewer),
+                sandbox_policy: Some(guardian_approvals.sandbox_policy.clone()),
                 windows_sandbox_level: None,
                 model: None,
                 effort: None,
@@ -5789,7 +6112,7 @@ mod tests {
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
         assert!(config.contains("approvals_reviewer = \"guardian_subagent\""));
-        assert!(config.contains("smart_approvals = true"));
+        assert!(config.contains("guardian_approval = true"));
         assert!(config.contains("approval_policy = \"on-request\""));
         assert!(config.contains("sandbox_mode = \"workspace-write\""));
         Ok(())
@@ -5802,7 +6125,7 @@ mod tests {
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
-        let config_toml = "approvals_reviewer = \"user\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nsmart_approvals = true\n";
+        let config_toml = "approvals_reviewer = \"user\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
         app.config.config_layer_stack = app
@@ -5849,7 +6172,7 @@ mod tests {
         );
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-        assert!(!config.contains("smart_approvals = true"));
+        assert!(!config.contains("guardian_approval = true"));
         assert!(!config.contains("approvals_reviewer ="));
         Ok(())
     }
@@ -5860,7 +6183,7 @@ mod tests {
         let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let smart_approvals = smart_approvals_mode();
+        let guardian_approvals = guardian_approvals_mode();
         app.active_profile = Some("guardian".to_string());
         let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
         let config_toml = "profile = \"guardian\"\napprovals_reviewer = \"user\"\n";
@@ -5880,19 +6203,19 @@ mod tests {
         assert!(app.config.features.enabled(Feature::GuardianApproval));
         assert_eq!(
             app.config.approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(
             app.chat_widget.config_ref().approvals_reviewer,
-            smart_approvals.approvals_reviewer
+            guardian_approvals.approvals_reviewer
         );
         assert_eq!(
             op_rx.try_recv(),
             Ok(Op::OverrideTurnContext {
                 cwd: None,
-                approval_policy: Some(smart_approvals.approval_policy),
-                approvals_reviewer: Some(smart_approvals.approvals_reviewer),
-                sandbox_policy: Some(smart_approvals.sandbox_policy.clone()),
+                approval_policy: Some(guardian_approvals.approval_policy),
+                approvals_reviewer: Some(guardian_approvals.approvals_reviewer),
+                sandbox_policy: Some(guardian_approvals.sandbox_policy.clone()),
                 windows_sandbox_level: None,
                 model: None,
                 effort: None,
@@ -5941,7 +6264,7 @@ approvals_reviewer = "user"
 approvals_reviewer = "guardian_subagent"
 
 [profiles.guardian.features]
-smart_approvals = true
+guardian_approval = true
 "#;
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6002,7 +6325,7 @@ smart_approvals = true
         assert!(rendered.contains("Permissions updated to Default"));
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-        assert!(!config.contains("smart_approvals = true"));
+        assert!(!config.contains("guardian_approval = true"));
         assert!(!config.contains("guardian_subagent"));
         assert_eq!(
             toml::from_str::<TomlValue>(&config)?
@@ -6021,7 +6344,7 @@ smart_approvals = true
         app.config.codex_home = codex_home.path().to_path_buf();
         app.active_profile = Some("guardian".to_string());
         let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
-        let config_toml = "profile = \"guardian\"\napprovals_reviewer = \"guardian_subagent\"\n\n[features]\nsmart_approvals = true\n";
+        let config_toml = "profile = \"guardian\"\napprovals_reviewer = \"guardian_subagent\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
         app.config.config_layer_stack = app
@@ -6072,7 +6395,7 @@ smart_approvals = true
         );
 
         let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-        assert!(config.contains("smart_approvals = true"));
+        assert!(config.contains("guardian_approval = true"));
         assert_eq!(
             toml::from_str::<TomlValue>(&config)?
                 .as_table()

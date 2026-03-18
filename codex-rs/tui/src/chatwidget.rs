@@ -68,9 +68,9 @@ use codex_core::config::types::ApprovalsReviewer;
 use codex_core::config::types::Notifications;
 use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::ConfigLayerStackOrdering;
+use codex_core::default_client::build_reqwest_client;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
-use codex_core::features::Stage;
 use codex_core::find_thread_name_by_id;
 use codex_core::git_info::current_branch_name;
 use codex_core::git_info::get_git_repo_root;
@@ -238,8 +238,6 @@ use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::CollaborationModeIndicator;
 use crate::bottom_pane::ColumnWidthMode;
 use crate::bottom_pane::DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED;
-use crate::bottom_pane::ExperimentalFeatureItem;
-use crate::bottom_pane::ExperimentalFeaturesView;
 use crate::bottom_pane::FeedbackAudience;
 use crate::bottom_pane::InputResult;
 use crate::bottom_pane::LocalImageAttachment;
@@ -1092,10 +1090,6 @@ impl ChatWidget {
             && cfg!(not(target_os = "linux"))
     }
 
-    fn realtime_audio_device_selection_enabled(&self) -> bool {
-        self.realtime_conversation_enabled() && cfg!(feature = "voice-input")
-    }
-
     /// Synchronize the bottom-pane "task running" indicator with the current lifecycles.
     ///
     /// The bottom pane only has one running flag, but this module treats it as a derived state of
@@ -1208,7 +1202,7 @@ impl ChatWidget {
     fn set_status_header(&mut self, header: String) {
         self.set_status(
             header,
-            None,
+            /*details*/ None,
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
@@ -1265,7 +1259,7 @@ impl ChatWidget {
         let enabled = !items.is_empty();
         self.bottom_pane.set_status_line_enabled(enabled);
         if !enabled {
-            self.set_status_line(None);
+            self.set_status_line(/*status_line*/ None);
             return;
         }
 
@@ -1371,7 +1365,7 @@ impl ChatWidget {
     fn on_session_configured(&mut self, event: codex_protocol::protocol::SessionConfiguredEvent) {
         self.bottom_pane
             .set_history_metadata(event.history_log_id, event.history_entry_count);
-        self.set_skills(None);
+        self.set_skills(/*skills*/ None);
         self.session_network_proxy = event.network_proxy.clone();
         self.thread_id = Some(event.session_id);
         self.thread_name = event.thread_name.clone();
@@ -1408,7 +1402,7 @@ impl ChatWidget {
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             Some(model_for_header.clone()),
             Some(event.reasoning_effort),
-            None,
+            /*developer_instructions*/ None,
         );
         if let Some(mask) = self.active_collaboration_mask.as_mut() {
             mask.model = Some(model_for_header.clone());
@@ -1735,7 +1729,8 @@ impl ChatWidget {
 
     fn on_task_started(&mut self) {
         self.agent_turn_running = true;
-        self.turn_sleep_inhibitor.set_turn_running(true);
+        self.turn_sleep_inhibitor
+            .set_turn_running(/*turn_running*/ true);
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
         self.plan_delta_buffer.clear();
@@ -1750,7 +1745,8 @@ impl ChatWidget {
         self.update_task_running_state();
         self.retry_status_header = None;
         self.pending_status_indicator_restore = false;
-        self.bottom_pane.set_interrupt_hint_visible(true);
+        self.bottom_pane
+            .set_interrupt_hint_visible(/*visible*/ true);
         self.set_status_header(String::from("Working"));
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
@@ -1799,7 +1795,8 @@ impl ChatWidget {
         // Mark task stopped and request redraw now that all content is in history.
         self.pending_status_indicator_restore = false;
         self.agent_turn_running = false;
-        self.turn_sleep_inhibitor.set_turn_running(false);
+        self.turn_sleep_inhibitor
+            .set_turn_running(/*turn_running*/ false);
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
@@ -1959,7 +1956,8 @@ impl ChatWidget {
         match info {
             Some(info) => self.apply_token_info(info),
             None => {
-                self.bottom_pane.set_context_window(None, None);
+                self.bottom_pane
+                    .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                 self.token_info = None;
             }
         }
@@ -2013,7 +2011,8 @@ impl ChatWidget {
             match saved {
                 Some(info) => self.apply_token_info(info),
                 None => {
-                    self.bottom_pane.set_context_window(None, None);
+                    self.bottom_pane
+                        .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                     self.token_info = None;
                 }
             }
@@ -2146,7 +2145,8 @@ impl ChatWidget {
         self.finalize_active_cell_as_failed();
         // Reset running state and clear streaming buffers.
         self.agent_turn_running = false;
-        self.turn_sleep_inhibitor.set_turn_running(false);
+        self.turn_sleep_inhibitor
+            .set_turn_running(/*turn_running*/ false);
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
@@ -2203,7 +2203,7 @@ impl ChatWidget {
         };
         self.add_to_history(history_cell::new_info_event(
             format!("Using skill ({invocation_type}): {name}"),
-            None,
+            /*hint*/ None,
         ));
         self.request_redraw();
     }
@@ -2282,16 +2282,13 @@ impl ChatWidget {
     fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
-        if reason == TurnAbortReason::Interrupted {
-            self.clear_unified_exec_processes();
-        }
         let send_pending_steers_immediately = self.submit_pending_steers_after_interrupt;
         self.submit_pending_steers_after_interrupt = false;
         if reason != TurnAbortReason::ReviewEnded {
             if send_pending_steers_immediately {
                 self.add_to_history(history_cell::new_info_event(
                     "Model interrupted to submit steer instructions.".to_owned(),
-                    None,
+                    /*hint*/ None,
                 ));
             } else {
                 self.add_to_history(history_cell::new_error_event(
@@ -2571,7 +2568,8 @@ impl ChatWidget {
             // review is pending. Parallel reviews are aggregated into one
             // footer summary by `PendingGuardianReviewStatus`.
             self.bottom_pane.ensure_status_indicator();
-            self.bottom_pane.set_interrupt_hint_visible(true);
+            self.bottom_pane
+                .set_interrupt_hint_visible(/*visible*/ true);
             self.pending_guardian_review_status
                 .start_or_update(ev.id.clone(), detail);
             if let Some(status) = self.pending_guardian_review_status.status_indicator_state() {
@@ -2775,12 +2773,13 @@ impl ChatWidget {
             // Surface this in the status indicator (single "waiting" surface) instead of
             // the transcript. Keep the header short so the interrupt hint remains visible.
             self.bottom_pane.ensure_status_indicator();
-            self.bottom_pane.set_interrupt_hint_visible(true);
+            self.bottom_pane
+                .set_interrupt_hint_visible(/*visible*/ true);
             self.set_status(
                 "Waiting for background terminal".to_string(),
                 command_display.clone(),
                 StatusDetailsCapitalization::Preserve,
-                1,
+                /*details_max_lines*/ 1,
             );
             match &mut self.unified_exec_wait_streak {
                 Some(wait) if wait.process_id == ev.process_id => {
@@ -2944,14 +2943,6 @@ impl ChatWidget {
         }
     }
 
-    fn clear_unified_exec_processes(&mut self) {
-        if self.unified_exec_processes.is_empty() {
-            return;
-        }
-        self.unified_exec_processes.clear();
-        self.sync_unified_exec_footer();
-    }
-
     fn on_mcp_tool_call_begin(&mut self, ev: McpToolCallBeginEvent) {
         let ev2 = ev.clone();
         self.defer_or_handle(|q| q.push_mcp_begin(ev), |s| s.handle_mcp_begin_now(ev2));
@@ -3038,7 +3029,8 @@ impl ChatWidget {
     fn on_background_event(&mut self, message: String) {
         debug!("BackgroundEvent: {message}");
         self.bottom_pane.ensure_status_indicator();
-        self.bottom_pane.set_interrupt_hint_visible(true);
+        self.bottom_pane
+            .set_interrupt_hint_visible(/*visible*/ true);
         self.set_status_header(message);
     }
 
@@ -3051,7 +3043,7 @@ impl ChatWidget {
             message.push_str(": ");
             message.push_str(&status_message);
         }
-        self.add_to_history(history_cell::new_info_event(message, None));
+        self.add_to_history(history_cell::new_info_event(message, /*hint*/ None));
         self.request_redraw();
     }
 
@@ -3075,7 +3067,8 @@ impl ChatWidget {
 
     fn on_undo_started(&mut self, event: UndoStartedEvent) {
         self.bottom_pane.ensure_status_indicator();
-        self.bottom_pane.set_interrupt_hint_visible(false);
+        self.bottom_pane
+            .set_interrupt_hint_visible(/*visible*/ false);
         let message = event
             .message
             .unwrap_or_else(|| "Undo in progress...".to_string());
@@ -3093,7 +3086,7 @@ impl ChatWidget {
             }
         });
         if success {
-            self.add_info_message(message, None);
+            self.add_info_message(message, /*hint*/ None);
         } else {
             self.add_error_message(message);
         }
@@ -3233,7 +3226,7 @@ impl ChatWidget {
                     .map(|current| self.worked_elapsed_from(current));
                 self.add_to_history(history_cell::FinalMessageSeparator::new(
                     elapsed_seconds,
-                    None,
+                    /*runtime_metrics*/ None,
                 ));
                 self.needs_final_message_separator = false;
                 self.had_work_activity = false;
@@ -3781,11 +3774,10 @@ impl ChatWidget {
             .set_realtime_conversation_enabled(widget.realtime_conversation_enabled());
         widget
             .bottom_pane
-            .set_audio_device_selection_enabled(widget.realtime_audio_device_selection_enabled());
+            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
         widget
             .bottom_pane
-            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
-        widget.bottom_pane.set_collaboration_modes_enabled(true);
+            .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_fast_command_enabled();
         widget.sync_personality_command_enabled();
         widget
@@ -3970,11 +3962,10 @@ impl ChatWidget {
             .set_realtime_conversation_enabled(widget.realtime_conversation_enabled());
         widget
             .bottom_pane
-            .set_audio_device_selection_enabled(widget.realtime_audio_device_selection_enabled());
+            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
         widget
             .bottom_pane
-            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
-        widget.bottom_pane.set_collaboration_modes_enabled(true);
+            .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_fast_command_enabled();
         widget.sync_personality_command_enabled();
         widget
@@ -4151,11 +4142,10 @@ impl ChatWidget {
             .set_realtime_conversation_enabled(widget.realtime_conversation_enabled());
         widget
             .bottom_pane
-            .set_audio_device_selection_enabled(widget.realtime_audio_device_selection_enabled());
+            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
         widget
             .bottom_pane
-            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
-        widget.bottom_pane.set_collaboration_modes_enabled(true);
+            .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_fast_command_enabled();
         widget.sync_personality_command_enabled();
         widget
@@ -4401,7 +4391,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn can_run_ctrl_l_clear_now(&mut self) -> bool {
-        // Ctrl+L is not a slash command, but it follows /clear's current rule:
+        // Ctrl+L is not a slash command, but it follows /clear's rule:
         // block while a task is running.
         if !self.bottom_pane.is_task_running() {
             return true;
@@ -4456,7 +4446,7 @@ impl ChatWidget {
                     let message = format!(
                         "{DEFAULT_PROJECT_DOC_FILENAME} already exists here. Skipping /init to avoid overwriting it."
                     );
-                    self.add_info_message(message, None);
+                    self.add_info_message(message, /*hint*/ None);
                     return;
                 }
                 const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
@@ -4471,7 +4461,7 @@ impl ChatWidget {
             }
             SlashCommand::Rename => {
                 self.session_telemetry
-                    .counter("codex.thread.rename", 1, &[]);
+                    .counter("codex.thread.rename", /*inc*/ 1, &[]);
                 self.show_rename_prompt();
             }
             SlashCommand::Model => {
@@ -4493,16 +4483,19 @@ impl ChatWidget {
                     return;
                 }
                 if self.realtime_conversation.is_live() {
-                    self.request_realtime_conversation_close(None);
+                    self.request_realtime_conversation_close(/*info_message*/ None);
                 } else {
                     self.start_realtime_conversation();
                 }
             }
             SlashCommand::Settings => {
-                if !self.realtime_audio_device_selection_enabled() {
-                    return;
-                }
-                self.open_realtime_audio_popup();
+                self.open_settings(
+                    crate::settings::data::SettingsScope::default_for(
+                        self.config.active_profile.as_deref(),
+                    ),
+                    crate::settings::data::SettingsScreen::Root,
+                    /*selected_item_key*/ None,
+                );
             }
             SlashCommand::Personality => {
                 self.open_personality_popup();
@@ -4518,7 +4511,10 @@ impl ChatWidget {
                 if let Some(mask) = collaboration_modes::plan_mask(self.models_manager.as_ref()) {
                     self.set_collaboration_mask(mask);
                 } else {
-                    self.add_info_message("Plan mode unavailable right now.".to_string(), None);
+                    self.add_info_message(
+                        "Plan mode unavailable right now.".to_string(),
+                        /*hint*/ None,
+                    );
                 }
             }
             SlashCommand::Collab => {
@@ -4595,9 +4591,6 @@ impl ChatWidget {
                     "Usage: /sandbox-add-read-dir <absolute-directory-path>".to_string(),
                 );
             }
-            SlashCommand::Experimental => {
-                self.open_experimental_popup();
-            }
             SlashCommand::Quit | SlashCommand::Exit => {
                 self.request_quit_without_confirmation();
             }
@@ -4635,7 +4628,7 @@ impl ChatWidget {
                     self.add_info_message(
                         "`/copy` is unavailable before the first Codex output or right after a rollback."
                             .to_string(),
-                        None,
+                        /*hint*/ None,
                     );
                     return;
                 };
@@ -4679,7 +4672,7 @@ impl ChatWidget {
             SlashCommand::Ps => {
                 self.add_ps_output();
             }
-            SlashCommand::Clean => {
+            SlashCommand::Stop => {
                 self.clean_background_terminals();
             }
             SlashCommand::MemoryDrop => {
@@ -4698,10 +4691,13 @@ impl ChatWidget {
                 if let Some(path) = self.rollout_path() {
                     self.add_info_message(
                         format!("Current rollout path: {}", path.display()),
-                        None,
+                        /*hint*/ None,
                     );
                 } else {
-                    self.add_info_message("Rollout path is not available yet.".to_string(), None);
+                    self.add_info_message(
+                        "Rollout path is not available yet.".to_string(),
+                        /*hint*/ None,
+                    );
                 }
             }
             SlashCommand::TestApproval => {
@@ -4774,7 +4770,7 @@ impl ChatWidget {
                 }
                 match trimmed.to_ascii_lowercase().as_str() {
                     "on" => self.set_service_tier_selection(Some(ServiceTier::Fast)),
-                    "off" => self.set_service_tier_selection(None),
+                    "off" => self.set_service_tier_selection(/*service_tier*/ None),
                     "status" => {
                         let status = if matches!(self.config.service_tier, Some(ServiceTier::Fast))
                         {
@@ -4782,7 +4778,10 @@ impl ChatWidget {
                         } else {
                             "off"
                         };
-                        self.add_info_message(format!("Fast mode is {status}."), None);
+                        self.add_info_message(
+                            format!("Fast mode is {status}."),
+                            /*hint*/ None,
+                        );
                     }
                     _ => {
                         self.add_error_message("Usage: /fast [on|off|status]".to_string());
@@ -4791,9 +4790,10 @@ impl ChatWidget {
             }
             SlashCommand::Rename if !trimmed.is_empty() => {
                 self.session_telemetry
-                    .counter("codex.thread.rename", 1, &[]);
-                let Some((prepared_args, _prepared_elements)) =
-                    self.bottom_pane.prepare_inline_args_submission(false)
+                    .counter("codex.thread.rename", /*inc*/ 1, &[]);
+                let Some((prepared_args, _prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ false)
                 else {
                     return;
                 };
@@ -4813,8 +4813,9 @@ impl ChatWidget {
                 if self.active_mode_kind() != ModeKind::Plan {
                     return;
                 }
-                let Some((prepared_args, prepared_elements)) =
-                    self.bottom_pane.prepare_inline_args_submission(true)
+                let Some((prepared_args, prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ true)
                 else {
                     return;
                 };
@@ -4839,8 +4840,9 @@ impl ChatWidget {
                 }
             }
             SlashCommand::Review if !trimmed.is_empty() => {
-                let Some((prepared_args, _prepared_elements)) =
-                    self.bottom_pane.prepare_inline_args_submission(false)
+                let Some((prepared_args, _prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ false)
                 else {
                     return;
                 };
@@ -4855,8 +4857,9 @@ impl ChatWidget {
                 self.bottom_pane.drain_pending_submission_state();
             }
             SlashCommand::SandboxReadRoot if !trimmed.is_empty() => {
-                let Some((prepared_args, _prepared_elements)) =
-                    self.bottom_pane.prepare_inline_args_submission(false)
+                let Some((prepared_args, _prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ false)
                 else {
                     return;
                 };
@@ -4885,17 +4888,18 @@ impl ChatWidget {
         let view = CustomPromptView::new(
             title.to_string(),
             "Type a name and press Enter".to_string(),
-            None,
+            /*context_label*/ None,
             Box::new(move |name: String| {
                 let Some(name) = codex_core::util::normalize_thread_name(&name) else {
                     tx.send(AppEvent::InsertHistoryCell(Box::new(
                         history_cell::new_error_event("Thread name cannot be empty.".to_string()),
                     )));
-                    return;
+                    return Ok(());
                 };
                 let cell = Self::rename_confirmation_cell(&name, thread_id);
                 tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
                 tx.send(AppEvent::CodexOp(Op::SetThreadName { name }));
+                Ok(())
             }),
         );
 
@@ -5293,13 +5297,17 @@ impl ChatWidget {
                 continue;
             }
             // `id: None` indicates a synthetic/fake id coming from replay.
-            self.dispatch_event_msg(None, msg, Some(ReplayKind::ResumeInitialMessages));
+            self.dispatch_event_msg(
+                /*id*/ None,
+                msg,
+                Some(ReplayKind::ResumeInitialMessages),
+            );
         }
     }
 
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
         let Event { id, msg } = event;
-        self.dispatch_event_msg(Some(id), msg, None);
+        self.dispatch_event_msg(Some(id), msg, /*replay_kind*/ None);
     }
 
     pub(crate) fn handle_codex_event_replay(&mut self, event: Event) {
@@ -5307,7 +5315,7 @@ impl ChatWidget {
         if matches!(msg, EventMsg::ShutdownComplete) {
             return;
         }
-        self.dispatch_event_msg(None, msg, Some(ReplayKind::ThreadSnapshot));
+        self.dispatch_event_msg(/*id*/ None, msg, Some(ReplayKind::ThreadSnapshot));
     }
 
     /// Dispatch a protocol `EventMsg` to the appropriate handler.
@@ -5613,7 +5621,7 @@ impl ChatWidget {
         }
         // Avoid toggling running state for replayed history events on resume.
         if !from_replay && !self.bottom_pane.is_task_running() {
-            self.bottom_pane.set_task_running(true);
+            self.bottom_pane.set_task_running(/*running*/ true);
         }
         self.is_review_mode = true;
         let hint = review
@@ -5643,11 +5651,11 @@ impl ChatWidget {
                     let mut rendered: Vec<ratatui::text::Line<'static>> = vec!["".into()];
                     append_markdown(
                         &explanation,
-                        None,
+                        /*width*/ None,
                         Some(self.config.cwd.as_path()),
                         &mut rendered,
                     );
-                    let body_cell = AgentMessageCell::new(rendered, false);
+                    let body_cell = AgentMessageCell::new(rendered, /*is_first_line*/ false);
                     self.app_event_tx
                         .send(AppEvent::InsertHistoryCell(Box::new(body_cell)));
                 }
@@ -5837,6 +5845,91 @@ impl ChatWidget {
         self.bottom_pane.show_view(Box::new(view));
     }
 
+    pub(crate) fn open_settings(
+        &mut self,
+        scope: crate::settings::data::SettingsScope,
+        screen: crate::settings::data::SettingsScreen,
+        selected_item_key: Option<String>,
+    ) {
+        match crate::settings::view::build_settings_view_params(
+            &self.config,
+            scope,
+            &screen,
+            selected_item_key.as_deref(),
+        ) {
+            Ok(params) => {
+                let view_id = match &screen {
+                    crate::settings::data::SettingsScreen::Root => {
+                        crate::settings::view::SETTINGS_ROOT_VIEW_ID
+                    }
+                    crate::settings::data::SettingsScreen::Section { .. } => {
+                        crate::settings::view::SETTINGS_SECTION_VIEW_ID
+                    }
+                };
+                if self
+                    .bottom_pane
+                    .selected_index_for_active_view(view_id)
+                    .is_some()
+                {
+                    self.bottom_pane
+                        .replace_selection_view_if_active(view_id, params);
+                } else {
+                    self.bottom_pane.show_selection_view(params);
+                }
+            }
+            Err(err) => {
+                self.add_error_message(format!("Failed to open settings: {err}"));
+            }
+        }
+    }
+
+    pub(crate) fn open_settings_scope_picker(
+        &mut self,
+        current_scope: crate::settings::data::SettingsScope,
+        current_screen: crate::settings::data::SettingsScreen,
+    ) {
+        let params = crate::settings::view::build_settings_scope_picker_params(
+            current_scope,
+            current_screen,
+            self.config.active_profile.as_deref(),
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    pub(crate) fn open_setting_editor(
+        &mut self,
+        key_path: String,
+        scope: crate::settings::data::SettingsScope,
+        screen: crate::settings::data::SettingsScreen,
+    ) {
+        if cfg!(all(not(target_os = "linux"), feature = "voice-input")) {
+            match key_path.as_str() {
+                "audio" | "audio.microphone" => {
+                    self.open_realtime_audio_device_selection(RealtimeAudioDeviceKind::Microphone);
+                    return;
+                }
+                "audio.speaker" => {
+                    self.open_realtime_audio_device_selection(RealtimeAudioDeviceKind::Speaker);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        match crate::settings::view::build_setting_editor_view(
+            &self.config,
+            &key_path,
+            scope,
+            screen,
+            self.app_event_tx.clone(),
+        ) {
+            Ok(view) => self.bottom_pane.show_view(Box::new(view)),
+            Err(err) => {
+                self.add_error_message(format!("Failed to open setting editor: {err}"));
+            }
+        }
+    }
+
     fn open_theme_picker(&mut self) {
         let codex_home = codex_core::config::find_codex_home().ok();
         let terminal_width = self
@@ -5912,7 +6005,10 @@ impl ChatWidget {
 
         self.config
             .config_layer_stack
-            .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
+            .get_layers(
+                ConfigLayerStackOrdering::LowestPrecedenceFirst,
+                /*include_disabled*/ true,
+            )
             .iter()
             .find_map(|layer| match &layer.name {
                 ConfigLayerSource::Project { dot_codex_folder } => {
@@ -5926,7 +6022,7 @@ impl ChatWidget {
         self.status_line_project_root().map(|root| {
             root.file_name()
                 .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| format_directory_display(&root, None))
+                .unwrap_or_else(|| format_directory_display(&root, /*max_width*/ None))
         })
     }
 
@@ -5985,7 +6081,10 @@ impl ChatWidget {
                 Some(format!("{} {label}{fast_label}", self.model_display_name()))
             }
             StatusLineItem::CurrentDir => {
-                Some(format_directory_display(self.status_line_cwd(), None))
+                Some(format_directory_display(
+                    self.status_line_cwd(),
+                    /*max_width*/ None,
+                ))
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
@@ -6124,7 +6223,10 @@ impl ChatWidget {
 
     fn clean_background_terminals(&mut self) {
         self.submit_op(Op::CleanBackgroundTerminals);
-        self.add_info_message("Stopping all background terminals.".to_string(), None);
+        self.add_info_message(
+            "Stopping all background terminals.".to_string(),
+            /*hint*/ None,
+        );
     }
 
     fn stop_rate_limit_poller(&mut self) {
@@ -6144,7 +6246,7 @@ impl ChatWidget {
     }
 
     fn prefetch_connectors(&mut self) {
-        self.prefetch_connectors_with_options(false);
+        self.prefetch_connectors_with_options(/*force_refetch*/ false);
     }
 
     fn prefetch_connectors_with_options(&mut self, force_refetch: bool) {
@@ -6199,7 +6301,7 @@ impl ChatWidget {
                 let connectors = connectors::merge_connectors_with_accessible(
                     all_connectors,
                     accessible_connectors,
-                    true,
+                    /*all_connectors_loaded*/ true,
                 );
                 Ok(ConnectorsSnapshot { connectors })
             }
@@ -6416,7 +6518,7 @@ impl ChatWidget {
         if !self.is_session_configured() {
             self.add_info_message(
                 "Model selection is disabled until startup completes.".to_string(),
-                None,
+                /*hint*/ None,
             );
             return;
         }
@@ -6426,7 +6528,7 @@ impl ChatWidget {
             Err(_) => {
                 self.add_info_message(
                     "Models are being updated; please try /model again in a moment.".to_string(),
-                    None,
+                    /*hint*/ None,
                 );
                 return;
             }
@@ -6438,7 +6540,7 @@ impl ChatWidget {
         if !self.is_session_configured() {
             self.add_info_message(
                 "Personality selection is disabled until startup completes.".to_string(),
-                None,
+                /*hint*/ None,
             );
             return;
         }
@@ -6497,39 +6599,6 @@ impl ChatWidget {
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
             header: Box::new(header),
-            footer_hint: Some(standard_popup_hint_line()),
-            items,
-            ..Default::default()
-        });
-    }
-
-    pub(crate) fn open_realtime_audio_popup(&mut self) {
-        let items = [
-            RealtimeAudioDeviceKind::Microphone,
-            RealtimeAudioDeviceKind::Speaker,
-        ]
-        .into_iter()
-        .map(|kind| {
-            let description = Some(format!(
-                "Current: {}",
-                self.current_realtime_audio_selection_label(kind)
-            ));
-            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                tx.send(AppEvent::OpenRealtimeAudioDeviceSelection { kind });
-            })];
-            SelectionItem {
-                name: kind.title().to_string(),
-                description,
-                actions,
-                dismiss_on_select: true,
-                ..Default::default()
-            }
-        })
-        .collect();
-
-        self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some("Settings".to_string()),
-            subtitle: Some("Configure settings for Codex.".to_string()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
             ..Default::default()
@@ -6799,7 +6868,7 @@ impl ChatWidget {
         if presets.is_empty() {
             self.add_info_message(
                 "No additional models are available right now.".to_string(),
-                None,
+                /*hint*/ None,
             );
             return;
         }
@@ -6845,7 +6914,7 @@ impl ChatWidget {
         if presets.is_empty() {
             self.add_info_message(
                 "No collaboration modes are available right now.".to_string(),
-                None,
+                /*hint*/ None,
             );
             return;
         }
@@ -7359,7 +7428,7 @@ impl ChatWidget {
 
                 if guardian_approval_enabled {
                     items.push(SelectionItem {
-                        name: "Smart Approvals".to_string(),
+                        name: "Guardian Approvals".to_string(),
                         description: Some(
                             "Same workspace-write permissions as Default, but eligible `on-request` approvals are routed through the guardian reviewer subagent."
                                 .to_string(),
@@ -7373,7 +7442,7 @@ impl ChatWidget {
                         actions: Self::approval_preset_actions(
                             preset.approval,
                             preset.sandbox.clone(),
-                            "Smart Approvals".to_string(),
+                            "Guardian Approvals".to_string(),
                             ApprovalsReviewer::GuardianSubagent,
                         ),
                         dismiss_on_select: true,
@@ -7418,63 +7487,6 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn experimental_feature_items(&self) -> Vec<ExperimentalFeatureItem> {
-        FEATURES
-            .iter()
-            .filter_map(|spec| {
-                let default_state = if spec.default_enabled { "on" } else { "off" };
-                let (name, description, stage_tag) = match spec.stage {
-                    Stage::Experimental {
-                        name,
-                        menu_description,
-                        ..
-                    } => (
-                        name.to_string(),
-                        format!("{menu_description} Default: {default_state}."),
-                        "experimental".to_string(),
-                    ),
-                    Stage::UnderDevelopment => (
-                        spec.key.to_string(),
-                        format!(
-                            "Under development. Incomplete and may behave unpredictably. Default: {default_state}."
-                        ),
-                        "under development".to_string(),
-                    ),
-                    Stage::Stable => (
-                        spec.key.to_string(),
-                        format!("Stable feature flag. Default: {default_state}."),
-                        "stable".to_string(),
-                    ),
-                    Stage::Deprecated => (
-                        spec.key.to_string(),
-                        format!(
-                            "Deprecated feature flag kept for backward compatibility. Default: {default_state}."
-                        ),
-                        "deprecated".to_string(),
-                    ),
-                    Stage::Removed => return None,
-                };
-
-                Some(ExperimentalFeatureItem {
-                    feature: spec.id,
-                    name,
-                    description,
-                    stage_tag,
-                    enabled: self.config.features.enabled(spec.id),
-                    original_enabled: self.config.features.enabled(spec.id),
-                })
-            })
-            .collect()
-    }
-
-    pub(crate) fn open_experimental_popup(&mut self) {
-        let view = ExperimentalFeaturesView::new(
-            self.experimental_feature_items(),
-            self.app_event_tx.clone(),
-        );
-        self.bottom_pane.show_view(Box::new(view));
-    }
-
     fn approval_preset_actions(
         approval: AskForApproval,
         sandbox: SandboxPolicy,
@@ -7500,7 +7512,10 @@ impl ChatWidget {
             tx.send(AppEvent::UpdateSandboxPolicy(sandbox_clone));
             tx.send(AppEvent::UpdateApprovalsReviewer(approvals_reviewer));
             tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_info_event(format!("Permissions updated to {label}"), None),
+                history_cell::new_info_event(
+                    format!("Permissions updated to {label}"),
+                    /*hint*/ None,
+                ),
             )));
         })]
     }
@@ -8060,8 +8075,6 @@ impl ChatWidget {
             let realtime_conversation_enabled = self.realtime_conversation_enabled();
             self.bottom_pane
                 .set_realtime_conversation_enabled(realtime_conversation_enabled);
-            self.bottom_pane
-                .set_audio_device_selection_enabled(self.realtime_audio_device_selection_enabled());
             if !realtime_conversation_enabled && self.realtime_conversation.is_live() {
                 self.request_realtime_conversation_close(Some(
                     "Realtime voice mode was closed because the feature was disabled.".to_string(),
@@ -8145,9 +8158,11 @@ impl ChatWidget {
 
     /// Set the reasoning effort in the stored collaboration mode.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
-        self.current_collaboration_mode =
-            self.current_collaboration_mode
-                .with_updates(None, Some(effort), None);
+        self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
+            /*model*/ None,
+            Some(effort),
+            /*developer_instructions*/ None,
+        );
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
             && !mask.mode.is_some_and(ModeKind::is_plan_output_mode)
@@ -8170,6 +8185,14 @@ impl ChatWidget {
 
     pub(crate) fn current_service_tier(&self) -> Option<ServiceTier> {
         self.config.service_tier
+    }
+
+    #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
+    fn current_realtime_audio_device_name(&self, kind: RealtimeAudioDeviceKind) -> Option<String> {
+        match kind {
+            RealtimeAudioDeviceKind::Microphone => self.config.realtime_audio.microphone.clone(),
+            RealtimeAudioDeviceKind::Speaker => self.config.realtime_audio.speaker.clone(),
+        }
     }
 
     pub(crate) fn should_show_fast_status(
@@ -8208,9 +8231,11 @@ impl ChatWidget {
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
-        self.current_collaboration_mode =
-            self.current_collaboration_mode
-                .with_updates(Some(model.to_string()), None, None);
+        self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
+            Some(model.to_string()),
+            /*effort*/ None,
+            /*developer_instructions*/ None,
+        );
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
         {
@@ -8261,18 +8286,6 @@ impl ChatWidget {
 
     pub(crate) fn realtime_conversation_is_live(&self) -> bool {
         self.realtime_conversation.is_active()
-    }
-
-    fn current_realtime_audio_device_name(&self, kind: RealtimeAudioDeviceKind) -> Option<String> {
-        match kind {
-            RealtimeAudioDeviceKind::Microphone => self.config.realtime_audio.microphone.clone(),
-            RealtimeAudioDeviceKind::Speaker => self.config.realtime_audio.speaker.clone(),
-        }
-    }
-
-    fn current_realtime_audio_selection_label(&self, kind: RealtimeAudioDeviceKind) -> String {
-        self.current_realtime_audio_device_name(kind)
-            .unwrap_or_else(|| "System default".to_string())
     }
 
     fn sync_fast_command_enabled(&mut self) {
@@ -8505,7 +8518,7 @@ impl ChatWidget {
             message.push_str(" for ");
             message.push_str(next_mode.display_name());
             message.push_str(" mode.");
-            self.add_info_message(message, None);
+            self.add_info_message(message, /*hint*/ None);
         }
         self.request_redraw();
     }
@@ -8545,8 +8558,8 @@ impl ChatWidget {
         Box::new(history_cell::SessionHeaderHistoryCell::new_with_style(
             DEFAULT_MODEL_DISPLAY_NAME.to_string(),
             placeholder_style,
-            None,
-            false,
+            /*reasoning_effort*/ None,
+            /*show_fast_status*/ false,
             config.cwd.clone(),
             CODEX_CLI_VERSION,
         ))
@@ -8613,7 +8626,10 @@ impl ChatWidget {
         let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(
             self.config.codex_home.clone(),
         )));
-        if mcp_manager.effective_servers(&self.config, None).is_empty() {
+        if mcp_manager
+            .effective_servers(&self.config, /*auth*/ None)
+            .is_empty()
+        {
             self.add_to_history(history_cell::empty_mcp_output());
         } else {
             self.submit_op(Op::ListMcpTools);
@@ -8637,7 +8653,7 @@ impl ChatWidget {
         match connectors_cache {
             ConnectorsCacheState::Ready(snapshot) => {
                 if snapshot.connectors.is_empty() {
-                    self.add_info_message("No apps available.".to_string(), None);
+                    self.add_info_message("No apps available.".to_string(), /*hint*/ None);
                 } else {
                     self.open_connectors_popup(&snapshot.connectors);
                 }
@@ -8663,8 +8679,9 @@ impl ChatWidget {
     }
 
     fn open_connectors_popup(&mut self, connectors: &[connectors::AppInfo]) {
-        self.bottom_pane
-            .show_selection_view(self.connectors_popup_params(connectors, None));
+        self.bottom_pane.show_selection_view(
+            self.connectors_popup_params(connectors, /*selected_connector_id*/ None),
+        );
     }
 
     fn connectors_loading_popup_params(&self) -> SelectionViewParams {
@@ -8759,7 +8776,10 @@ impl ChatWidget {
                 let missing_label_for_action = missing_label.clone();
                 item.actions = vec![Box::new(move |tx| {
                     tx.send(AppEvent::InsertHistoryCell(Box::new(
-                        history_cell::new_info_event(missing_label_for_action.clone(), None),
+                        history_cell::new_info_event(
+                            missing_label_for_action.clone(),
+                            /*hint*/ None,
+                        ),
                     )));
                 })];
                 item.dismiss_on_select = true;
@@ -8847,7 +8867,7 @@ impl ChatWidget {
     ///
     /// The first press arms a time-bounded quit shortcut and shows a footer hint via the bottom
     /// pane. If cancellable work is active, Ctrl+C also submits `Op::Interrupt` after the shortcut
-    /// is armed.
+    /// is armed; this interrupts the turn but intentionally preserves background terminals.
     ///
     /// If the same quit shortcut is pressed again before expiry, this requests a shutdown-first
     /// quit.
@@ -9056,7 +9076,7 @@ impl ChatWidget {
         // Record outbound operation for session replay fidelity.
         crate::session_log::log_outbound_op(&op);
         if matches!(&op, Op::Review { .. }) && !self.bottom_pane.is_task_running() {
-            self.bottom_pane.set_task_running(true);
+            self.bottom_pane.set_task_running(/*running*/ true);
         }
         if let Err(e) = self.codex_op_tx.send(op) {
             tracing::error!("failed to submit op: {e}");
@@ -9107,7 +9127,7 @@ impl ChatWidget {
                     snapshot.connectors = connectors::merge_connectors_with_accessible(
                         Vec::new(),
                         snapshot.connectors,
-                        false,
+                        /*all_connectors_loaded*/ false,
                     );
                 }
                 snapshot.connectors =
@@ -9148,13 +9168,13 @@ impl ChatWidget {
                     self.bottom_pane.set_connectors_snapshot(Some(snapshot));
                 } else {
                     self.connectors_cache = ConnectorsCacheState::Failed(err);
-                    self.bottom_pane.set_connectors_snapshot(None);
+                    self.bottom_pane.set_connectors_snapshot(/*snapshot*/ None);
                 }
             }
         }
 
         if trigger_pending_force_refetch {
-            self.prefetch_connectors_with_options(true);
+            self.prefetch_connectors_with_options(/*force_refetch*/ true);
         }
     }
 
@@ -9183,7 +9203,7 @@ impl ChatWidget {
 
     fn refresh_plugin_mentions(&mut self) {
         if !self.config.features.enabled(Feature::Plugins) {
-            self.bottom_pane.set_plugin_mentions(None);
+            self.bottom_pane.set_plugin_mentions(/*plugins*/ None);
             return;
         }
 
@@ -9292,7 +9312,7 @@ impl ChatWidget {
     }
 
     pub(crate) async fn show_review_commit_picker(&mut self, cwd: &Path) {
-        let commits = codex_core::git_info::recent_commits(cwd, 100).await;
+        let commits = codex_core::git_info::recent_commits(cwd, /*limit*/ 100).await;
 
         let mut items: Vec<SelectionItem> = Vec::with_capacity(commits.len());
         for entry in commits {
@@ -9334,11 +9354,11 @@ impl ChatWidget {
         let view = CustomPromptView::new(
             "Custom review instructions".to_string(),
             "Type instructions and press Enter".to_string(),
-            None,
+            /*context_label*/ None,
             Box::new(move |prompt: String| {
                 let trimmed = prompt.trim().to_string();
                 if trimmed.is_empty() {
-                    return;
+                    return Ok(());
                 }
                 tx.send(AppEvent::CodexOp(Op::Review {
                     review_request: ReviewRequest {
@@ -9348,6 +9368,7 @@ impl ChatWidget {
                         user_facing_hint: None,
                     },
                 }));
+                Ok(())
             }),
         );
         self.bottom_pane.show_view(Box::new(view));
@@ -9425,14 +9446,18 @@ impl ChatWidget {
 
     fn as_renderable(&self) -> RenderableItem<'_> {
         let active_cell_renderable = match &self.active_cell {
-            Some(cell) => RenderableItem::Borrowed(cell).inset(Insets::tlbr(1, 0, 0, 0)),
+            Some(cell) => RenderableItem::Borrowed(cell).inset(Insets::tlbr(
+                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
+            )),
             None => RenderableItem::Owned(Box::new(())),
         };
         let mut flex = FlexRenderable::new();
-        flex.push(1, active_cell_renderable);
+        flex.push(/*flex*/ 1, active_cell_renderable);
         flex.push(
-            0,
-            RenderableItem::Borrowed(&self.bottom_pane).inset(Insets::tlbr(1, 0, 0, 0)),
+            /*flex*/ 0,
+            RenderableItem::Borrowed(&self.bottom_pane).inset(Insets::tlbr(
+                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
+            )),
         );
         RenderableItem::Owned(Box::new(flex))
     }
@@ -9525,7 +9550,10 @@ impl Notification {
                     .unwrap_or_else(|| "Agent turn complete".to_string())
             }
             Notification::ExecApprovalRequested { command } => {
-                format!("Approval requested: {}", truncate_text(command, 30))
+                format!(
+                    "Approval requested: {}",
+                    truncate_text(command, /*max_graphemes*/ 30)
+                )
             }
             Notification::EditApprovalRequested { cwd, changes } => {
                 format!(
@@ -9612,7 +9640,7 @@ impl Notification {
         if summary.is_empty() {
             None
         } else {
-            Some(truncate_text(summary, 30))
+            Some(truncate_text(summary, /*max_graphemes*/ 30))
         }
     }
 }

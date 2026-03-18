@@ -1,0 +1,13 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / voice
+subtitle: Browse and edit settings under `voice` in user config.toml.
+Write scope: 1
+audio: 1
+microphone: 1
+realtime: 1
+realtime_ws_model: 1
+version: 1

@@ -1,0 +1,14 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / model
+subtitle: Browse and edit settings under `model` in user config.toml.
+Write scope: 1
+model: 1
+plan_mode_reasoning_effort: 1
+provider: 1
+reasoning_effort: 1
+review_model: 1
+service_tier: 1

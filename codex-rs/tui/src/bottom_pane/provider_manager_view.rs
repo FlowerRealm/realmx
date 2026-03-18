@@ -181,7 +181,10 @@ pub(crate) struct ProviderManagerView {
 
 impl ProviderManagerView {
     pub(crate) fn new(config: &Config, app_event_tx: AppEventSender) -> Self {
-        let builtin_ids: HashSet<String> = built_in_model_providers(None).keys().cloned().collect();
+        let builtin_ids: HashSet<String> = built_in_model_providers(/*openai_base_url*/ None)
+            .keys()
+            .cloned()
+            .collect();
         let mut rows: Vec<ProviderRow> = config
             .model_providers
             .iter()
@@ -518,7 +521,7 @@ impl BottomPaneView for ProviderManagerView {
                     code: KeyCode::Char('k'),
                     modifiers: KeyModifiers::NONE,
                     ..
-                } => self.move_selection(-1),
+                } => self.move_selection(/*delta*/ -1),
                 KeyEvent {
                     code: KeyCode::Down,
                     ..
@@ -527,7 +530,7 @@ impl BottomPaneView for ProviderManagerView {
                     code: KeyCode::Char('j'),
                     modifiers: KeyModifiers::NONE,
                     ..
-                } => self.move_selection(1),
+                } => self.move_selection(/*delta*/ 1),
                 KeyEvent {
                     code: KeyCode::Char('n'),
                     modifiers: KeyModifiers::NONE,

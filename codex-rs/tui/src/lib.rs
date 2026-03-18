@@ -70,6 +70,7 @@ mod app;
 mod app_backtrack;
 mod app_event;
 mod app_event_sender;
+mod app_server_tui_dispatch;
 mod ascii_animation;
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
 mod audio_device;
@@ -112,6 +113,7 @@ mod render;
 mod resume_picker;
 mod selection_list;
 mod session_log;
+mod settings;
 mod shimmer;
 mod skills_helpers;
 mod slash_command;
@@ -231,6 +233,7 @@ pub mod test_backend;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::onboarding::onboarding_screen::run_onboarding_app;
 use crate::tui::Tui;
+pub use app_server_tui_dispatch::should_use_app_server_tui;
 pub use cli::Cli;
 use codex_arg0::Arg0DispatchPaths;
 pub use markdown_render::render_markdown_text;
@@ -397,7 +400,7 @@ pub async fn run_main(
 
     let cloud_auth_manager = AuthManager::shared(
         codex_home.to_path_buf(),
-        false,
+        /*enable_codex_api_key_env*/ false,
         config_toml.cli_auth_credentials_store.unwrap_or_default(),
     );
     let chatgpt_base_url = config_toml
@@ -560,7 +563,12 @@ pub async fn run_main(
     }
 
     let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        codex_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"), None, true)
+        codex_core::otel_init::build_provider(
+            &config,
+            env!("CARGO_PKG_VERSION"),
+            /*service_name_override*/ None,
+            /*default_analytics_enabled*/ true,
+        )
     })) {
         Ok(Ok(otel)) => otel,
         Ok(Err(e)) => {
@@ -666,7 +674,7 @@ async fn run_ratatui_app(
 
     let auth_manager = AuthManager::shared(
         initial_config.codex_home.clone(),
-        false,
+        /*enable_codex_api_key_env*/ false,
         initial_config.cli_auth_credentials_store_mode,
     );
     let login_status = get_login_status(&initial_config);
@@ -775,19 +783,24 @@ async fn run_ratatui_app(
             let provider_filter = vec![config.model_provider_id.clone()];
             match RolloutRecorder::list_threads(
                 &config,
-                1,
-                None,
+                /*page_size*/ 1,
+                /*cursor*/ None,
                 ThreadSortKey::UpdatedAt,
                 INTERACTIVE_SESSION_SOURCES,
                 Some(provider_filter.as_slice()),
                 &config.model_provider_id,
-                None,
+                /*search_term*/ None,
             )
             .await
             {
                 Ok(page) => match page.items.first() {
                     Some(item) => {
-                        match resolve_session_thread_id(item.path.as_path(), None).await {
+                        match resolve_session_thread_id(
+                            item.path.as_path(),
+                            /*id_str_if_uuid*/ None,
+                        )
+                        .await
+                        {
                             Some(thread_id) => resume_picker::SessionSelection::Fork(
                                 resume_picker::SessionTarget {
                                     path: item.path.clone(),
@@ -870,8 +883,8 @@ async fn run_ratatui_app(
         };
         match RolloutRecorder::find_latest_thread_path(
             &config,
-            1,
-            None,
+            /*page_size*/ 1,
+            /*cursor*/ None,
             ThreadSortKey::UpdatedAt,
             INTERACTIVE_SESSION_SOURCES,
             Some(provider_filter.as_slice()),
@@ -880,30 +893,34 @@ async fn run_ratatui_app(
         )
         .await
         {
-            Ok(Some(path)) => match resolve_session_thread_id(path.as_path(), None).await {
-                Some(thread_id) => {
-                    resume_picker::SessionSelection::Resume(resume_picker::SessionTarget {
-                        path,
-                        thread_id,
-                    })
+            Ok(Some(path)) => {
+                match resolve_session_thread_id(path.as_path(), /*id_str_if_uuid*/ None).await {
+                    Some(thread_id) => {
+                        resume_picker::SessionSelection::Resume(resume_picker::SessionTarget {
+                            path,
+                            thread_id,
+                        })
+                    }
+                    None => {
+                        let rollout_path = path.display();
+                        error!(
+                            "Error reading session metadata from latest rollout: {rollout_path}"
+                        );
+                        restore();
+                        session_log::log_session_end();
+                        let _ = tui.terminal.clear();
+                        return Ok(AppExitInfo {
+                            token_usage: codex_protocol::protocol::TokenUsage::default(),
+                            thread_id: None,
+                            thread_name: None,
+                            update_action: None,
+                            exit_reason: ExitReason::Fatal(format!(
+                                "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `codex resume` to choose from existing sessions."
+                            )),
+                        });
+                    }
                 }
-                None => {
-                    let rollout_path = path.display();
-                    error!("Error reading session metadata from latest rollout: {rollout_path}");
-                    restore();
-                    session_log::log_session_end();
-                    let _ = tui.terminal.clear();
-                    return Ok(AppExitInfo {
-                        token_usage: codex_protocol::protocol::TokenUsage::default(),
-                        thread_id: None,
-                        thread_name: None,
-                        update_action: None,
-                        exit_reason: ExitReason::Fatal(format!(
-                            "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `codex resume` to choose from existing sessions."
-                        )),
-                    });
-                }
-            },
+            }
             _ => resume_picker::SessionSelection::StartFresh,
         }
     } else if cli.resume_picker {
@@ -1224,8 +1241,13 @@ async fn load_config_or_exit(
     overrides: ConfigOverrides,
     cloud_requirements: CloudRequirementsLoader,
 ) -> Config {
-    load_config_or_exit_with_fallback_cwd(cli_kv_overrides, overrides, cloud_requirements, None)
-        .await
+    load_config_or_exit_with_fallback_cwd(
+        cli_kv_overrides,
+        overrides,
+        cloud_requirements,
+        /*fallback_cwd*/ None,
+    )
+    .await
 }
 
 async fn load_config_or_exit_with_fallback_cwd(
@@ -1292,6 +1314,7 @@ mod tests {
     use codex_protocol::protocol::SessionMetaLine;
     use codex_protocol::protocol::SessionSource;
     use codex_protocol::protocol::TurnContextItem;
+    use pretty_assertions::assert_eq;
     use serial_test::serial;
     use tempfile::TempDir;
 

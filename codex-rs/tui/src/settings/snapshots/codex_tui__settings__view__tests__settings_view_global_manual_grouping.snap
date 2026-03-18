@@ -1,0 +1,33 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings
+subtitle: Browse settings sections and edit your user config.toml.
+auth: 1
+extensions: 1
+features: 1
+mcp: 1
+model: 1
+notifications: 1
+permissions: 1
+profile: 1
+project: 1
+prompting: 1
+reasoning_output: 1
+storage: 1
+telemetry: 1
+tools: 1
+tui: 1
+voice: 1
+windows: 1
+agents: 1
+memories: 1
+audio: 0
+check_for_update_on_startup: 0
+commit_attribution: 0
+disable_paste_burst: 0
+instructions: 0
+notify: 0
+windows_wsl_setup_acknowledged: 0

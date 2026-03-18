@@ -41,7 +41,6 @@ pub(crate) struct CommandPopupFlags {
     pub(crate) fast_command_enabled: bool,
     pub(crate) personality_command_enabled: bool,
     pub(crate) realtime_conversation_enabled: bool,
-    pub(crate) audio_device_selection_enabled: bool,
     pub(crate) windows_degraded_sandbox_active: bool,
 }
 
@@ -53,7 +52,6 @@ impl From<CommandPopupFlags> for slash_commands::BuiltinCommandFlags {
             fast_command_enabled: value.fast_command_enabled,
             personality_command_enabled: value.personality_command_enabled,
             realtime_conversation_enabled: value.realtime_conversation_enabled,
-            audio_device_selection_enabled: value.audio_device_selection_enabled,
             allow_elevate_sandbox: value.windows_degraded_sandbox_active,
         }
     }
@@ -274,7 +272,9 @@ impl WidgetRef for CommandPopup {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let rows = self.rows_from_matches(self.filtered());
         render_rows(
-            area.inset(Insets::tlbr(0, 2, 0, 0)),
+            area.inset(Insets::tlbr(
+                /*top*/ 0, /*left*/ 2, /*bottom*/ 0, /*right*/ 0,
+            )),
             buf,
             &rows,
             &self.state,
@@ -510,7 +510,6 @@ mod tests {
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
-                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -532,7 +531,6 @@ mod tests {
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
-                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -554,7 +552,6 @@ mod tests {
                 fast_command_enabled: false,
                 personality_command_enabled: false,
                 realtime_conversation_enabled: false,
-                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -584,7 +581,6 @@ mod tests {
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
-                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -597,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_command_hidden_when_audio_device_selection_is_disabled() {
+    fn settings_command_is_still_visible() {
         let mut popup = CommandPopup::new(
             Vec::new(),
             CommandPopupFlags {
@@ -606,25 +602,15 @@ mod tests {
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: true,
-                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
-        popup.on_composer_text_change("/aud".to_string());
+        popup.on_composer_text_change("/settings".to_string());
 
-        let cmds: Vec<&str> = popup
-            .filtered_items()
-            .into_iter()
-            .filter_map(|item| match item {
-                CommandItem::Builtin(cmd) => Some(cmd.command()),
-                CommandItem::UserPrompt(_) => None,
-            })
-            .collect();
-
-        assert!(
-            !cmds.contains(&"settings"),
-            "expected '/settings' to be hidden when audio device selection is disabled, got {cmds:?}"
-        );
+        match popup.selected_item() {
+            Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "settings"),
+            other => panic!("expected settings to be selected for exact match, got {other:?}"),
+        }
     }
 
     #[test]

@@ -21,7 +21,6 @@ pub enum SlashCommand {
     ElevateSandbox,
     #[strum(serialize = "sandbox-add-read-dir")]
     SandboxReadRoot,
-    Experimental,
     Skills,
     Review,
     Rename,
@@ -49,7 +48,8 @@ pub enum SlashCommand {
     Feedback,
     Rollout,
     Ps,
-    Clean,
+    #[strum(to_string = "stop", serialize = "clean")]
+    Stop,
     Clear,
     Personality,
     Realtime,
@@ -88,7 +88,7 @@ impl SlashCommand {
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
             SlashCommand::Ps => "list background terminals",
-            SlashCommand::Clean => "stop all background terminals",
+            SlashCommand::Stop => "stop all background terminals",
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
@@ -96,7 +96,7 @@ impl SlashCommand {
             SlashCommand::Fast => "toggle Fast mode to enable fastest inference at 2X plan usage",
             SlashCommand::Personality => "choose a communication style for Codex",
             SlashCommand::Realtime => "toggle realtime voice mode (experimental)",
-            SlashCommand::Settings => "configure realtime microphone/speaker",
+            SlashCommand::Settings => "browse and edit all config settings",
             SlashCommand::Plan => "switch to Plan mode",
             SlashCommand::Collab => "change collaboration mode (experimental)",
             SlashCommand::Agent | SlashCommand::MultiAgents => "switch the active agent thread",
@@ -106,7 +106,6 @@ impl SlashCommand {
             SlashCommand::SandboxReadRoot => {
                 "let sandbox read a directory: /sandbox-add-read-dir <absolute_path>"
             }
-            SlashCommand::Experimental => "inspect and toggle feature flags",
             SlashCommand::Mcp => "list configured MCP tools",
             SlashCommand::Apps => "manage apps",
             SlashCommand::Logout => "log out of Codex",
@@ -150,7 +149,6 @@ impl SlashCommand {
             | SlashCommand::Permissions
             | SlashCommand::ElevateSandbox
             | SlashCommand::SandboxReadRoot
-            | SlashCommand::Experimental
             | SlashCommand::Review
             | SlashCommand::Plan
             | SlashCommand::Clear
@@ -165,7 +163,7 @@ impl SlashCommand {
             | SlashCommand::Status
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
-            | SlashCommand::Clean
+            | SlashCommand::Stop
             | SlashCommand::Mcp
             | SlashCommand::Apps
             | SlashCommand::Feedback
@@ -198,4 +196,22 @@ pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
         .filter(|command| command.is_visible())
         .map(|c| (c.command(), c))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use std::str::FromStr;
+
+    use super::SlashCommand;
+
+    #[test]
+    fn stop_command_is_canonical_name() {
+        assert_eq!(SlashCommand::Stop.command(), "stop");
+    }
+
+    #[test]
+    fn clean_alias_parses_to_stop_command() {
+        assert_eq!(SlashCommand::from_str("clean"), Ok(SlashCommand::Stop));
+    }
 }

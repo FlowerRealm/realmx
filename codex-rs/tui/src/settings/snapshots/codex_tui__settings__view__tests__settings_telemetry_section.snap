@@ -1,0 +1,14 @@
+---
+source: tui/src/settings/view.rs
+expression: summary
+snapshot_kind: text
+---
+title: Settings / telemetry
+subtitle: Browse and edit settings under `telemetry` in user config.toml.
+Write scope: 1
+analytics: 1
+analytics.enabled: 1
+feedback: 1
+feedback.enabled: 1
+otel: 1
+otel.environment: 1

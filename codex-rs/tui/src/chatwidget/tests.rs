@@ -34,9 +34,7 @@ use codex_core::config_loader::ConfigLayerStack;
 use codex_core::config_loader::ConfigRequirements;
 use codex_core::config_loader::ConfigRequirementsToml;
 use codex_core::config_loader::RequirementSource;
-use codex_core::features::FEATURES;
 use codex_core::features::Feature;
-use codex_core::features::Stage;
 use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_core::skills::model::SkillMetadata;
@@ -132,7 +130,6 @@ use pretty_assertions::assert_eq;
 #[cfg(target_os = "windows")]
 use serial_test::serial;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Read;
 use std::io::Write;
@@ -1850,8 +1847,25 @@ fn test_session_telemetry(config: &Config, model: &str) -> SessionTelemetry {
 }
 
 // --- Helpers for tests that need direct construction and event draining ---
+enum TestAnimationMode {
+    UseConfigDefault,
+    Disabled,
+}
+
 async fn make_chatwidget_manual(
     model_override: Option<&str>,
+) -> (
+    ChatWidget,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    make_chatwidget_manual_with_animation_mode(model_override, TestAnimationMode::UseConfigDefault)
+        .await
+}
+
+async fn make_chatwidget_manual_with_animation_mode(
+    model_override: Option<&str>,
+    animation_mode: TestAnimationMode,
 ) -> (
     ChatWidget,
     tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
@@ -1866,6 +1880,9 @@ async fn make_chatwidget_manual(
         .unwrap_or_else(|| codex_core::test_support::get_model_offline(cfg.model.as_deref()));
     if let Some(model) = model_override {
         cfg.model = Some(model.to_string());
+    }
+    if matches!(animation_mode, TestAnimationMode::Disabled) {
+        cfg.animations = false;
     }
     let prevent_idle_sleep = cfg.features.enabled(Feature::PreventIdleSleep);
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
@@ -4100,7 +4117,7 @@ async fn enqueueing_history_prompt_multiple_times_is_stable() {
 }
 
 #[tokio::test]
-async fn streaming_final_answer_keeps_task_running_state() {
+async fn streaming_final_answer_ctrl_c_interrupt_preserves_background_shells() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
     chat.thread_id = Some(ThreadId::new());
 
@@ -4123,12 +4140,16 @@ async fn streaming_final_answer_keeps_task_running_state() {
     );
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 
+    begin_unified_exec_startup(&mut chat, "call-1", "process-1", "npm run dev");
+    assert_eq!(chat.unified_exec_processes.len(), 1);
+
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     match op_rx.try_recv() {
         Ok(Op::Interrupt) => {}
         other => panic!("expected Op::Interrupt, got {other:?}"),
     }
     assert!(!chat.bottom_pane.quit_shortcut_hint_visible());
+    assert_eq!(chat.unified_exec_processes.len(), 1);
 }
 
 #[tokio::test]
@@ -6309,10 +6330,10 @@ async fn slash_exit_requests_exit() {
 }
 
 #[tokio::test]
-async fn slash_clean_submits_background_terminal_cleanup() {
+async fn slash_stop_submits_background_terminal_cleanup() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
 
-    chat.dispatch_command(SlashCommand::Clean);
+    chat.dispatch_command(SlashCommand::Stop);
 
     assert_matches!(op_rx.try_recv(), Ok(Op::CleanBackgroundTerminals));
     let cells = drain_insert_history(&mut rx);
@@ -7735,243 +7756,6 @@ async fn apps_popup_for_not_installed_app_uses_install_only_selected_description
 }
 
 #[tokio::test]
-async fn experimental_features_popup_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-
-    let features = vec![
-        ExperimentalFeatureItem {
-            feature: Feature::GhostCommit,
-            name: "Ghost snapshots".to_string(),
-            description: "Capture undo snapshots each turn.".to_string(),
-            stage_tag: "stable".to_string(),
-            enabled: false,
-            original_enabled: false,
-        },
-        ExperimentalFeatureItem {
-            feature: Feature::JsRepl,
-            name: "JavaScript REPL".to_string(),
-            description: "Enable a persistent Node-backed JavaScript REPL.".to_string(),
-            stage_tag: "experimental".to_string(),
-            enabled: true,
-            original_enabled: true,
-        },
-    ];
-    let view = ExperimentalFeaturesView::new(features, chat.app_event_tx.clone());
-    chat.bottom_pane.show_view(Box::new(view));
-
-    let popup = render_bottom_popup(&chat, 80);
-    assert_snapshot!("experimental_features_popup", popup);
-}
-
-#[tokio::test]
-async fn experimental_features_exit_without_changes_does_not_emit_update() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
-
-    let view = ExperimentalFeaturesView::new(
-        vec![ExperimentalFeatureItem {
-            feature: Feature::GhostCommit,
-            name: "Ghost snapshots".to_string(),
-            description: "Capture undo snapshots each turn.".to_string(),
-            stage_tag: "stable".to_string(),
-            enabled: false,
-            original_enabled: false,
-        }],
-        chat.app_event_tx.clone(),
-    );
-    chat.bottom_pane.show_view(Box::new(view));
-
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    while let Ok(event) = rx.try_recv() {
-        if matches!(event, AppEvent::UpdateFeatureFlags { .. }) {
-            panic!("did not expect UpdateFeatureFlags event when nothing changed");
-        }
-    }
-}
-
-#[tokio::test]
-async fn experimental_features_toggle_saves_on_exit() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
-
-    let expected_feature = Feature::GhostCommit;
-    let view = ExperimentalFeaturesView::new(
-        vec![ExperimentalFeatureItem {
-            feature: expected_feature,
-            name: "Ghost snapshots".to_string(),
-            description: "Capture undo snapshots each turn.".to_string(),
-            stage_tag: "stable".to_string(),
-            enabled: false,
-            original_enabled: false,
-        }],
-        chat.app_event_tx.clone(),
-    );
-    chat.bottom_pane.show_view(Box::new(view));
-
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-
-    assert!(
-        rx.try_recv().is_err(),
-        "expected no updates until saving the popup"
-    );
-
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    let mut updates = None;
-    while let Ok(event) = rx.try_recv() {
-        if let AppEvent::UpdateFeatureFlags {
-            updates: event_updates,
-        } = event
-        {
-            updates = Some(event_updates);
-            break;
-        }
-    }
-
-    let updates = updates.expect("expected UpdateFeatureFlags event");
-    assert_eq!(updates, vec![(expected_feature, true)]);
-}
-
-#[tokio::test]
-async fn experimental_popup_shows_all_non_removed_feature_flags() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
-
-    let items = chat.experimental_feature_items();
-    let actual_features: BTreeSet<_> = items.iter().map(|item| item.feature).collect();
-    let expected_features: BTreeSet<_> = FEATURES
-        .iter()
-        .filter(|spec| !matches!(spec.stage, Stage::Removed))
-        .map(|spec| spec.id)
-        .collect();
-    assert_eq!(actual_features, expected_features);
-
-    let actual_stage_tags: BTreeSet<_> = items.iter().map(|item| item.stage_tag.as_str()).collect();
-    let expected_stage_tags: BTreeSet<_> = FEATURES
-        .iter()
-        .filter_map(|spec| match spec.stage {
-            Stage::Experimental { .. } => Some("experimental"),
-            Stage::UnderDevelopment => Some("under development"),
-            Stage::Stable => Some("stable"),
-            Stage::Deprecated => Some("deprecated"),
-            Stage::Removed => None,
-        })
-        .collect();
-    assert_eq!(actual_stage_tags, expected_stage_tags);
-
-    let target_feature = items
-        .iter()
-        .find(|item| !item.enabled)
-        .map(|item| item.feature)
-        .expect("expected at least one disabled feature flag");
-    let target_idx = items
-        .iter()
-        .position(|item| item.feature == target_feature)
-        .expect("target feature should exist in popup items");
-
-    chat.open_experimental_popup();
-    for _ in 0..target_idx {
-        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    }
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    let mut updates = None;
-    while let Ok(event) = rx.try_recv() {
-        if let AppEvent::UpdateFeatureFlags {
-            updates: event_updates,
-        } = event
-        {
-            updates = Some(event_updates);
-            break;
-        }
-    }
-
-    let updates = updates.expect("expected UpdateFeatureFlags event");
-    assert_eq!(updates, vec![(target_feature, true)]);
-    assert!(
-        !updates
-            .iter()
-            .any(|(feature, _)| matches!(feature.stage(), Stage::Removed)),
-        "did not expect removed feature flags in updates: {updates:?}"
-    );
-}
-
-#[tokio::test]
-
-async fn experimental_popup_shows_js_repl_node_requirement() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-
-    let js_repl_description = FEATURES
-        .iter()
-        .find(|spec| spec.id == Feature::JsRepl)
-        .and_then(|spec| spec.stage.experimental_menu_description())
-        .expect("expected js_repl experimental description");
-    let node_requirement = js_repl_description
-        .split(". ")
-        .find(|sentence| sentence.starts_with("Requires Node >= v"))
-        .map(|sentence| sentence.trim_end_matches(" installed."))
-        .expect("expected js_repl description to mention the Node requirement");
-
-    chat.open_experimental_popup();
-
-    let popup = render_bottom_popup(&chat, 120);
-    assert!(
-        popup.contains(node_requirement),
-        "expected js_repl feature description to mention the required Node version, got:\n{popup}"
-    );
-}
-
-#[tokio::test]
-async fn experimental_popup_includes_smart_approvals() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    let smart_approvals_stage = FEATURES
-        .iter()
-        .find(|spec| spec.id == Feature::GuardianApproval)
-        .map(|spec| spec.stage)
-        .expect("expected guardian approval feature metadata");
-    let smart_approvals_name = smart_approvals_stage
-        .experimental_menu_name()
-        .expect("expected guardian approval experimental menu name");
-    let smart_approvals_idx = chat
-        .experimental_feature_items()
-        .iter()
-        .position(|item| item.feature == Feature::GuardianApproval)
-        .expect("expected guardian approval feature in experimental popup items");
-
-    chat.open_experimental_popup();
-    for _ in 0..smart_approvals_idx {
-        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    }
-
-    let popup = render_bottom_popup(&chat, 120);
-    let normalized_popup = popup
-        .replace("-\n", "")
-        .replace("- ", "")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(
-        popup.contains(smart_approvals_name),
-        "expected Smart Approvals entry in experimental popup, got:\n{popup}"
-    );
-    assert!(
-        normalized_popup.contains("When Codex needs approval for higher-risk actions"),
-        "expected Smart Approvals description to explain the approval routing, got:\n{popup}"
-    );
-    assert!(
-        normalized_popup.contains("sandbox escapes or blocked network access"),
-        "expected Smart Approvals description to mention high-risk approval examples, got:\n{popup}"
-    );
-    assert!(
-        normalized_popup.contains("security reviewer subagent"),
-        "expected Smart Approvals description to mention the reviewer subagent, got:\n{popup}"
-    );
-    assert!(
-        normalized_popup.contains("runs a subagent on every approval request"),
-        "expected Smart Approvals description to mention the token cost tradeoff, got:\n{popup}"
-    );
-}
-
-#[tokio::test]
 async fn multi_agent_enable_prompt_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
@@ -8029,11 +7813,102 @@ async fn personality_selection_popup_snapshot() {
     assert_snapshot!("personality_selection_popup", popup);
 }
 
+#[tokio::test]
+async fn settings_popup_renders_root_items() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Root,
+        /*selected_item_key*/ None,
+    );
+
+    let popup = render_bottom_popup(&chat, 88);
+    assert!(popup.contains("Settings"));
+    assert!(popup.contains("Write scope"));
+    assert!(!popup.contains("audio.microphone"));
+    assert!(!popup.contains("service_tier"));
+}
+
+#[tokio::test]
+async fn settings_section_popup_renders_child_items() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Root,
+        /*selected_item_key*/ None,
+    );
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Section {
+            section_key: "voice".to_string(),
+        },
+        /*selected_item_key*/ None,
+    );
+
+    let popup = render_bottom_popup(&chat, 88);
+    assert!(popup.contains("Settings / voice"));
+    assert!(popup.contains("microphone"));
+}
+
+#[tokio::test]
+async fn settings_section_escape_returns_to_settings_root() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Root,
+        /*selected_item_key*/ None,
+    );
+    let root_popup = render_bottom_popup(&chat, 88);
+
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Section {
+            section_key: "voice".to_string(),
+        },
+        /*selected_item_key*/ None,
+    );
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+
+    assert_eq!(render_bottom_popup(&chat, 88), root_popup);
+}
+
+#[tokio::test]
+async fn settings_editor_escape_returns_to_settings_section() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Root,
+        /*selected_item_key*/ None,
+    );
+    chat.open_settings(
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Section {
+            section_key: "model".to_string(),
+        },
+        /*selected_item_key*/ None,
+    );
+    let section_popup = render_bottom_popup(&chat, 88);
+
+    chat.open_setting_editor(
+        "service_tier".to_string(),
+        crate::settings::data::SettingsScope::Global,
+        crate::settings::data::SettingsScreen::Section {
+            section_key: "model".to_string(),
+        },
+    );
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+
+    assert_eq!(render_bottom_popup(&chat, 88), section_popup);
+}
+
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
 #[tokio::test]
 async fn realtime_audio_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
-    chat.open_realtime_audio_popup();
+    chat.open_realtime_audio_device_selection_with_names(
+        RealtimeAudioDeviceKind::Microphone,
+        vec!["Built-in Mic".to_string(), "USB Mic".to_string()],
+    );
 
     let popup = render_bottom_popup(&chat, 80);
     assert_snapshot!("realtime_audio_selection_popup", popup);
@@ -8043,7 +7918,10 @@ async fn realtime_audio_selection_popup_snapshot() {
 #[tokio::test]
 async fn realtime_audio_selection_popup_narrow_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
-    chat.open_realtime_audio_popup();
+    chat.open_realtime_audio_device_selection_with_names(
+        RealtimeAudioDeviceKind::Microphone,
+        vec!["Built-in Mic".to_string(), "USB Mic".to_string()],
+    );
 
     let popup = render_bottom_popup(&chat, 56);
     assert_snapshot!("realtime_audio_selection_popup_narrow", popup);
@@ -8804,7 +8682,7 @@ async fn permissions_selection_history_snapshot_full_access_to_default() {
     chat.open_permissions_popup();
     let popup = render_bottom_popup(&chat, 120);
     chat.handle_key_event(KeyEvent::from(KeyCode::Up));
-    if popup.contains("Smart Approvals") {
+    if popup.contains("Guardian Approvals") {
         chat.handle_key_event(KeyEvent::from(KeyCode::Up));
     }
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
@@ -8861,7 +8739,7 @@ async fn permissions_selection_emits_history_cell_when_current_is_selected() {
 }
 
 #[tokio::test]
-async fn permissions_selection_hides_smart_approvals_when_feature_disabled() {
+async fn permissions_selection_hides_guardian_approvals_when_feature_disabled() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     #[cfg(target_os = "windows")]
     {
@@ -8874,13 +8752,13 @@ async fn permissions_selection_hides_smart_approvals_when_feature_disabled() {
     let popup = render_bottom_popup(&chat, 120);
 
     assert!(
-        !popup.contains("Smart Approvals"),
-        "expected Smart Approvals to stay hidden until the experimental feature is enabled: {popup}"
+        !popup.contains("Guardian Approvals"),
+        "expected Guardian Approvals to stay hidden until the experimental feature is enabled: {popup}"
     );
 }
 
 #[tokio::test]
-async fn permissions_selection_hides_smart_approvals_when_feature_disabled_even_if_auto_review_is_active()
+async fn permissions_selection_hides_guardian_approvals_when_feature_disabled_even_if_auto_review_is_active()
  {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     #[cfg(target_os = "windows")]
@@ -8905,13 +8783,13 @@ async fn permissions_selection_hides_smart_approvals_when_feature_disabled_even_
     let popup = render_bottom_popup(&chat, 120);
 
     assert!(
-        !popup.contains("Smart Approvals"),
-        "expected Smart Approvals to stay hidden when the experimental feature is disabled: {popup}"
+        !popup.contains("Guardian Approvals"),
+        "expected Guardian Approvals to stay hidden when the experimental feature is disabled: {popup}"
     );
 }
 
 #[tokio::test]
-async fn permissions_selection_marks_smart_approvals_current_after_session_configured() {
+async fn permissions_selection_marks_guardian_approvals_current_after_session_configured() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     #[cfg(target_os = "windows")]
     {
@@ -8950,13 +8828,14 @@ async fn permissions_selection_marks_smart_approvals_current_after_session_confi
     let popup = render_bottom_popup(&chat, 120);
 
     assert!(
-        popup.contains("Smart Approvals (current)"),
-        "expected Smart Approvals to be current after SessionConfigured sync: {popup}"
+        popup.contains("Guardian Approvals (current)"),
+        "expected Guardian Approvals to be current after SessionConfigured sync: {popup}"
     );
 }
 
 #[tokio::test]
-async fn permissions_selection_marks_smart_approvals_current_with_custom_workspace_write_details() {
+async fn permissions_selection_marks_guardian_approvals_current_with_custom_workspace_write_details()
+ {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     #[cfg(target_os = "windows")]
     {
@@ -8969,7 +8848,7 @@ async fn permissions_selection_marks_smart_approvals_current_with_custom_workspa
         .features
         .set_enabled(Feature::GuardianApproval, true);
 
-    let extra_root = AbsolutePathBuf::try_from("/tmp/smart-approvals-extra")
+    let extra_root = AbsolutePathBuf::try_from("/tmp/guardian-approvals-extra")
         .expect("absolute extra writable root");
 
     chat.handle_codex_event(Event {
@@ -9004,13 +8883,13 @@ async fn permissions_selection_marks_smart_approvals_current_with_custom_workspa
     let popup = render_bottom_popup(&chat, 120);
 
     assert!(
-        popup.contains("Smart Approvals (current)"),
-        "expected Smart Approvals to be current even with custom workspace-write details: {popup}"
+        popup.contains("Guardian Approvals (current)"),
+        "expected Guardian Approvals to be current even with custom workspace-write details: {popup}"
     );
 }
 
 #[tokio::test]
-async fn permissions_selection_can_disable_smart_approvals() {
+async fn permissions_selection_can_disable_guardian_approvals() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     #[cfg(target_os = "windows")]
     {
@@ -9040,7 +8919,7 @@ async fn permissions_selection_can_disable_smart_approvals() {
             event,
             AppEvent::UpdateApprovalsReviewer(ApprovalsReviewer::User)
         )),
-        "expected selecting Default from Smart Approvals to switch back to manual approval review: {events:?}"
+        "expected selecting Default from Guardian Approvals to switch back to manual approval review: {events:?}"
     );
     assert!(
         !events
@@ -9086,8 +8965,8 @@ async fn permissions_selection_sends_approvals_reviewer_in_override_turn_context
     assert!(
         popup
             .lines()
-            .any(|line| line.contains("Smart Approvals") && line.contains('›')),
-        "expected one Down from Default to select Smart Approvals: {popup}"
+            .any(|line| line.contains("Guardian Approvals") && line.contains('›')),
+        "expected one Down from Default to select Guardian Approvals: {popup}"
     );
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -9473,7 +9352,7 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
 }
 
 #[tokio::test]
-async fn interrupt_clears_unified_exec_processes() {
+async fn interrupt_keeps_unified_exec_processes() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 
     begin_unified_exec_startup(&mut chat, "call-1", "process-1", "sleep 5");
@@ -9488,7 +9367,7 @@ async fn interrupt_clears_unified_exec_processes() {
         }),
     });
 
-    assert!(chat.unified_exec_processes.is_empty());
+    assert_eq!(chat.unified_exec_processes.len(), 2);
 
     let _ = drain_insert_history(&mut rx);
 }
@@ -9531,7 +9410,7 @@ async fn review_ended_keeps_unified_exec_processes() {
 }
 
 #[tokio::test]
-async fn interrupt_clears_unified_exec_wait_streak_snapshot() {
+async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 
     chat.handle_codex_event(Event {
@@ -9562,7 +9441,7 @@ async fn interrupt_clears_unified_exec_wait_streak_snapshot() {
         .collect::<Vec<_>>()
         .join("\n");
     let snapshot = format!("cells={}\n{combined}", cells.len());
-    assert_snapshot!("interrupt_clears_unified_exec_wait_streak", snapshot);
+    assert_snapshot!("interrupt_preserves_unified_exec_wait_streak", snapshot);
 }
 
 #[tokio::test]
@@ -9716,7 +9595,8 @@ async fn status_widget_and_approval_modal_snapshot() {
 
 #[tokio::test]
 async fn guardian_denied_exec_renders_warning_and_denied_request() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    let (mut chat, mut rx, _op_rx) =
+        make_chatwidget_manual_with_animation_mode(None, TestAnimationMode::Disabled).await;
     chat.show_welcome_banner = false;
     let action = serde_json::json!({
         "tool": "shell",

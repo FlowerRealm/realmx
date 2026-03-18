@@ -122,7 +122,9 @@ impl WidgetRef for &ProviderWidget {
         column.push(
             Paragraph::new("Press Enter to continue")
                 .wrap(Wrap { trim: true })
-                .inset(Insets::tlbr(0, 2, 0, 0)),
+                .inset(Insets::tlbr(
+                    /*top*/ 0, /*left*/ 2, /*bottom*/ 0, /*right*/ 0,
+                )),
         );
         column.render(area, buf);
     }

@@ -118,6 +118,7 @@ pub struct PluginDetailSummary {
 pub struct ConfiguredMarketplaceSummary {
     pub name: String,
     pub path: AbsolutePathBuf,
+    pub display_name: Option<String>,
     pub plugins: Vec<ConfiguredMarketplacePluginSummary>,
 }
 
@@ -434,7 +435,11 @@ impl PluginsManager {
     }
 
     pub fn plugins_for_config(&self, config: &Config) -> PluginLoadOutcome {
-        self.plugins_for_layer_stack(&config.cwd, &config.config_layer_stack, false)
+        self.plugins_for_layer_stack(
+            &config.cwd,
+            &config.config_layer_stack,
+            /*force_reload*/ false,
+        )
     }
 
     pub fn plugins_for_layer_stack(
@@ -797,6 +802,7 @@ impl PluginsManager {
                 (!plugins.is_empty()).then_some(ConfiguredMarketplaceSummary {
                     name: marketplace.name,
                     path: marketplace.path,
+                    display_name: marketplace.display_name,
                     plugins,
                 })
             })
