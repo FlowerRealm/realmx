@@ -10,6 +10,8 @@ base_url = "http://localhost:11434/v1"
     let expected_provider = ModelProviderInfo {
         name: "Ollama".into(),
         base_url: Some("http://localhost:11434/v1".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: None,
         env_key_instructions: None,
@@ -40,6 +42,8 @@ query_params = { api-version = "2025-04-01-preview" }
     let expected_provider = ModelProviderInfo {
         name: "Azure".into(),
         base_url: Some("https://xxxxx.openai.azure.com/openai".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
@@ -73,6 +77,8 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
     let expected_provider = ModelProviderInfo {
         name: "Example".into(),
         base_url: Some("https://example.com".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
@@ -121,6 +127,8 @@ env_key = "API_KEY"
     let expected_provider = ModelProviderInfo {
         name: "Example".into(),
         base_url: Some("https://example.com".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: Some("secret".into()),
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
@@ -145,6 +153,8 @@ fn api_key_prefers_inline_config_value() {
     let provider = ModelProviderInfo {
         name: "Example".into(),
         base_url: Some("https://example.com/v1".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: Some("inline-key".into()),
         env_key: Some("SHOULD_NOT_BE_USED".into()),
         env_key_instructions: None,
@@ -161,4 +171,36 @@ fn api_key_prefers_inline_config_value() {
     };
 
     assert_eq!(provider.api_key().unwrap(), Some("inline-key".to_string()));
+}
+
+#[test]
+fn resolved_auth_strategy_does_not_infer_oauth_from_oauth_config() {
+    let provider = ModelProviderInfo {
+        name: "Example".into(),
+        base_url: Some("https://example.com/v1".into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: Some(ModelProviderOAuthConfig {
+            url: Some("https://example.com/oauth".into()),
+            scopes: None,
+            oauth_resource: None,
+        }),
+        api_key: None,
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    };
+
+    assert_eq!(
+        provider.resolved_auth_strategy(),
+        ModelProviderAuthStrategy::None
+    );
 }

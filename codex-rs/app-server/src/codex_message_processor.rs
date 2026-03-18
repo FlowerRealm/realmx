@@ -185,16 +185,18 @@ use codex_core::CodexAuth;
 use codex_core::CodexThread;
 use codex_core::Cursor as RolloutCursor;
 use codex_core::NewThread;
+use codex_core::ProviderCredentialMode;
 use codex_core::RolloutRecorder;
 use codex_core::SessionMeta;
 use codex_core::SteerInputError;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::ThreadManager;
 use codex_core::ThreadSortKey as CoreThreadSortKey;
-use codex_core::auth::AuthMode as CoreAuthMode;
+use codex_core::activate_provider_api_key;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::login_with_chatgpt_auth_tokens;
+use codex_core::clear_provider_credentials;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::NetworkProxyAuditMetadata;
@@ -205,6 +207,7 @@ use codex_core::config_loader::CloudRequirementsLoadError;
 use codex_core::config_loader::CloudRequirementsLoadErrorCode;
 use codex_core::config_loader::CloudRequirementsLoader;
 use codex_core::default_client::set_default_client_residency_requirement;
+use codex_core::detect_provider_credential_mode;
 use codex_core::error::CodexErr;
 use codex_core::error::Result as CodexResult;
 use codex_core::exec::ExecExpiration;
@@ -231,8 +234,11 @@ use codex_core::plugins::PluginInstallRequest;
 use codex_core::plugins::PluginReadRequest;
 use codex_core::plugins::PluginUninstallError as CorePluginUninstallError;
 use codex_core::plugins::load_plugin_apps;
+use codex_core::provider_login_capabilities;
+use codex_core::provider_oauth_url;
 use codex_core::read_head_for_summary;
 use codex_core::read_session_meta_line;
+use codex_core::resolve_provider_credential;
 use codex_core::rollout_date_parts;
 use codex_core::sandboxing::SandboxPermissions;
 use codex_core::skills::remote::export_remote_skill;
@@ -278,6 +284,7 @@ use codex_protocol::protocol::USER_MESSAGE_BEGIN;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use codex_protocol::user_input::UserInput as CoreInputItem;
+use codex_rmcp_client::OauthLoginCancelHandle;
 use codex_rmcp_client::perform_oauth_login_return_url;
 use codex_state::StateRuntime;
 use codex_state::ThreadMetadataBuilder;
@@ -337,14 +344,29 @@ struct ThreadListFilters {
 // Duration before a ChatGPT login attempt is abandoned.
 const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APP_LIST_LOAD_TIMEOUT: Duration = Duration::from_secs(90);
+enum ActiveLoginKind {
+    Chatgpt {
+        shutdown_handle: ShutdownHandle,
+    },
+    OAuth {
+        cancel_handle: OauthLoginCancelHandle,
+    },
+}
+
 struct ActiveLogin {
-    shutdown_handle: ShutdownHandle,
     login_id: Uuid,
+    kind: ActiveLoginKind,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum CancelLoginError {
     NotFound,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CanceledLoginKind {
+    Chatgpt,
+    OAuth,
 }
 
 enum AppListLoadResult {
@@ -378,7 +400,10 @@ fn convert_remote_product_surface(product_surface: ApiProductSurface) -> RemoteS
 
 impl Drop for ActiveLogin {
     fn drop(&mut self) {
-        self.shutdown_handle.shutdown();
+        match &self.kind {
+            ActiveLoginKind::Chatgpt { shutdown_handle } => shutdown_handle.shutdown(),
+            ActiveLoginKind::OAuth { cancel_handle } => cancel_handle.cancel(),
+        }
     }
 }
 
@@ -455,11 +480,44 @@ impl CodexMessageProcessor {
         }
     }
 
-    fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
+    fn current_provider_credential_mode(&self) -> Option<ProviderCredentialMode> {
+        detect_provider_credential_mode(
+            &self.config.codex_home,
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+            self.auth_manager.auth_cached().as_ref(),
+            self.config.mcp_oauth_credentials_store_mode,
+        )
+        .ok()
+        .flatten()
+    }
+
+    fn protocol_auth_mode(mode: ProviderCredentialMode) -> AuthMode {
+        match mode {
+            ProviderCredentialMode::ApiKey => AuthMode::ApiKey,
+            ProviderCredentialMode::Chatgpt => AuthMode::Chatgpt,
+            ProviderCredentialMode::OAuth => AuthMode::Oauth,
+        }
+    }
+
+    async fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
         let auth = self.auth_manager.auth_cached();
+        let capabilities = provider_login_capabilities(
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+        );
+        let current_auth_mode = self
+            .current_provider_credential_mode()
+            .map(Self::protocol_auth_mode);
         AccountUpdatedNotification {
-            auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
-            plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            auth_mode: current_auth_mode,
+            plan_type: if capabilities.uses_openai_auth() {
+                auth.as_ref().and_then(CodexAuth::account_plan_type)
+            } else {
+                None
+            },
+            provider_id: Some(self.config.model_provider_id.clone()),
+            provider_name: Some(self.config.model_provider.name.clone()),
         }
     }
 
@@ -935,6 +993,9 @@ impl CodexMessageProcessor {
                 self.login_api_key_v2(request_id, LoginApiKeyParams { api_key })
                     .await;
             }
+            LoginAccountParams::Oauth => {
+                self.login_oauth_v2(request_id).await;
+            }
             LoginAccountParams::Chatgpt => {
                 self.login_chatgpt_v2(request_id).await;
             }
@@ -967,17 +1028,31 @@ impl CodexMessageProcessor {
         &mut self,
         params: &LoginApiKeyParams,
     ) -> std::result::Result<(), JSONRPCErrorError> {
-        if self.auth_manager.is_external_auth_active() {
+        let provider_id = self.config.model_provider_id.clone();
+        let provider = self.config.model_provider.clone();
+        let capabilities = provider_login_capabilities(&provider_id, &provider);
+
+        if capabilities.uses_openai_auth() && self.auth_manager.is_external_auth_active() {
             return Err(self.external_auth_active_error());
         }
 
-        if matches!(
-            self.config.forced_login_method,
-            Some(ForcedLoginMethod::Chatgpt)
-        ) {
+        if capabilities.uses_openai_auth()
+            && matches!(
+                self.config.forced_login_method,
+                Some(ForcedLoginMethod::Chatgpt)
+            )
+        {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
                 message: "API key login is disabled. Use ChatGPT login instead.".to_string(),
+                data: None,
+            });
+        }
+
+        if !capabilities.uses_openai_auth() && !capabilities.api_key {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("provider `{provider_id}` does not support API key login"),
                 data: None,
             });
         }
@@ -990,13 +1065,29 @@ impl CodexMessageProcessor {
             }
         }
 
-        match login_with_api_key(
-            &self.config.codex_home,
-            &params.api_key,
-            self.config.cli_auth_credentials_store_mode,
-        ) {
+        let result = if capabilities.uses_openai_auth() {
+            login_with_api_key(
+                &self.config.codex_home,
+                &params.api_key,
+                self.config.cli_auth_credentials_store_mode,
+            )
+            .map_err(std::io::Error::other)
+        } else {
+            activate_provider_api_key(
+                &self.config.codex_home,
+                &provider_id,
+                &provider,
+                self.config.mcp_oauth_credentials_store_mode,
+                &params.api_key,
+            )
+            .map_err(std::io::Error::other)
+        };
+
+        match result {
             Ok(()) => {
-                self.auth_manager.reload();
+                if capabilities.uses_openai_auth() {
+                    self.auth_manager.reload();
+                }
                 Ok(())
             }
             Err(err) => Err(JSONRPCErrorError {
@@ -1030,7 +1121,7 @@ impl CodexMessageProcessor {
 
                 self.outgoing
                     .send_server_notification(ServerNotification::AccountUpdated(
-                        self.current_account_updated_notification(),
+                        self.current_account_updated_notification().await,
                     ))
                     .await;
             }
@@ -1045,6 +1136,16 @@ impl CodexMessageProcessor {
         &self,
     ) -> std::result::Result<LoginServerOptions, JSONRPCErrorError> {
         let config = self.config.as_ref();
+        if !provider_login_capabilities(&config.model_provider_id, &config.model_provider).chatgpt {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!(
+                    "provider `{}` does not support ChatGPT login",
+                    config.model_provider_id
+                ),
+                data: None,
+            });
+        }
 
         if self.auth_manager.is_external_auth_active() {
             return Err(self.external_auth_active_error());
@@ -1083,8 +1184,10 @@ impl CodexMessageProcessor {
                             drop(existing);
                         }
                         *guard = Some(ActiveLogin {
-                            shutdown_handle: shutdown_handle.clone(),
                             login_id,
+                            kind: ActiveLoginKind::Chatgpt {
+                                shutdown_handle: shutdown_handle.clone(),
+                            },
                         });
                     }
 
@@ -1096,6 +1199,8 @@ impl CodexMessageProcessor {
                     let chatgpt_base_url = self.config.chatgpt_base_url.clone();
                     let codex_home = self.config.codex_home.clone();
                     let cli_overrides = self.cli_overrides.clone();
+                    let provider_id = self.config.model_provider_id.clone();
+                    let provider_name = self.config.model_provider.name.clone();
                     let auth_url = server.auth_url.clone();
                     tokio::spawn(async move {
                         let (success, error_msg) = match tokio::time::timeout(
@@ -1142,6 +1247,8 @@ impl CodexMessageProcessor {
                             let payload_v2 = AccountUpdatedNotification {
                                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                                provider_id: Some(provider_id),
+                                provider_name: Some(provider_name),
                             };
                             outgoing_clone
                                 .send_server_notification(ServerNotification::AccountUpdated(
@@ -1178,19 +1285,150 @@ impl CodexMessageProcessor {
         }
     }
 
-    async fn cancel_login_chatgpt_common(
-        &mut self,
-        login_id: Uuid,
-    ) -> std::result::Result<(), CancelLoginError> {
-        let mut guard = self.active_login.lock().await;
-        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+    async fn login_oauth_v2(&mut self, request_id: ConnectionRequestId) {
+        let provider_id = self.config.model_provider_id.clone();
+        let provider = self.config.model_provider.clone();
+        let capabilities = provider_login_capabilities(&provider_id, &provider);
+        if capabilities.uses_openai_auth() || !capabilities.oauth {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("provider `{provider_id}` does not support OAuth login"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        {
+            let mut guard = self.active_login.lock().await;
             if let Some(active) = guard.take() {
                 drop(active);
             }
-            Ok(())
-        } else {
-            Err(CancelLoginError::NotFound)
         }
+
+        let oauth_scopes = provider
+            .oauth
+            .as_ref()
+            .and_then(|oauth| oauth.scopes.clone())
+            .unwrap_or_default();
+        let oauth_resource = provider
+            .oauth
+            .as_ref()
+            .and_then(|oauth| oauth.oauth_resource.as_deref())
+            .map(ToString::to_string);
+
+        match perform_oauth_login_return_url(
+            &format!("model-provider:{provider_id}"),
+            provider_oauth_url(&provider_id, &provider).unwrap_or_default(),
+            self.config.mcp_oauth_credentials_store_mode,
+            provider.http_headers.clone(),
+            provider.env_http_headers.clone(),
+            &oauth_scopes,
+            oauth_resource.as_deref(),
+            None,
+            self.config.mcp_oauth_callback_port,
+            self.config.mcp_oauth_callback_url.as_deref(),
+        )
+        .await
+        {
+            Ok(handle) => {
+                let login_id = Uuid::new_v4();
+                let auth_url = handle.authorization_url().to_string();
+                let cancel_handle = handle.cancel_handle();
+                {
+                    let mut guard = self.active_login.lock().await;
+                    *guard = Some(ActiveLogin {
+                        login_id,
+                        kind: ActiveLoginKind::OAuth { cancel_handle },
+                    });
+                }
+
+                let outgoing_clone = self.outgoing.clone();
+                let active_login = self.active_login.clone();
+                let provider_id_for_task = provider_id.clone();
+                let provider_name_for_task = provider.name.clone();
+                tokio::spawn(async move {
+                    let (success, error_msg) =
+                        match tokio::time::timeout(LOGIN_CHATGPT_TIMEOUT, handle.wait()).await {
+                            Ok(Ok(())) => (true, None),
+                            Ok(Err(err)) => (false, Some(format!("OAuth login failed: {err:#}"))),
+                            Err(_elapsed) => (false, Some("OAuth login timed out".to_string())),
+                        };
+
+                    let still_active = {
+                        let guard = active_login.lock().await;
+                        guard.as_ref().map(|login| login.login_id) == Some(login_id)
+                    };
+                    if !still_active {
+                        return;
+                    }
+
+                    outgoing_clone
+                        .send_server_notification(ServerNotification::AccountLoginCompleted(
+                            AccountLoginCompletedNotification {
+                                login_id: Some(login_id.to_string()),
+                                success,
+                                error: error_msg,
+                            },
+                        ))
+                        .await;
+
+                    if success {
+                        outgoing_clone
+                            .send_server_notification(ServerNotification::AccountUpdated(
+                                AccountUpdatedNotification {
+                                    auth_mode: Some(AuthMode::Oauth),
+                                    plan_type: None,
+                                    provider_id: Some(provider_id_for_task.clone()),
+                                    provider_name: Some(provider_name_for_task.clone()),
+                                },
+                            ))
+                            .await;
+                    }
+
+                    let mut guard = active_login.lock().await;
+                    if guard.as_ref().map(|login| login.login_id) == Some(login_id) {
+                        *guard = None;
+                    }
+                });
+
+                self.outgoing
+                    .send_response(
+                        request_id,
+                        LoginAccountResponse::Oauth {
+                            login_id: login_id.to_string(),
+                            auth_url,
+                        },
+                    )
+                    .await;
+            }
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to start OAuth login: {err:#}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+        }
+    }
+
+    async fn cancel_login_common(
+        &mut self,
+        login_id: Uuid,
+    ) -> std::result::Result<CanceledLoginKind, CancelLoginError> {
+        let mut guard = self.active_login.lock().await;
+        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+            if let Some(active) = guard.take() {
+                let kind = match &active.kind {
+                    ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
+                    ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
+                };
+                drop(active);
+                return Ok(kind);
+            }
+        }
+        Err(CancelLoginError::NotFound)
     }
 
     async fn cancel_login_v2(
@@ -1201,12 +1439,26 @@ impl CodexMessageProcessor {
         let login_id = params.login_id;
         match Uuid::parse_str(&login_id) {
             Ok(uuid) => {
-                let status = match self.cancel_login_chatgpt_common(uuid).await {
-                    Ok(()) => CancelLoginAccountStatus::Canceled,
+                let cancel_outcome = self.cancel_login_common(uuid).await;
+                let canceled_oauth = matches!(cancel_outcome, Ok(CanceledLoginKind::OAuth));
+                let status = match &cancel_outcome {
+                    Ok(_) => CancelLoginAccountStatus::Canceled,
                     Err(CancelLoginError::NotFound) => CancelLoginAccountStatus::NotFound,
                 };
                 let response = CancelLoginAccountResponse { status };
                 self.outgoing.send_response(request_id, response).await;
+
+                if canceled_oauth {
+                    self.outgoing
+                        .send_server_notification(ServerNotification::AccountLoginCompleted(
+                            AccountLoginCompletedNotification {
+                                login_id: Some(login_id),
+                                success: false,
+                                error: Some("OAuth login canceled".to_string()),
+                            },
+                        ))
+                        .await;
+                }
             }
             Err(_) => {
                 let error = JSONRPCErrorError {
@@ -1226,6 +1478,21 @@ impl CodexMessageProcessor {
         chatgpt_account_id: String,
         chatgpt_plan_type: Option<String>,
     ) {
+        if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
+            .chatgpt
+        {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!(
+                    "provider `{}` does not support external ChatGPT auth",
+                    self.config.model_provider_id
+                ),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
         if matches!(
             self.config.forced_login_method,
             Some(ForcedLoginMethod::Api)
@@ -1306,12 +1573,16 @@ impl CodexMessageProcessor {
 
         self.outgoing
             .send_server_notification(ServerNotification::AccountUpdated(
-                self.current_account_updated_notification(),
+                self.current_account_updated_notification().await,
             ))
             .await;
     }
 
     async fn logout_common(&mut self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
+        let capabilities = provider_login_capabilities(
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+        );
         // Cancel any active login attempt.
         {
             let mut guard = self.active_login.lock().await;
@@ -1320,20 +1591,36 @@ impl CodexMessageProcessor {
             }
         }
 
-        if let Err(err) = self.auth_manager.logout() {
-            return Err(JSONRPCErrorError {
-                code: INTERNAL_ERROR_CODE,
-                message: format!("logout failed: {err}"),
-                data: None,
-            });
+        if capabilities.uses_openai_auth() {
+            if let Err(err) = self.auth_manager.logout() {
+                return Err(JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("logout failed: {err}"),
+                    data: None,
+                });
+            }
+
+            return Ok(self
+                .auth_manager
+                .auth_cached()
+                .as_ref()
+                .map(CodexAuth::api_auth_mode));
         }
 
-        // Reflect the current auth method after logout (likely None).
+        clear_provider_credentials(
+            &self.config.codex_home,
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+            self.config.mcp_oauth_credentials_store_mode,
+        )
+        .map_err(|err| JSONRPCErrorError {
+            code: INTERNAL_ERROR_CODE,
+            message: format!("logout failed: {err}"),
+            data: None,
+        })?;
         Ok(self
-            .auth_manager
-            .auth_cached()
-            .as_ref()
-            .map(CodexAuth::api_auth_mode))
+            .current_provider_credential_mode()
+            .map(Self::protocol_auth_mode))
     }
 
     async fn logout_v2(&mut self, request_id: ConnectionRequestId) {
@@ -1346,6 +1633,8 @@ impl CodexMessageProcessor {
                 let payload_v2 = AccountUpdatedNotification {
                     auth_mode: current_auth_method,
                     plan_type: None,
+                    provider_id: Some(self.config.model_provider_id.clone()),
+                    provider_name: Some(self.config.model_provider.name.clone()),
                 };
                 self.outgoing
                     .send_server_notification(ServerNotification::AccountUpdated(payload_v2))
@@ -1358,6 +1647,11 @@ impl CodexMessageProcessor {
     }
 
     async fn refresh_token_if_requested(&self, do_refresh: bool) {
+        if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
+            .uses_openai_auth()
+        {
+            return;
+        }
         if self.auth_manager.is_external_auth_active() {
             return;
         }
@@ -1369,47 +1663,44 @@ impl CodexMessageProcessor {
     async fn get_auth_status(&self, request_id: ConnectionRequestId, params: GetAuthStatusParams) {
         let include_token = params.include_token.unwrap_or(false);
         let do_refresh = params.refresh_token.unwrap_or(false);
+        let capabilities = provider_login_capabilities(
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+        );
 
         self.refresh_token_if_requested(do_refresh).await;
-
-        // Determine whether auth is required based on the active model provider.
-        // If a custom provider is configured with `requires_openai_auth == false`,
-        // then no auth step is required; otherwise, default to requiring auth.
-        let requires_openai_auth = self.config.model_provider.requires_openai_auth;
-
-        let response = if !requires_openai_auth {
-            GetAuthStatusResponse {
-                auth_method: None,
-                auth_token: None,
-                requires_openai_auth: Some(false),
+        let requires_auth = capabilities.requires_auth();
+        let requires_openai_auth = capabilities.uses_openai_auth();
+        let auth_method = self
+            .current_provider_credential_mode()
+            .map(Self::protocol_auth_mode);
+        let auth_token = if include_token && requires_auth {
+            match resolve_provider_credential(
+                &self.config.codex_home,
+                &self.config.model_provider_id,
+                &self.config.model_provider,
+                self.auth_manager.auth_cached(),
+                self.config.mcp_oauth_credentials_store_mode,
+            )
+            .await
+            {
+                Ok(credential) => credential.token,
+                Err(err) => {
+                    tracing::warn!("failed to get token for auth status: {err}");
+                    None
+                }
             }
         } else {
-            match self.auth_manager.auth().await {
-                Some(auth) => {
-                    let auth_mode = auth.api_auth_mode();
-                    let (reported_auth_method, token_opt) = match auth.get_token() {
-                        Ok(token) if !token.is_empty() => {
-                            let tok = if include_token { Some(token) } else { None };
-                            (Some(auth_mode), tok)
-                        }
-                        Ok(_) => (None, None),
-                        Err(err) => {
-                            tracing::warn!("failed to get token for auth status: {err}");
-                            (None, None)
-                        }
-                    };
-                    GetAuthStatusResponse {
-                        auth_method: reported_auth_method,
-                        auth_token: token_opt,
-                        requires_openai_auth: Some(true),
-                    }
-                }
-                None => GetAuthStatusResponse {
-                    auth_method: None,
-                    auth_token: None,
-                    requires_openai_auth: Some(true),
-                },
-            }
+            None
+        };
+
+        let response = GetAuthStatusResponse {
+            auth_method,
+            auth_token,
+            requires_openai_auth: Some(requires_openai_auth),
+            requires_auth: Some(requires_auth),
+            provider_id: Some(self.config.model_provider_id.clone()),
+            provider_name: Some(self.config.model_provider.name.clone()),
         };
 
         self.outgoing.send_response(request_id, response).await;
@@ -1417,25 +1708,35 @@ impl CodexMessageProcessor {
 
     async fn get_account(&self, request_id: ConnectionRequestId, params: GetAccountParams) {
         let do_refresh = params.refresh_token;
+        let capabilities = provider_login_capabilities(
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+        );
 
         self.refresh_token_if_requested(do_refresh).await;
 
-        // Whether auth is required for the active model provider.
-        let requires_openai_auth = self.config.model_provider.requires_openai_auth;
+        let requires_openai_auth = capabilities.uses_openai_auth();
+        let requires_auth = capabilities.requires_auth();
+        let provider_id = self.config.model_provider_id.clone();
+        let provider_name = self.config.model_provider.name.clone();
 
-        if !requires_openai_auth {
+        if !requires_auth {
             let response = GetAccountResponse {
                 account: None,
                 requires_openai_auth,
+                requires_auth: Some(requires_auth),
+                provider_id: Some(provider_id),
+                provider_name: Some(provider_name),
             };
             self.outgoing.send_response(request_id, response).await;
             return;
         }
 
-        let account = match self.auth_manager.auth_cached() {
-            Some(auth) => match auth.auth_mode() {
-                CoreAuthMode::ApiKey => Some(Account::ApiKey {}),
-                CoreAuthMode::Chatgpt => {
+        let account = match self.current_provider_credential_mode() {
+            Some(ProviderCredentialMode::ApiKey) => Some(Account::ApiKey {}),
+            Some(ProviderCredentialMode::OAuth) => Some(Account::Oauth {}),
+            Some(ProviderCredentialMode::Chatgpt) => match self.auth_manager.auth_cached() {
+                Some(auth) => {
                     let email = auth.get_account_email();
                     let plan_type = auth.account_plan_type();
 
@@ -1456,6 +1757,7 @@ impl CodexMessageProcessor {
                         }
                     }
                 }
+                None => None,
             },
             None => None,
         };
@@ -1463,6 +1765,9 @@ impl CodexMessageProcessor {
         let response = GetAccountResponse {
             account,
             requires_openai_auth,
+            requires_auth: Some(requires_auth),
+            provider_id: Some(provider_id),
+            provider_name: Some(provider_name),
         };
         self.outgoing.send_response(request_id, response).await;
     }
@@ -1496,6 +1801,16 @@ impl CodexMessageProcessor {
         ),
         JSONRPCErrorError,
     > {
+        if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
+            .uses_openai_auth()
+        {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "chatgpt authentication required to read rate limits".to_string(),
+                data: None,
+            });
+        }
+
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,

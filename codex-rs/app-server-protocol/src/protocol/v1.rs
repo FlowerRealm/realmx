@@ -188,6 +188,9 @@ pub struct GetAuthStatusResponse {
     pub auth_method: Option<AuthMode>,
     pub auth_token: Option<String>,
     pub requires_openai_auth: Option<bool>,
+    pub requires_auth: Option<bool>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, JsonSchema, TS)]

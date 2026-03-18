@@ -107,7 +107,7 @@ mod pending_thread_approvals;
 pub mod popup_consts;
 mod scroll_state;
 mod selection_popup_common;
-mod textarea;
+pub(crate) mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
 pub(crate) use provider_manager_view::ProviderManagerView;

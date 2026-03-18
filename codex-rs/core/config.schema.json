@@ -804,13 +804,32 @@
       },
       "type": "object"
     },
+    "ModelProviderAuthStrategy": {
+      "enum": [
+        "none",
+        "open_ai",
+        "api_key",
+        "o_auth",
+        "o_auth_or_api_key"
+      ],
+      "type": "string"
+    },
     "ModelProviderInfo": {
       "additionalProperties": false,
       "description": "Serializable representation of a provider definition.",
       "properties": {
         "api_key": {
-          "description": "API key stored directly in config.toml for this provider.",
+          "description": "API key stored directly in config.toml for this provider.\n\nDeprecated: legacy compatibility only. Runtime credentials should be stored outside config and are automatically migrated on load.",
           "type": "string"
+        },
+        "auth_strategy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderAuthStrategy"
+            }
+          ],
+          "default": "none",
+          "description": "Authentication strategy for this provider."
         },
         "base_url": {
           "description": "Base URL for the provider's OpenAI-compatible API.",
@@ -845,6 +864,14 @@
         "name": {
           "description": "Friendly display name.",
           "type": "string"
+        },
+        "oauth": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderOAuthConfig"
+            }
+          ],
+          "description": "Optional OAuth configuration for generic provider login."
         },
         "query_params": {
           "additionalProperties": {
@@ -894,6 +921,27 @@
       "required": [
         "name"
       ],
+      "type": "object"
+    },
+    "ModelProviderOAuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "oauth_resource": {
+          "description": "Optional OAuth resource parameter (RFC 8707).",
+          "type": "string"
+        },
+        "scopes": {
+          "description": "Optional OAuth scopes requested during generic provider login.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "url": {
+          "description": "Optional URL used for OAuth discovery/login. Defaults to `base_url`.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "NetworkModeSchema": {

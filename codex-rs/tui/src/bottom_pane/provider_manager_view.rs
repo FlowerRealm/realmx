@@ -1,10 +1,13 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::path::PathBuf;
 
+use codex_core::ModelProviderAuthStrategy;
 use codex_core::ModelProviderInfo;
 use codex_core::WireApi;
 use codex_core::built_in_model_providers;
 use codex_core::config::Config;
+use codex_core::read_provider_api_key;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -21,6 +24,7 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
 
 use crate::app_event::AppEvent;
+use crate::app_event::ProviderApiKeyInput;
 use crate::app_event_sender::AppEventSender;
 use crate::provider_usage::can_edit_provider_usage_scripts;
 use crate::render::renderable::ColumnRenderable;
@@ -84,6 +88,7 @@ struct ProviderDraft {
     name: String,
     base_url: String,
     api_key: String,
+    existing_api_key: bool,
     focused_field: Field,
 }
 
@@ -94,6 +99,8 @@ impl ProviderDraft {
             template: ModelProviderInfo {
                 name: String::new(),
                 base_url: None,
+                auth_strategy: ModelProviderAuthStrategy::ApiKey,
+                oauth: None,
                 api_key: None,
                 env_key: None,
                 env_key_instructions: None,
@@ -112,18 +119,20 @@ impl ProviderDraft {
             name: String::new(),
             base_url: String::new(),
             api_key: String::new(),
+            existing_api_key: false,
             focused_field: Field::Id,
         }
     }
 
-    fn from_row(row: &ProviderRow) -> Self {
+    fn from_row(row: &ProviderRow, existing_api_key: bool) -> Self {
         Self {
             original_id: Some(row.id.clone()),
             template: row.provider.clone(),
             id: row.id.clone(),
             name: row.provider.name.clone(),
             base_url: row.provider.base_url.clone().unwrap_or_default(),
-            api_key: row.provider.api_key.clone().unwrap_or_default(),
+            api_key: String::new(),
+            existing_api_key,
             focused_field: Field::Name,
         }
     }
@@ -151,8 +160,22 @@ impl ProviderDraft {
         provider.name = self.name.trim().to_string();
         provider.base_url =
             Some(self.base_url.trim().to_string()).filter(|value| !value.is_empty());
-        provider.api_key = Some(self.api_key.trim().to_string()).filter(|value| !value.is_empty());
+        provider.auth_strategy = ModelProviderAuthStrategy::ApiKey;
+        provider.oauth = None;
+        provider.api_key = None;
+        provider.requires_openai_auth = false;
         provider
+    }
+
+    fn api_key_input(&self) -> ProviderApiKeyInput {
+        let api_key = self.api_key.trim();
+        if api_key.eq_ignore_ascii_case("clear") {
+            ProviderApiKeyInput::Clear
+        } else if !api_key.is_empty() {
+            ProviderApiKeyInput::Set(api_key.to_string())
+        } else {
+            ProviderApiKeyInput::KeepExisting
+        }
     }
 }
 
@@ -169,6 +192,7 @@ enum Mode {
 
 pub(crate) struct ProviderManagerView {
     app_event_tx: AppEventSender,
+    codex_home: PathBuf,
     rows: Vec<ProviderRow>,
     selected_idx: usize,
     default_provider_id: String,
@@ -204,6 +228,7 @@ impl ProviderManagerView {
 
         Self {
             app_event_tx,
+            codex_home: config.codex_home.clone(),
             rows,
             selected_idx,
             default_provider_id: config.model_provider_id.clone(),
@@ -253,7 +278,12 @@ impl ProviderManagerView {
             );
             return;
         }
-        self.begin_edit(ProviderDraft::from_row(&row));
+        let existing_api_key = read_provider_api_key(&self.codex_home, &row.id)
+            .ok()
+            .flatten()
+            .is_some()
+            || row.provider.inline_api_key().is_some();
+        self.begin_edit(ProviderDraft::from_row(&row, existing_api_key));
     }
 
     fn sync_draft_from_textarea(edit: &mut EditState) {
@@ -322,8 +352,10 @@ impl ProviderManagerView {
         }
 
         self.app_event_tx.send(AppEvent::PersistModelProvider {
+            original_id: edit.draft.original_id.clone(),
             id: provider_id,
             provider: edit.draft.to_provider(),
+            api_key_input: edit.draft.api_key_input(),
         });
         self.complete = true;
     }
@@ -378,7 +410,9 @@ impl ProviderManagerView {
         column.push(Line::from(
             "Editing only saves config. It does not switch the default provider.".dim(),
         ));
-        column.push(Line::from("Request type: responses".dim()));
+        column.push(Line::from(
+            "API keys are stored securely outside config.toml.".dim(),
+        ));
         column.push("");
 
         for (idx, row) in self.rows.iter().enumerate() {
@@ -469,6 +503,14 @@ impl ProviderManagerView {
         footer.push(Line::from(
             "Saving here does not switch the current default provider.".dim(),
         ));
+        footer.push(Line::from(
+            "Leave API key blank to keep the existing secure value. Type CLEAR to remove it.".dim(),
+        ));
+        if edit.draft.existing_api_key && edit.draft.api_key.trim().is_empty() {
+            footer.push(Line::from(
+                "A secure API key is already stored for this provider.".dim(),
+            ));
+        }
         if let Some(error) = &self.error {
             footer.push(Line::from(error.clone().red()));
         }
@@ -630,7 +672,7 @@ impl BottomPaneView for ProviderManagerView {
 
 impl Renderable for ProviderManagerView {
     fn desired_height(&self, _width: u16) -> u16 {
-        18
+        22
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -681,10 +723,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editing_provider_preserves_unexposed_fields() {
+    async fn editing_provider_canonicalizes_custom_auth_to_api_key() {
         let provider = ModelProviderInfo {
             name: "Original".to_string(),
             base_url: Some("https://example.com/v1".to_string()),
+            auth_strategy: ModelProviderAuthStrategy::OAuthOrApiKey,
+            oauth: Some(codex_core::ModelProviderOAuthConfig {
+                url: Some("https://example.com/oauth".to_string()),
+                scopes: Some(vec!["scope.read".to_string()]),
+                oauth_resource: Some("https://example.com/resource".to_string()),
+            }),
             api_key: Some("sk-old".to_string()),
             env_key: Some("CUSTOM_API_KEY".to_string()),
             env_key_instructions: Some("export CUSTOM_API_KEY=...".to_string()),
@@ -725,11 +773,14 @@ mod tests {
             AppEvent::PersistModelProvider {
                 id,
                 provider: saved,
+                ..
             } => {
                 assert_eq!(id, "custom-provider");
                 assert_eq!(saved.name, "Renamed provider");
                 assert_eq!(saved.base_url, provider.base_url);
-                assert_eq!(saved.api_key, provider.api_key);
+                assert_eq!(saved.auth_strategy, ModelProviderAuthStrategy::ApiKey);
+                assert_eq!(saved.oauth, None);
+                assert_eq!(saved.api_key, None);
                 assert_eq!(saved.env_key, provider.env_key);
                 assert_eq!(saved.env_key_instructions, provider.env_key_instructions);
                 assert_eq!(
@@ -745,7 +796,7 @@ mod tests {
                     saved.stream_idle_timeout_ms,
                     provider.stream_idle_timeout_ms
                 );
-                assert_eq!(saved.requires_openai_auth, provider.requires_openai_auth);
+                assert!(!saved.requires_openai_auth);
                 assert_eq!(saved.supports_websockets, provider.supports_websockets);
             }
             event => panic!("unexpected event: {event:?}"),
@@ -758,6 +809,8 @@ mod tests {
         let provider = ModelProviderInfo {
             name: "Original".to_string(),
             base_url: Some("https://example.com/v1".to_string()),
+            auth_strategy: ModelProviderAuthStrategy::None,
+            oauth: None,
             api_key: Some("sk-old".to_string()),
             env_key: Some("CUSTOM_API_KEY".to_string()),
             env_key_instructions: None,

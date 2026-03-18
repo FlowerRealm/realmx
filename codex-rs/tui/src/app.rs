@@ -1,6 +1,7 @@
 use crate::app_backtrack::BacktrackState;
 use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
+use crate::app_event::ProviderApiKeyInput;
 use crate::app_event::RealtimeAudioDeviceKind;
 #[cfg(target_os = "windows")]
 use crate::app_event::WindowsSandboxEnableMode;
@@ -3436,14 +3437,73 @@ impl App {
                     let _ = (preset, mode);
                 }
             }
-            AppEvent::PersistModelProvider { id, provider } => {
+            AppEvent::PersistModelProvider {
+                original_id,
+                id,
+                provider,
+                api_key_input,
+            } => {
                 match ConfigEditsBuilder::new(&self.config.codex_home)
                     .set_model_provider(&id, &provider)
                     .apply()
                     .await
                 {
                     Ok(()) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                        let credential_result = match api_key_input {
+                            ProviderApiKeyInput::KeepExisting => {
+                                if let Some(original_id) = original_id
+                                    .as_deref()
+                                    .filter(|original_id| *original_id != id)
+                                {
+                                    match codex_core::read_provider_api_key(
+                                        &self.config.codex_home,
+                                        original_id,
+                                    ) {
+                                        Ok(Some(existing_key)) => {
+                                            codex_core::store_provider_api_key(
+                                                &self.config.codex_home,
+                                                &id,
+                                                &existing_key,
+                                            )
+                                            .and_then(
+                                                |()| {
+                                                    codex_core::clear_provider_api_key(
+                                                        &self.config.codex_home,
+                                                        original_id,
+                                                    )
+                                                    .map(|_| ())
+                                                },
+                                            )
+                                        }
+                                        Ok(None) => Ok(()),
+                                        Err(err) => Err(err),
+                                    }
+                                } else {
+                                    Ok(())
+                                }
+                            }
+                            ProviderApiKeyInput::Set(api_key) => {
+                                codex_core::activate_provider_api_key(
+                                    &self.config.codex_home,
+                                    &id,
+                                    &provider,
+                                    self.config.mcp_oauth_credentials_store_mode,
+                                    &api_key,
+                                )
+                            }
+                            ProviderApiKeyInput::Clear => codex_core::clear_provider_credentials(
+                                &self.config.codex_home,
+                                &id,
+                                &provider,
+                                self.config.mcp_oauth_credentials_store_mode,
+                            )
+                            .map(|_| ()),
+                        };
+                        if let Err(err) = credential_result {
+                            self.chat_widget.add_error_message(format!(
+                                "Provider saved but failed to store credentials: {err}"
+                            ));
+                        } else if let Err(err) = self.refresh_config_after_provider_change().await {
                             self.chat_widget.add_error_message(format!(
                                 "Provider saved but failed to reload config: {err}"
                             ));

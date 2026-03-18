@@ -21,6 +21,22 @@
         },
         {
           "properties": {
+            "type": {
+              "enum": [
+                "oauth"
+              ],
+              "title": "OauthAccountType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "OauthAccount",
+          "type": "object"
+        },
+        {
+          "properties": {
             "email": {
               "type": "string"
             },
@@ -69,6 +85,24 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "providerId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "providerName": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requiresAuth": {
+      "type": [
+        "boolean",
+        "null"
       ]
     },
     "requiresOpenaiAuth": {

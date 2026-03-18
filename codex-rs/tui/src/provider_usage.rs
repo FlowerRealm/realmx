@@ -1,11 +1,14 @@
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_core::CodexAuth;
 use codex_core::ModelProviderInfo;
+use codex_core::ProviderCredentialMode;
+use codex_core::ResolvedProviderCredential;
 use codex_core::config::Config;
 use codex_core::config_loader::ConfigLayerStackOrdering;
 use codex_core::default_client::build_reqwest_client;
 use codex_core::git_info::resolve_root_git_project_for_trust;
 use codex_core::path_utils::write_atomically;
+use codex_core::resolve_provider_credential;
 use reqwest::Method;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
@@ -186,7 +189,7 @@ pub(crate) struct ProviderUsageEditorState {
     pub(crate) has_existing_script: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct ScriptRequestPlan {
     method: Option<String>,
@@ -211,6 +214,7 @@ struct ScriptProviderContext {
     name: String,
     base_url: Option<String>,
     api_key: Option<String>,
+    auth_mode: Option<String>,
     env_key: Option<String>,
     experimental_bearer_token: Option<String>,
     query_params: Option<HashMap<String, String>>,
@@ -220,12 +224,20 @@ struct ScriptProviderContext {
 }
 
 impl ScriptProviderContext {
-    fn from_provider(id: &str, provider: &ModelProviderInfo) -> Self {
+    fn from_provider(
+        id: &str,
+        provider: &ModelProviderInfo,
+        credential: &ResolvedProviderCredential,
+    ) -> Self {
         Self {
             id: id.to_string(),
             name: provider.name.clone(),
             base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
+            api_key: match credential.auth_mode {
+                Some(ProviderCredentialMode::ApiKey) => credential.token.clone(),
+                _ => None,
+            },
+            auth_mode: credential.auth_mode.map(script_auth_mode_label),
             env_key: provider.env_key.clone(),
             experimental_bearer_token: provider.experimental_bearer_token.clone(),
             query_params: provider.query_params.clone(),
@@ -244,10 +256,10 @@ struct ScriptAuthContext {
 }
 
 impl ScriptAuthContext {
-    fn from_auth(auth: &CodexAuth) -> Self {
+    fn from_credential(credential: &ResolvedProviderCredential) -> Self {
         Self {
-            bearer_token: auth.get_token().ok(),
-            account_id: auth.get_account_id(),
+            bearer_token: credential.token.clone(),
+            account_id: credential.account_id.clone(),
         }
     }
 }
@@ -370,7 +382,20 @@ pub(crate) async fn fetch_provider_usage_snapshot(
     auth: Option<CodexAuth>,
 ) -> Option<ProviderUsageRefreshResult> {
     if let Some(path) = active_provider_usage_script_path(&config) {
-        return fetch_scripted_provider_usage_snapshot(&config, &path, auth.as_ref()).await;
+        let credential = match resolve_provider_credential(
+            &config.codex_home,
+            &config.model_provider_id,
+            &config.model_provider,
+            auth.clone(),
+            config.mcp_oauth_credentials_store_mode,
+        )
+        .await
+        {
+            Ok(credential) => credential,
+            Err(err) => return Some(ProviderUsageRefreshResult::Failed(err.to_string())),
+        };
+        return fetch_scripted_provider_usage_snapshot(&config, &path, &credential, auth.as_ref())
+            .await;
     }
 
     if crate::provider_usage_compat::is_legacy_su8_provider(&config.model_provider_id) {
@@ -461,20 +486,6 @@ fn trusted_project_root(config: &Config) -> Option<PathBuf> {
     {
         return Some(project_root);
     }
-    if let Some(project_root) = config
-        .projects
-        .as_ref()
-        .into_iter()
-        .flat_map(HashMap::iter)
-        .filter(|(_, project)| project.is_trusted())
-        .filter_map(|(path, _)| {
-            let project_root = PathBuf::from(path);
-            cwd.starts_with(&project_root).then_some(project_root)
-        })
-        .max_by_key(|project_root| project_root.components().count())
-    {
-        return Some(project_root);
-    }
     Some(cwd_project_root)
 }
 
@@ -504,15 +515,21 @@ fn is_safe_provider_id(provider_id: &str) -> bool {
 async fn fetch_scripted_provider_usage_snapshot(
     config: &Config,
     script_path: &Path,
+    credential: &ResolvedProviderCredential,
     auth: Option<&CodexAuth>,
 ) -> Option<ProviderUsageRefreshResult> {
-    let request = match run_usage_script_request(config, script_path, auth).await {
+    let request = match run_usage_script_request(config, script_path, credential).await {
         Ok(request) => request,
         Err(err) => return Some(ProviderUsageRefreshResult::Failed(err)),
     };
     let request = match apply_request_placeholders(
         request,
-        &script_placeholders(&config.model_provider_id, &config.model_provider, auth),
+        &script_placeholders(
+            &config.model_provider_id,
+            &config.model_provider,
+            credential,
+            auth,
+        ),
     ) {
         Ok(request) => request,
         Err(err) => return Some(ProviderUsageRefreshResult::Failed(err)),
@@ -621,14 +638,18 @@ async fn fetch_scripted_provider_usage_snapshot(
 async fn run_usage_script_request(
     config: &Config,
     script_path: &Path,
-    auth: Option<&CodexAuth>,
+    credential: &ResolvedProviderCredential,
 ) -> Result<ScriptRequestPlan, String> {
     let payload = serde_json::to_value(ScriptRequestContext {
         provider: ScriptProviderContext::from_provider(
             &config.model_provider_id,
             &config.model_provider,
+            credential,
         ),
-        auth: auth.map(ScriptAuthContext::from_auth),
+        auth: credential
+            .token
+            .as_ref()
+            .map(|_| ScriptAuthContext::from_credential(credential)),
     })
     .map_err(|err| format!("failed to serialize provider usage script request payload: {err}"))?;
 
@@ -785,6 +806,7 @@ fn is_executable_file(path: &Path) -> bool {
 fn script_placeholders(
     provider_id: &str,
     provider: &ModelProviderInfo,
+    credential: &ResolvedProviderCredential,
     auth: Option<&CodexAuth>,
 ) -> Vec<(&'static str, String)> {
     let mut placeholders = vec![
@@ -799,29 +821,25 @@ fn script_placeholders(
         ),
         (
             "{{apiKey}}",
-            provider
-                .api_key()
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
+            if credential.auth_mode == Some(ProviderCredentialMode::ApiKey) {
+                credential.token.clone().unwrap_or_default()
+            } else {
+                String::new()
+            },
         ),
         ("{{providerId}}", provider_id.to_string()),
         ("{{providerName}}", provider.name.clone()),
         (
             "{{bearerToken}}",
-            auth.and_then(|auth| auth.get_token().ok())
-                .unwrap_or_default(),
+            credential.token.clone().unwrap_or_default(),
         ),
         (
             "{{accessToken}}",
-            auth.and_then(|auth| auth.get_token().ok())
-                .unwrap_or_default(),
+            credential.token.clone().unwrap_or_default(),
         ),
         (
             "{{accountId}}",
-            auth.and_then(CodexAuth::get_account_id).unwrap_or_default(),
+            credential.account_id.clone().unwrap_or_default(),
         ),
     ];
 
@@ -833,6 +851,14 @@ fn script_placeholders(
     }
 
     placeholders
+}
+
+fn script_auth_mode_label(mode: ProviderCredentialMode) -> String {
+    match mode {
+        ProviderCredentialMode::ApiKey => "apiKey".to_string(),
+        ProviderCredentialMode::Chatgpt => "chatgpt".to_string(),
+        ProviderCredentialMode::OAuth => "oauth".to_string(),
+    }
 }
 
 fn apply_request_placeholders(

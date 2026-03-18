@@ -10,7 +10,6 @@ use crossterm::event::KeyEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::Color;
 use ratatui::widgets::Clear;
 use ratatui::widgets::WidgetRef;
 
@@ -90,7 +89,10 @@ impl OnboardingScreen {
         let forced_login_method = config.forced_login_method;
         let codex_home = config.codex_home.clone();
         let cli_auth_credentials_store_mode = config.cli_auth_credentials_store_mode;
-        let login_step_enabled = matches!(login_status, LoginStatus::NotAuthenticated);
+        let oauth_credentials_store_mode = config.mcp_oauth_credentials_store_mode;
+        let mcp_oauth_callback_port = config.mcp_oauth_callback_port;
+        let mcp_oauth_callback_uri = config.mcp_oauth_callback_url.clone();
+        let login_step_enabled = true;
         let mut steps: Vec<Step> = Vec::new();
         steps.push(Step::Welcome(WelcomeWidget::new(
             !matches!(login_status, LoginStatus::NotAuthenticated),
@@ -108,13 +110,19 @@ impl OnboardingScreen {
                 highlighted_mode,
                 error: None,
                 sign_in_state: Arc::new(RwLock::new(SignInState::PickMode)),
+                provider_id: config.model_provider_id.clone(),
+                provider: config.model_provider.clone(),
                 codex_home: codex_home.clone(),
                 cli_auth_credentials_store_mode,
+                oauth_credentials_store_mode,
+                mcp_oauth_callback_port,
+                mcp_oauth_callback_uri,
                 login_status,
                 auth_manager,
                 forced_chatgpt_workspace_id,
                 forced_login_method,
                 animations_enabled: config.animations,
+                back_to_provider_selection_requested: false,
             }))
         }
         #[cfg(target_os = "windows")]
@@ -152,56 +160,49 @@ impl OnboardingScreen {
         }
     }
 
-    fn current_steps_mut(&mut self) -> Vec<&mut Step> {
+    fn active_step_index(&self) -> Option<usize> {
         let auth_state = self.auth_step_state();
-        let mut out: Vec<&mut Step> = Vec::new();
-        for step in self.steps.iter_mut() {
+        let mut last_visible = None;
+        for (idx, step) in self.steps.iter().enumerate() {
             let step_state = match step {
                 Step::Auth(_) => auth_state,
                 _ => step.intrinsic_state(),
             };
             match step_state {
                 StepState::Hidden => continue,
-                StepState::Complete => out.push(step),
-                StepState::InProgress => {
-                    out.push(step);
-                    break;
-                }
+                StepState::Complete => last_visible = Some(idx),
+                StepState::InProgress => return Some(idx),
             }
         }
-        out
+
+        last_visible
     }
 
-    fn current_steps(&self) -> Vec<&Step> {
-        let mut out: Vec<&Step> = Vec::new();
-        for step in &self.steps {
-            match self.effective_step_state(step) {
-                StepState::Hidden => continue,
-                StepState::Complete => out.push(step),
-                StepState::InProgress => {
-                    out.push(step);
-                    break;
-                }
-            }
-        }
-        out
+    fn active_step(&self) -> Option<&Step> {
+        let idx = self.active_step_index()?;
+        self.steps.get(idx)
     }
 
-    fn selected_provider_requires_openai_auth(&self) -> bool {
+    fn active_step_mut(&mut self) -> Option<&mut Step> {
+        let idx = self.active_step_index()?;
+        self.steps.get_mut(idx)
+    }
+
+    fn selected_provider_requires_auth(&self) -> bool {
         self.steps
             .iter()
             .find_map(|step| {
                 if let Step::Provider(widget) = step {
-                    widget.selected_requires_openai_auth()
+                    widget.selected_requires_auth()
                 } else {
                     None
                 }
             })
-            .unwrap_or(self.login_step_enabled)
+            .unwrap_or(false)
     }
 
     fn auth_step_state(&self) -> StepState {
-        if !self.login_step_enabled || !self.selected_provider_requires_openai_auth() {
+        if !self.login_step_enabled || !self.selected_provider_requires_auth() {
             return StepState::Hidden;
         }
 
@@ -209,7 +210,15 @@ impl OnboardingScreen {
             .iter()
             .find_map(|step| {
                 if let Step::Auth(widget) = step {
-                    Some(widget.get_step_state())
+                    let in_pick_mode = widget
+                        .sign_in_state
+                        .read()
+                        .is_ok_and(|state| matches!(*state, SignInState::PickMode));
+                    Some(if in_pick_mode && widget.is_authenticated() {
+                        StepState::Hidden
+                    } else {
+                        widget.get_step_state()
+                    })
                 } else {
                     None
                 }
@@ -242,16 +251,6 @@ impl OnboardingScreen {
             .flatten()
     }
 
-    pub fn selected_provider_id(&self) -> Option<&str> {
-        self.steps.iter().find_map(|step| {
-            if let Step::Provider(widget) = step {
-                widget.selected_provider_id()
-            } else {
-                None
-            }
-        })
-    }
-
     pub fn should_exit(&self) -> bool {
         self.should_exit
     }
@@ -266,6 +265,50 @@ impl OnboardingScreen {
             }
             false
         })
+    }
+
+    fn sync_auth_widget_provider(&mut self) {
+        let selected_provider = self.steps.iter().find_map(|step| {
+            if let Step::Provider(widget) = step {
+                widget
+                    .selected_provider()
+                    .map(|(id, provider)| (id.to_string(), provider.clone()))
+            } else {
+                None
+            }
+        });
+        if let Some((provider_id, provider)) = selected_provider {
+            for step in &mut self.steps {
+                if let Step::Auth(widget) = step {
+                    widget.set_provider(provider_id.clone(), provider.clone());
+                }
+            }
+        }
+    }
+
+    fn apply_auth_navigation_requests(&mut self) {
+        let should_back_to_provider_selection = self
+            .steps
+            .iter_mut()
+            .find_map(|step| {
+                if let Step::Auth(widget) = step {
+                    Some(widget.take_provider_selection_requested())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+
+        if !should_back_to_provider_selection {
+            return;
+        }
+
+        for step in &mut self.steps {
+            if let Step::Provider(widget) = step {
+                widget.clear_selection();
+                break;
+            }
+        }
     }
 }
 
@@ -303,16 +346,11 @@ impl KeyboardHandler for OnboardingScreen {
             }
             self.is_done = true;
         } else {
-            if let Some(Step::Welcome(widget)) = self
-                .steps
-                .iter_mut()
-                .find(|step| matches!(step, Step::Welcome(_)))
-            {
-                widget.handle_key_event(key_event);
-            }
-            if let Some(active_step) = self.current_steps_mut().into_iter().last() {
+            if let Some(active_step) = self.active_step_mut() {
                 active_step.handle_key_event(key_event);
             }
+            self.apply_auth_navigation_requests();
+            self.sync_auth_widget_provider();
             if self.steps.iter().any(|step| {
                 if let Step::TrustDirectory(widget) = step {
                     widget.should_quit()
@@ -332,7 +370,7 @@ impl KeyboardHandler for OnboardingScreen {
             return;
         }
 
-        if let Some(active_step) = self.current_steps_mut().into_iter().last() {
+        if let Some(active_step) = self.active_step_mut() {
             active_step.handle_paste(pasted);
         }
         self.request_frame.schedule_frame();
@@ -342,65 +380,12 @@ impl KeyboardHandler for OnboardingScreen {
 impl WidgetRef for &OnboardingScreen {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        // Render steps top-to-bottom, measuring each step's height dynamically.
-        let mut y = area.y;
-        let bottom = area.y.saturating_add(area.height);
-        let width = area.width;
 
-        // Helper to scan a temporary buffer and return number of used rows.
-        fn used_rows(tmp: &Buffer, width: u16, height: u16) -> u16 {
-            if width == 0 || height == 0 {
-                return 0;
-            }
-            let mut last_non_empty: Option<u16> = None;
-            for yy in 0..height {
-                let mut any = false;
-                for xx in 0..width {
-                    let cell = &tmp[(xx, yy)];
-                    let has_symbol = !cell.symbol().trim().is_empty();
-                    let has_style = cell.fg != Color::Reset
-                        || cell.bg != Color::Reset
-                        || !cell.modifier.is_empty();
-                    if has_symbol || has_style {
-                        any = true;
-                        break;
-                    }
-                }
-                if any {
-                    last_non_empty = Some(yy);
-                }
-            }
-            last_non_empty.map(|v| v + 2).unwrap_or(0)
-        }
-
-        let mut i = 0usize;
-        let current_steps = self.current_steps();
-
-        while i < current_steps.len() && y < bottom {
-            let step = &current_steps[i];
-            let max_h = bottom.saturating_sub(y);
-            if max_h == 0 || width == 0 {
-                break;
-            }
-            let scratch_area = Rect::new(0, 0, width, max_h);
-            let mut scratch = Buffer::empty(scratch_area);
+        if let Some(step) = self.active_step() {
             if let Step::Welcome(widget) = step {
-                widget.update_layout_area(scratch_area);
+                widget.update_layout_area(area);
             }
-            step.render_ref(scratch_area, &mut scratch);
-            let h = used_rows(&scratch, width, max_h).min(max_h);
-            if h > 0 {
-                let target = Rect {
-                    x: area.x,
-                    y,
-                    width,
-                    height: h,
-                };
-                Clear.render(target, buf);
-                step.render_ref(target, buf);
-                y = y.saturating_add(h);
-            }
-            i += 1;
+            step.render_ref(area, buf);
         }
     }
 }
@@ -467,6 +452,7 @@ pub(crate) async fn run_onboarding_app(
 ) -> Result<OnboardingResult> {
     use tokio_stream::StreamExt;
 
+    let initial_providers = args.config.model_providers.clone();
     let codex_home = args.config.codex_home.clone();
     let active_profile = args.config.active_profile.clone();
     let mut onboarding_screen = OnboardingScreen::new(tui, args);
@@ -527,17 +513,33 @@ pub(crate) async fn run_onboarding_app(
             }
         }
     }
-    let selected_provider = onboarding_screen.selected_provider_id().map(str::to_string);
-    let provider_changed = if let Some(provider_id) = selected_provider.as_deref() {
-        if provider_id != onboarding_screen.initial_provider_id {
-            let _ = codex_core::config::edit::ConfigEditsBuilder::new(&codex_home)
-                .with_profile(active_profile.as_deref())
-                .set_default_model_provider(provider_id)
-                .apply_blocking();
-            true
+    let selected_provider = onboarding_screen.steps.iter().find_map(|step| {
+        if let Step::Provider(widget) = step {
+            widget
+                .selected_provider()
+                .map(|(id, provider)| (id.to_string(), provider.clone()))
         } else {
-            false
+            None
         }
+    });
+    let provider_changed = if let Some((provider_id, provider)) = selected_provider {
+        let mut edits = codex_core::config::edit::ConfigEditsBuilder::new(&codex_home);
+        let should_persist_provider = initial_providers
+            .get(&provider_id)
+            .is_none_or(|existing| *existing != provider);
+        if should_persist_provider {
+            edits = edits.set_model_provider(&provider_id, &provider);
+        }
+        let provider_changed = provider_id != onboarding_screen.initial_provider_id;
+        if provider_changed {
+            edits = edits
+                .with_profile(active_profile.as_deref())
+                .set_default_model_provider(&provider_id);
+        }
+        if should_persist_provider || provider_changed {
+            let _ = edits.apply_blocking();
+        }
+        provider_changed
     } else {
         false
     };
@@ -546,4 +548,69 @@ pub(crate) async fn run_onboarding_app(
         provider_changed,
         should_exit: onboarding_screen.should_exit(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_backend::VT100Backend;
+    use ratatui::Terminal;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn compact_render(output: &str) -> String {
+        output
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn renders_only_the_active_step_snapshot() {
+        let codex_home = TempDir::new().expect("temp home");
+        let screen = OnboardingScreen {
+            request_frame: FrameRequester::test_dummy(),
+            steps: vec![
+                Step::Welcome(WelcomeWidget::new(
+                    false,
+                    FrameRequester::test_dummy(),
+                    false,
+                )),
+                Step::TrustDirectory(TrustDirectoryWidget {
+                    codex_home: codex_home.path().to_path_buf(),
+                    cwd: PathBuf::from("/workspace/project"),
+                    show_windows_create_sandbox_hint: false,
+                    should_quit: false,
+                    selection: None,
+                    highlighted: TrustDirectorySelection::Trust,
+                    error: None,
+                }),
+            ],
+            initial_provider_id: "openai".to_string(),
+            login_step_enabled: false,
+            is_done: false,
+            should_exit: false,
+        };
+
+        let mut terminal = Terminal::new(VT100Backend::new(72, 16)).expect("terminal");
+        terminal
+            .draw(|f| f.render_widget_ref(&screen, f.area()))
+            .expect("draw");
+
+        let rendered = compact_render(&terminal.backend().to_string());
+        assert!(!rendered.contains("Welcome to Codex"));
+        insta::assert_snapshot!(
+                                                                                            rendered,
+                                                                                            @r"
+> You are in /workspace/project
+Do you trust the contents of this directory? Working with untrusted
+contents comes with higher risk of prompt injection.
+› 1. Yes, continue
+  2. No, quit
+Press Enter to continue
+"
+                                                                                        );
+    }
 }

@@ -185,6 +185,9 @@ impl CodexAuth {
             ApiAuthMode::ChatgptAuthTokens => {
                 Ok(Self::ChatgptAuthTokens(ChatgptAuthTokens { state }))
             }
+            ApiAuthMode::Oauth => Err(std::io::Error::other(
+                "provider OAuth credentials are not stored in auth.json",
+            )),
             ApiAuthMode::ApiKey => unreachable!("api key mode is handled above"),
         }
     }

@@ -707,7 +707,7 @@ fn normalize_skill_config_path(path: &Path) -> String {
 }
 
 fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
-    let value = TomlValue::try_from(provider.clone())?;
+    let value = TomlValue::try_from(provider.sanitized_for_config_persistence())?;
     toml_value_to_item(&value)
 }
 

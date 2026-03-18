@@ -1,5 +1,7 @@
 use super::*;
+use codex_core::ModelProviderAuthStrategy;
 use codex_core::config::ConfigBuilder;
+use codex_core::config::ConfigOverrides;
 use codex_protocol::config_types::TrustLevel;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -84,6 +86,8 @@ fn script_request_headers_include_provider_defaults_even_without_script_headers(
     let provider = ModelProviderInfo {
         name: "OpenAI".to_string(),
         base_url: Some("https://example.test".to_string()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: None,
         env_key_instructions: None,
@@ -132,6 +136,8 @@ fn script_request_headers_allow_script_values_to_override_provider_defaults() {
     let provider = ModelProviderInfo {
         name: "OpenAI".to_string(),
         base_url: Some("https://example.test".to_string()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: None,
         env_key_instructions: None,
@@ -348,26 +354,28 @@ async fn provider_usage_enabled_prefers_current_trusted_cwd_over_stale_project_l
 #[tokio::test]
 async fn trusted_project_root_prefers_trusted_subproject_over_git_root_fallback() {
     let codex_home = tempfile::tempdir().expect("temp dir");
-    let mut config = ConfigBuilder::default()
-        .codex_home(codex_home.path().to_path_buf())
-        .build()
-        .await
-        .expect("config");
     let repo_root = tempfile::tempdir().expect("repo root");
     std::fs::create_dir(repo_root.path().join(".git")).expect("create .git dir");
 
     let trusted_subproject = repo_root.path().join("apps/child");
     std::fs::create_dir_all(trusted_subproject.join(".codex/providers/openai"))
         .expect("create trusted project providers dir");
+    std::fs::create_dir_all(trusted_subproject.join(".realmx"))
+        .expect("create trusted project config dir");
+    std::fs::write(trusted_subproject.join(".realmx/config.toml"), "")
+        .expect("write trusted project config");
 
-    config.cwd = trusted_subproject.clone();
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(trusted_subproject.clone()),
+            ..Default::default()
+        })
+        .build()
+        .await
+        .expect("config");
+
     config.active_project.trust_level = Some(TrustLevel::Trusted);
-    config.projects = Some(HashMap::from([(
-        trusted_subproject.display().to_string(),
-        codex_core::config::ProjectConfig {
-            trust_level: Some(TrustLevel::Trusted),
-        },
-    )]));
 
     assert_eq!(trusted_project_root(&config), Some(trusted_subproject));
 }

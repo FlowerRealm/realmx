@@ -18,6 +18,7 @@ use crate::shimmer::shimmer_spans;
 use crate::tui::FrameRequester;
 
 use super::AuthModeWidget;
+use super::BACK_TO_SIGN_IN_OPTIONS_LABEL;
 use super::ContinueInBrowserState;
 use super::ContinueWithDeviceCodeState;
 use super::SignInState;
@@ -185,7 +186,10 @@ pub(super) fn render_device_code_login(
         None
     };
 
-    lines.push("  Press Esc to cancel".dim().into());
+    lines.push("".into());
+    lines.push(AuthModeWidget::back_action_line(
+        BACK_TO_SIGN_IN_OPTIONS_LABEL,
+    ));
     Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .render(area, buf);

@@ -7,6 +7,7 @@ use crate::config::RealtimeWsVersion;
 use crate::default_client::default_headers;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
+use crate::provider_credentials::resolve_provider_credential;
 use crate::realtime_context::build_realtime_startup_context;
 use async_channel::Receiver;
 use async_channel::Sender;
@@ -269,11 +270,18 @@ pub(crate) async fn handle_start(
     sub_id: String,
     params: ConversationStartParams,
 ) -> CodexResult<()> {
+    let config = sess.get_config().await;
     let provider = sess.provider().await;
     let auth = sess.services.auth_manager.auth().await;
-    let realtime_api_key = realtime_api_key(auth.as_ref(), &provider)?;
+    let realtime_api_key = realtime_api_key(
+        &config.codex_home,
+        &config.model_provider_id,
+        config.mcp_oauth_credentials_store_mode,
+        auth.clone(),
+        &provider,
+    )
+    .await?;
     let mut api_provider = provider.to_api_provider(Some(crate::auth::AuthMode::ApiKey))?;
-    let config = sess.get_config().await;
     if let Some(realtime_ws_base_url) = &config.experimental_realtime_ws_base_url {
         api_provider.base_url = realtime_ws_base_url.clone();
     }
@@ -412,20 +420,18 @@ fn realtime_text_from_handoff_request(handoff: &RealtimeHandoffRequested) -> Opt
         })
 }
 
-fn realtime_api_key(
-    auth: Option<&CodexAuth>,
+async fn realtime_api_key(
+    codex_home: &std::path::Path,
+    provider_id: &str,
+    oauth_store_mode: codex_rmcp_client::OAuthCredentialsStoreMode,
+    auth: Option<CodexAuth>,
     provider: &crate::ModelProviderInfo,
 ) -> CodexResult<String> {
-    if let Some(api_key) = provider.api_key()? {
-        return Ok(api_key);
-    }
-
-    if let Some(token) = provider.experimental_bearer_token.clone() {
+    let resolved =
+        resolve_provider_credential(codex_home, provider_id, provider, auth, oauth_store_mode)
+            .await?;
+    if let Some(token) = resolved.token {
         return Ok(token);
-    }
-
-    if let Some(api_key) = auth.and_then(CodexAuth::api_key) {
-        return Ok(api_key.to_string());
     }
 
     // TODO(aibrahim): Remove this temporary fallback once realtime auth no longer

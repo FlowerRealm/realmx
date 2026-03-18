@@ -16,7 +16,10 @@ use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::provider_credentials::resolve_provider_credential;
 use crate::token_data::PlanType;
+use codex_rmcp_client::OAuthCredentialsStoreMode;
+use std::path::Path;
 
 pub(crate) fn map_api_error(err: ApiError) -> CodexErr {
     match err {
@@ -164,36 +167,20 @@ fn extract_x_error_json_code(headers: Option<&HeaderMap>) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(crate) fn auth_provider_from_auth(
+pub(crate) async fn auth_provider_from_auth(
+    codex_home: &Path,
+    provider_id: &str,
     auth: Option<CodexAuth>,
     provider: &ModelProviderInfo,
+    oauth_store_mode: OAuthCredentialsStoreMode,
 ) -> crate::error::Result<CoreAuthProvider> {
-    if let Some(api_key) = provider.api_key()? {
-        return Ok(CoreAuthProvider {
-            token: Some(api_key),
-            account_id: None,
-        });
-    }
-
-    if let Some(token) = provider.experimental_bearer_token.clone() {
-        return Ok(CoreAuthProvider {
-            token: Some(token),
-            account_id: None,
-        });
-    }
-
-    if let Some(auth) = auth {
-        let token = auth.get_token()?;
-        Ok(CoreAuthProvider {
-            token: Some(token),
-            account_id: auth.get_account_id(),
-        })
-    } else {
-        Ok(CoreAuthProvider {
-            token: None,
-            account_id: None,
-        })
-    }
+    let resolved =
+        resolve_provider_credential(codex_home, provider_id, provider, auth, oauth_store_mode)
+            .await?;
+    Ok(CoreAuthProvider {
+        token: resolved.token,
+        account_id: resolved.account_id,
+    })
 }
 
 #[derive(Debug, Deserialize)]

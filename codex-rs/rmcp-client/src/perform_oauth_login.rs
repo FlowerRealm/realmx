@@ -13,6 +13,7 @@ use rmcp::transport::auth::OAuthState;
 use tiny_http::Response;
 use tiny_http::Server;
 use tokio::sync::oneshot;
+use tokio::task::AbortHandle;
 use tokio::time::timeout;
 use urlencoding::decode;
 
@@ -134,9 +135,13 @@ pub async fn perform_oauth_login_return_url(
     .await?;
 
     let authorization_url = flow.authorization_url();
-    let completion = flow.spawn();
+    let (completion, cancel_handle) = flow.spawn();
 
-    Ok(OauthLoginHandle::new(authorization_url, completion))
+    Ok(OauthLoginHandle::new(
+        authorization_url,
+        completion,
+        cancel_handle,
+    ))
 }
 
 fn spawn_callback_server(
@@ -244,21 +249,50 @@ fn parse_oauth_callback(path: &str, expected_callback_path: &str) -> CallbackOut
     CallbackOutcome::Invalid
 }
 
+#[derive(Clone)]
+pub struct OauthLoginCancelHandle {
+    abort_handle: AbortHandle,
+}
+
+impl OauthLoginCancelHandle {
+    fn new(abort_handle: AbortHandle) -> Self {
+        Self { abort_handle }
+    }
+
+    pub fn cancel(&self) {
+        self.abort_handle.abort();
+    }
+}
+
 pub struct OauthLoginHandle {
     authorization_url: String,
     completion: oneshot::Receiver<Result<()>>,
+    cancel_handle: OauthLoginCancelHandle,
 }
 
 impl OauthLoginHandle {
-    fn new(authorization_url: String, completion: oneshot::Receiver<Result<()>>) -> Self {
+    fn new(
+        authorization_url: String,
+        completion: oneshot::Receiver<Result<()>>,
+        cancel_handle: OauthLoginCancelHandle,
+    ) -> Self {
         Self {
             authorization_url,
             completion,
+            cancel_handle,
         }
     }
 
     pub fn authorization_url(&self) -> &str {
         &self.authorization_url
+    }
+
+    pub fn cancel_handle(&self) -> OauthLoginCancelHandle {
+        self.cancel_handle.clone()
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_handle.cancel();
     }
 
     pub fn into_parts(self) -> (String, oneshot::Receiver<Result<()>>) {
@@ -472,11 +506,11 @@ impl OauthLoginFlow {
         result
     }
 
-    fn spawn(self) -> oneshot::Receiver<Result<()>> {
+    fn spawn(self) -> (oneshot::Receiver<Result<()>>, OauthLoginCancelHandle) {
         let server_name_for_logging = self.server_name.clone();
         let (tx, rx) = oneshot::channel();
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let result = self.finish().await;
 
             if let Err(err) = &result {
@@ -487,8 +521,9 @@ impl OauthLoginFlow {
 
             let _ = tx.send(result);
         });
+        let cancel_handle = OauthLoginCancelHandle::new(task.abort_handle());
 
-        rx
+        (rx, cancel_handle)
     }
 }
 
@@ -512,9 +547,13 @@ fn append_query_param(url: &str, key: &str, value: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use std::time::Duration;
+    use tokio::sync::oneshot;
 
     use super::CallbackOutcome;
     use super::OAuthProviderError;
+    use super::OauthLoginCancelHandle;
+    use super::OauthLoginHandle;
     use super::append_query_param;
     use super::callback_path_from_redirect_uri;
     use super::parse_oauth_callback;
@@ -590,5 +629,28 @@ mod tests {
         let url = append_query_param("not a url", "resource", Some("api/resource"));
 
         assert_eq!(url, "not a url?resource=api%2Fresource");
+    }
+
+    #[tokio::test]
+    async fn oauth_login_handle_cancel_aborts_background_task() {
+        let (tx, rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let _ = tx.send(Ok(()));
+        });
+        let cancel_handle = OauthLoginCancelHandle::new(task.abort_handle());
+        let handle = OauthLoginHandle::new(
+            "https://auth.example.test/oauth".to_string(),
+            rx,
+            cancel_handle,
+        );
+
+        handle.cancel();
+
+        let err = handle.wait().await.expect_err("login should be cancelled");
+        assert_eq!(
+            err.to_string(),
+            "OAuth login task was cancelled: channel closed"
+        );
     }
 }

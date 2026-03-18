@@ -1815,8 +1815,14 @@ impl Session {
             state_db: state_db_ctx.clone(),
             model_client: ModelClient::new(
                 Some(Arc::clone(&auth_manager)),
+                config.codex_home.clone(),
                 conversation_id,
+                session_configuration
+                    .original_config_do_not_use
+                    .model_provider_id
+                    .clone(),
                 session_configuration.provider.clone(),
+                config.mcp_oauth_credentials_store_mode,
                 session_configuration.session_source.clone(),
                 config.model_verbosity,
                 ws_version_from_features(config.as_ref()),
@@ -2275,9 +2281,10 @@ impl Session {
                     if let Some(startup_regular_task) = state.take_startup_regular_task() {
                         startup_regular_task.abort();
                     }
-                    self.services
-                        .model_client
-                        .replace_provider(updated.provider.clone());
+                    self.services.model_client.replace_provider(
+                        updated.original_config_do_not_use.model_provider_id.clone(),
+                        updated.provider.clone(),
+                    );
                 }
                 state.session_configuration = updated;
                 drop(state);

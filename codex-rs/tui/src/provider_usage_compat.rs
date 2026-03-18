@@ -168,6 +168,7 @@ pub(crate) async fn fetch_legacy_su8_provider_usage_snapshot(
 mod tests {
     use super::*;
     use codex_core::CodexAuth;
+    use codex_core::ModelProviderAuthStrategy;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
 
@@ -181,6 +182,8 @@ mod tests {
         ModelProviderInfo {
             name: "SU8".to_string(),
             base_url: Some(base_url.to_string()),
+            auth_strategy: ModelProviderAuthStrategy::None,
+            oauth: None,
             api_key: None,
             env_key: env_key.map(ToString::to_string),
             env_key_instructions: None,

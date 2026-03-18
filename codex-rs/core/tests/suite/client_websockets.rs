@@ -2,6 +2,7 @@
 use codex_core::CodexAuth;
 use codex_core::ModelClient;
 use codex_core::ModelClientSession;
+use codex_core::ModelProviderAuthStrategy;
 use codex_core::ModelProviderInfo;
 use codex_core::Prompt;
 use codex_core::ResponseEvent;
@@ -1504,6 +1505,8 @@ fn websocket_provider(server: &WebSocketTestServer) -> ModelProviderInfo {
         name: "mock-ws".into(),
         api_key: None,
         base_url: Some(format!("{}/v1", server.uri())),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -1600,8 +1603,11 @@ async fn websocket_harness_with_options(
     let summary = ReasoningSummary::Auto;
     let client = ModelClient::new(
         None,
+        config.codex_home.clone(),
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
+        config.mcp_oauth_credentials_store_mode,
         SessionSource::Exec,
         config.model_verbosity,
         ws_version_from_features(&config),

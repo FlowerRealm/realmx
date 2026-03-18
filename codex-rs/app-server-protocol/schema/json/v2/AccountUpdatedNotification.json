@@ -12,6 +12,13 @@
           "type": "string"
         },
         {
+          "description": "Provider OAuth managed by Codex and persisted by Codex.",
+          "enum": [
+            "oauth"
+          ],
+          "type": "string"
+        },
+        {
           "description": "ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).",
           "enum": [
             "chatgpt"
@@ -61,6 +68,18 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "providerId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "providerName": {
+      "type": [
+        "string",
+        "null"
       ]
     }
   },

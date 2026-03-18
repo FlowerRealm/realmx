@@ -30,6 +30,8 @@ impl GitSha {
 pub enum AuthMode {
     /// OpenAI API key provided by the caller and stored by Codex.
     ApiKey,
+    /// Provider OAuth managed by Codex and persisted by Codex.
+    Oauth,
     /// ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).
     Chatgpt,
     /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
@@ -1312,15 +1314,34 @@ mod tests {
     }
 
     #[test]
+    fn serialize_account_login_oauth() -> Result<()> {
+        let request = ClientRequest::LoginAccount {
+            request_id: RequestId::Integer(4),
+            params: v2::LoginAccountParams::Oauth,
+        };
+        assert_eq!(
+            json!({
+                "method": "account/login/start",
+                "id": 4,
+                "params": {
+                    "type": "oauth"
+                }
+            }),
+            serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
     fn serialize_account_logout() -> Result<()> {
         let request = ClientRequest::LogoutAccount {
-            request_id: RequestId::Integer(4),
+            request_id: RequestId::Integer(5),
             params: None,
         };
         assert_eq!(
             json!({
                 "method": "account/logout",
-                "id": 4,
+                "id": 5,
             }),
             serde_json::to_value(&request)?,
         );
@@ -1382,6 +1403,14 @@ mod tests {
                 "type": "apiKey",
             }),
             serde_json::to_value(&api_key)?,
+        );
+
+        let oauth = v2::Account::Oauth {};
+        assert_eq!(
+            json!({
+                "type": "oauth",
+            }),
+            serde_json::to_value(&oauth)?,
         );
 
         let chatgpt = v2::Account::Chatgpt {

@@ -17,9 +17,13 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 fn create_config_toml_custom_provider(
     codex_home: &Path,
+    auth_strategy: Option<&str>,
     requires_openai_auth: bool,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
+    let auth_strategy_line = auth_strategy
+        .map(|auth_strategy| format!("auth_strategy = \"{auth_strategy}\"\n"))
+        .unwrap_or_default();
     let requires_line = if requires_openai_auth {
         "requires_openai_auth = true\n"
     } else {
@@ -42,6 +46,7 @@ base_url = "http://127.0.0.1:0/v1"
 wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
+{auth_strategy_line}
 {requires_line}
 "#
     );
@@ -147,9 +152,9 @@ async fn get_auth_status_with_api_key() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
+async fn get_auth_status_with_api_key_for_custom_provider() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), false)?;
+    create_config_toml_custom_provider(codex_home.path(), Some("api_key"), false)?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -169,12 +174,53 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
-    assert_eq!(status.auth_method, None, "expected no auth method");
-    assert_eq!(status.auth_token, None, "expected no token");
+    assert_eq!(status.auth_method, Some(AuthMode::ApiKey));
+    assert_eq!(status.auth_token, Some("sk-test-key".to_string()));
     assert_eq!(
         status.requires_openai_auth,
         Some(false),
         "requires_openai_auth should be false",
+    );
+    assert_eq!(status.requires_auth, Some(true));
+    assert_eq!(status.provider_id.as_deref(), Some("mock_provider"));
+    assert_eq!(
+        status.provider_name.as_deref(),
+        Some("Mock provider for test")
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_provider_openai_flag_normalizes_to_api_key_auth() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml_custom_provider(codex_home.path(), None, true)?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
+
+    let request_id = mcp
+        .send_get_auth_status_request(GetAuthStatusParams {
+            include_token: Some(true),
+            refresh_token: Some(false),
+        })
+        .await?;
+
+    let resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    let status: GetAuthStatusResponse = to_response(resp)?;
+    assert_eq!(status.auth_method, Some(AuthMode::ApiKey));
+    assert_eq!(status.auth_token, Some("sk-test-key".to_string()));
+    assert_eq!(status.requires_openai_auth, Some(false));
+    assert_eq!(status.requires_auth, Some(true));
+    assert_eq!(status.provider_id.as_deref(), Some("mock_provider"));
+    assert_eq!(
+        status.provider_name.as_deref(),
+        Some("Mock provider for test")
     );
     Ok(())
 }

@@ -1214,24 +1214,25 @@ $demo-app Pull the latest updates from the team.
 
 ## Auth endpoints
 
-The JSON-RPC auth/account surface exposes request/response methods plus server-initiated notifications (no `id`). Use these to determine auth state, start or cancel logins, logout, and inspect ChatGPT rate limits.
+The JSON-RPC auth/account surface is provider-aware. Use it to inspect whether the active provider needs credentials, start the correct login flow for that provider, logout the current provider, and, for OpenAI ChatGPT auth only, inspect rate limits.
 
 ### Authentication modes
 
-Codex supports these authentication modes. The current mode is surfaced in `account/updated` (`authMode`), which also includes the current ChatGPT `planType` when available, and can be inferred from `account/read`.
+Codex supports these authentication modes. The current mode is surfaced in `account/updated` (`authMode`) and `account/read`, alongside the active `providerId` / `providerName`.
 
-- **API key (`apiKey`)**: Caller supplies an OpenAI API key via `account/login/start` with `type: "apiKey"`. The API key is saved and used for API requests.
-- **ChatGPT managed (`chatgpt`)** (recommended): Codex owns the ChatGPT OAuth flow and refresh tokens. Start via `account/login/start` with `type: "chatgpt"`; Codex persists tokens to disk and refreshes them automatically.
+- **API key (`apiKey`)**: Caller supplies an API key via `account/login/start` with `type: "apiKey"`. For the built-in OpenAI provider, Codex persists it in CLI auth storage. For non-OpenAI providers, Codex persists it in provider-scoped secure storage instead of `config.toml`.
+- **Provider OAuth (`oauth`)**: For non-OpenAI providers that expose an OAuth URL, start via `account/login/start` with `type: "oauth"`. Codex persists the provider-scoped OAuth tokens in MCP OAuth storage.
+- **ChatGPT managed (`chatgpt`)**: OpenAI-only. Codex owns the ChatGPT OAuth flow and refresh tokens. Start via `account/login/start` with `type: "chatgpt"`; Codex persists tokens and refreshes them automatically.
 
 ### API Overview
 
-- `account/read` — fetch current account info; optionally refresh tokens.
-- `account/login/start` — begin login (`apiKey`, `chatgpt`).
+- `account/read` — fetch current account info for the active provider; optionally refresh OpenAI ChatGPT tokens first.
+- `account/login/start` — begin login for the active provider (`apiKey`, `oauth`, or `chatgpt`, depending on provider capabilities).
 - `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).
-- `account/login/cancel` — cancel a pending ChatGPT login by `loginId`.
-- `account/logout` — sign out; triggers `account/updated`.
-- `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey`, `chatgpt`, or `null`) and includes the current ChatGPT `planType` when available.
-- `account/rateLimits/read` — fetch ChatGPT rate limits; updates arrive via `account/rateLimits/updated` (notify).
+- `account/login/cancel` — cancel a pending ChatGPT browser login by `loginId`.
+- `account/logout` — sign out the active provider; triggers `account/updated`.
+- `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey`, `oauth`, `chatgpt`, or `null`); also includes `providerId`, `providerName`, and the current ChatGPT `planType` when available.
+- `account/rateLimits/read` — fetch ChatGPT rate limits for the OpenAI provider; updates arrive via `account/rateLimits/updated` (notify).
 - `account/rateLimits/updated` (notify) — emitted whenever a user's ChatGPT rate limits change.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 
@@ -1246,16 +1247,19 @@ Request:
 Response examples:
 
 ```json
-{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": false } } // No OpenAI auth needed (e.g., OSS/local models)
-{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": true } }  // OpenAI auth required (typical for OpenAI-hosted models)
-{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresOpenaiAuth": true } }
-{ "id": 1, "result": { "account": { "type": "chatgpt", "email": "user@example.com", "planType": "pro" }, "requiresOpenaiAuth": true } }
+{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": false, "requiresAuth": false, "providerId": "ollama", "providerName": "Ollama" } }
+{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": false, "requiresAuth": true, "providerId": "azure-openai-sso", "providerName": "Azure OpenAI SSO" } }
+{ "id": 1, "result": { "account": { "type": "oauth" }, "requiresOpenaiAuth": false, "requiresAuth": true, "providerId": "azure-openai-sso", "providerName": "Azure OpenAI SSO" } }
+{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresOpenaiAuth": true, "requiresAuth": true, "providerId": "openai", "providerName": "OpenAI" } }
+{ "id": 1, "result": { "account": { "type": "chatgpt", "email": "user@example.com", "planType": "pro" }, "requiresOpenaiAuth": true, "requiresAuth": true, "providerId": "openai", "providerName": "OpenAI" } }
 ```
 
 Field notes:
 
 - `refreshToken` (bool): set `true` to force a token refresh.
-- `requiresOpenaiAuth` reflects the active provider; when `false`, Codex can run without OpenAI credentials.
+- `requiresAuth` reflects whether the active provider needs any credentials at all.
+- `requiresOpenaiAuth` is narrower; it is only `true` for OpenAI-backed providers.
+- `providerId` / `providerName` identify which provider the account state belongs to.
 
 ### 2) Log in with an API key
 
@@ -1274,43 +1278,59 @@ Field notes:
 3. Notifications:
    ```json
    { "method": "account/login/completed", "params": { "loginId": null, "success": true, "error": null } }
-   { "method": "account/updated", "params": { "authMode": "apikey", "planType": null } }
+   { "method": "account/updated", "params": { "authMode": "apikey", "planType": null, "providerId": "openai", "providerName": "OpenAI" } }
    ```
 
-### 3) Log in with ChatGPT (browser flow)
+### 3) Log in with provider OAuth (browser flow)
 
 1. Start:
    ```json
-   { "method": "account/login/start", "id": 3, "params": { "type": "chatgpt" } }
-   { "id": 3, "result": { "type": "chatgpt", "loginId": "<uuid>", "authUrl": "https://chatgpt.com/…&redirect_uri=http%3A%2F%2Flocalhost%3A<port>%2Fauth%2Fcallback" } }
+   { "method": "account/login/start", "id": 3, "params": { "type": "oauth" } }
+   { "id": 3, "result": { "type": "oauth", "loginId": "<uuid>", "authUrl": "https://provider.example.com/oauth/authorize?..." } }
+   ```
+2. Open `authUrl` in a browser.
+3. Wait for notifications:
+   ```json
+   { "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": true, "error": null } }
+   { "method": "account/updated", "params": { "authMode": "oauth", "planType": null, "providerId": "azure-openai-sso", "providerName": "Azure OpenAI SSO" } }
+   ```
+
+### 4) Log in with ChatGPT (browser flow)
+
+1. Start:
+   ```json
+   { "method": "account/login/start", "id": 4, "params": { "type": "chatgpt" } }
+   { "id": 4, "result": { "type": "chatgpt", "loginId": "<uuid>", "authUrl": "https://chatgpt.com/…&redirect_uri=http%3A%2F%2Flocalhost%3A<port>%2Fauth%2Fcallback" } }
    ```
 2. Open `authUrl` in a browser; the app-server hosts the local callback.
 3. Wait for notifications:
    ```json
    { "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": true, "error": null } }
-   { "method": "account/updated", "params": { "authMode": "chatgpt", "planType": "plus" } }
+   { "method": "account/updated", "params": { "authMode": "chatgpt", "planType": "plus", "providerId": "openai", "providerName": "OpenAI" } }
    ```
 
-### 4) Cancel a ChatGPT login
+### 5) Cancel a ChatGPT login
 
 ```json
-{ "method": "account/login/cancel", "id": 4, "params": { "loginId": "<uuid>" } }
+{ "method": "account/login/cancel", "id": 5, "params": { "loginId": "<uuid>" } }
 { "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": false, "error": "…" } }
 ```
 
-### 5) Logout
+### 6) Logout
 
 ```json
-{ "method": "account/logout", "id": 5 }
-{ "id": 5, "result": {} }
-{ "method": "account/updated", "params": { "authMode": null, "planType": null } }
+{ "method": "account/logout", "id": 6 }
+{ "id": 6, "result": {} }
+{ "method": "account/updated", "params": { "authMode": null, "planType": null, "providerId": "openai", "providerName": "OpenAI" } }
 ```
 
-### 6) Rate limits (ChatGPT)
+For non-OpenAI providers, logout clears the current provider's stored API key and/or provider OAuth tokens. For the OpenAI provider, logout clears the OpenAI auth storage.
+
+### 7) Rate limits (ChatGPT)
 
 ```json
-{ "method": "account/rateLimits/read", "id": 6 }
-{ "id": 6, "result": { "rateLimits": { "primary": { "usedPercent": 25, "windowDurationMins": 15, "resetsAt": 1730947200 }, "secondary": null } } }
+{ "method": "account/rateLimits/read", "id": 7 }
+{ "id": 7, "result": { "rateLimits": { "primary": { "usedPercent": 25, "windowDurationMins": 15, "resetsAt": 1730947200 }, "secondary": null } } }
 { "method": "account/rateLimits/updated", "params": { "rateLimits": { … } } }
 ```
 

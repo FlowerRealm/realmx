@@ -754,6 +754,8 @@ mod tests {
         let notification = ServerNotification::AccountUpdated(AccountUpdatedNotification {
             auth_mode: Some(AuthMode::ApiKey),
             plan_type: None,
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         });
 
         let jsonrpc_notification = OutgoingMessage::AppServerNotification(notification);
@@ -762,7 +764,9 @@ mod tests {
                 "method": "account/updated",
                 "params": {
                     "authMode": "apikey",
-                    "planType": null
+                    "planType": null,
+                    "providerId": "openai",
+                    "providerName": "OpenAI"
                 },
             }),
             serde_json::to_value(jsonrpc_notification)

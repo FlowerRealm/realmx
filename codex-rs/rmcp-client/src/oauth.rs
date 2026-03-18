@@ -16,6 +16,8 @@
 //!
 //! If the keyring is not available or fails, we fall back to CODEX_HOME/.credentials.json which is consistent with other coding CLI agents.
 
+use crate::utils::apply_default_headers;
+use crate::utils::build_default_headers;
 use anyhow::Context;
 use anyhow::Error;
 use anyhow::Result;
@@ -25,6 +27,7 @@ use oauth2::RefreshToken;
 use oauth2::Scope;
 use oauth2::TokenResponse;
 use oauth2::basic::BasicTokenType;
+use reqwest::ClientBuilder;
 use rmcp::transport::auth::OAuthTokenResponse;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -46,6 +49,7 @@ use tracing::warn;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
 use rmcp::transport::auth::AuthorizationManager;
+use rmcp::transport::auth::OAuthState;
 use tokio::sync::Mutex;
 
 use codex_utils_home_dir::find_codex_home;
@@ -109,12 +113,61 @@ pub(crate) fn load_oauth_tokens(
     }
 }
 
-pub(crate) fn has_oauth_tokens(
+pub fn has_oauth_tokens(
     server_name: &str,
     url: &str,
     store_mode: OAuthCredentialsStoreMode,
 ) -> Result<bool> {
     Ok(load_oauth_tokens(server_name, url, store_mode)?.is_some())
+}
+
+pub async fn load_oauth_access_token(
+    server_name: &str,
+    url: &str,
+    store_mode: OAuthCredentialsStoreMode,
+    http_headers: Option<std::collections::HashMap<String, String>>,
+    env_http_headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<Option<String>> {
+    let Some(initial_tokens) = load_oauth_tokens(server_name, url, store_mode)? else {
+        return Ok(None);
+    };
+
+    let default_headers = build_default_headers(http_headers, env_http_headers)?;
+    let http_client = apply_default_headers(ClientBuilder::new(), &default_headers).build()?;
+    let mut oauth_state = OAuthState::new(url.to_string(), Some(http_client)).await?;
+    oauth_state
+        .set_credentials(
+            &initial_tokens.client_id,
+            initial_tokens.token_response.0.clone(),
+        )
+        .await?;
+
+    let manager = match oauth_state {
+        OAuthState::Authorized(manager) | OAuthState::Unauthorized(manager) => manager,
+        OAuthState::Session(_) | OAuthState::AuthorizedHttpClient(_) => {
+            return Err(Error::msg(
+                "unexpected OAuth state while loading credentials",
+            ));
+        }
+    };
+
+    let authorization_manager = Arc::new(Mutex::new(manager));
+    let persistor = OAuthPersistor::new(
+        server_name.to_string(),
+        url.to_string(),
+        authorization_manager.clone(),
+        store_mode,
+        Some(initial_tokens),
+    );
+    persistor.refresh_if_needed().await?;
+    persistor.persist_if_needed().await?;
+
+    let (_, credentials) = {
+        let guard = authorization_manager.lock().await;
+        guard.get_credentials().await
+    }?;
+
+    Ok(credentials.map(|credentials| credentials.access_token().secret().to_string()))
 }
 
 fn refresh_expires_in_from_timestamp(tokens: &mut StoredOAuthTokens) {

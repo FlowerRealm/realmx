@@ -1555,6 +1555,10 @@ pub enum Account {
     #[ts(rename = "apiKey", rename_all = "camelCase")]
     ApiKey {},
 
+    #[serde(rename = "oauth", rename_all = "camelCase")]
+    #[ts(rename = "oauth", rename_all = "camelCase")]
+    Oauth {},
+
     #[serde(rename = "chatgpt", rename_all = "camelCase")]
     #[ts(rename = "chatgpt", rename_all = "camelCase")]
     Chatgpt { email: String, plan_type: PlanType },
@@ -1575,6 +1579,9 @@ pub enum LoginAccountParams {
     #[serde(rename = "chatgpt")]
     #[ts(rename = "chatgpt")]
     Chatgpt,
+    #[serde(rename = "oauth")]
+    #[ts(rename = "oauth")]
+    Oauth,
     /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
     /// The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.
     #[experimental("account/login/start.chatgptAuthTokens")]
@@ -1603,6 +1610,9 @@ pub enum LoginAccountResponse {
     #[serde(rename = "apiKey", rename_all = "camelCase")]
     #[ts(rename = "apiKey", rename_all = "camelCase")]
     ApiKey {},
+    #[serde(rename = "oauth", rename_all = "camelCase")]
+    #[ts(rename = "oauth", rename_all = "camelCase")]
+    Oauth { login_id: String, auth_url: String },
     #[serde(rename = "chatgpt", rename_all = "camelCase")]
     #[ts(rename = "chatgpt", rename_all = "camelCase")]
     Chatgpt {
@@ -1707,6 +1717,9 @@ pub struct GetAccountParams {
 pub struct GetAccountResponse {
     pub account: Option<Account>,
     pub requires_openai_auth: bool,
+    pub requires_auth: Option<bool>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
@@ -3547,6 +3560,8 @@ pub struct Thread {
 pub struct AccountUpdatedNotification {
     pub auth_mode: Option<AuthMode>,
     pub plan_type: Option<PlanType>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

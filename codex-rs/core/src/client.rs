@@ -24,6 +24,7 @@
 //! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
@@ -59,6 +60,7 @@ use codex_api::create_text_param_for_request;
 use codex_api::error::ApiError;
 use codex_api::requests::responses::Compression;
 use codex_otel::SessionTelemetry;
+use codex_rmcp_client::OAuthCredentialsStoreMode;
 
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
@@ -134,8 +136,11 @@ pub fn ws_version_from_features(config: &Config) -> bool {
 #[derive(Debug)]
 struct ModelClientState {
     auth_manager: Option<Arc<AuthManager>>,
+    codex_home: PathBuf,
     conversation_id: ThreadId,
+    provider_id: StdRwLock<String>,
     provider: StdRwLock<ModelProviderInfo>,
+    oauth_store_mode: OAuthCredentialsStoreMode,
     session_source: SessionSource,
     model_verbosity: Option<VerbosityConfig>,
     responses_websockets_enabled_by_feature: bool,
@@ -256,8 +261,11 @@ impl ModelClient {
     /// are passed to [`ModelClientSession::stream`] (and other turn-scoped methods) explicitly.
     pub fn new(
         auth_manager: Option<Arc<AuthManager>>,
+        codex_home: PathBuf,
         conversation_id: ThreadId,
+        provider_id: String,
         provider: ModelProviderInfo,
+        oauth_store_mode: OAuthCredentialsStoreMode,
         session_source: SessionSource,
         model_verbosity: Option<VerbosityConfig>,
         responses_websockets_enabled_by_feature: bool,
@@ -268,8 +276,11 @@ impl ModelClient {
         Self {
             state: Arc::new(ModelClientState {
                 auth_manager,
+                codex_home,
                 conversation_id,
+                provider_id: StdRwLock::new(provider_id),
                 provider: StdRwLock::new(provider),
+                oauth_store_mode,
                 session_source,
                 model_verbosity,
                 responses_websockets_enabled_by_feature,
@@ -294,7 +305,12 @@ impl ModelClient {
         }
     }
 
-    pub fn replace_provider(&self, provider: ModelProviderInfo) {
+    pub fn replace_provider(&self, provider_id: String, provider: ModelProviderInfo) {
+        *self
+            .state
+            .provider_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = provider_id;
         *self
             .state
             .provider
@@ -309,6 +325,14 @@ impl ModelClient {
     pub(crate) fn provider(&self) -> ModelProviderInfo {
         self.state
             .provider
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn provider_id(&self) -> String {
+        self.state
+            .provider_id
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
@@ -527,7 +551,14 @@ impl ModelClient {
         };
         let provider = self.provider();
         let api_provider = provider.to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))?;
-        let api_auth = auth_provider_from_auth(auth.clone(), &provider)?;
+        let api_auth = auth_provider_from_auth(
+            &self.state.codex_home,
+            &self.provider_id(),
+            auth.clone(),
+            &provider,
+            self.state.oauth_store_mode,
+        )
+        .await?;
         Ok(CurrentClientSetup {
             auth,
             api_provider,

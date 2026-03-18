@@ -1,3 +1,4 @@
+use codex_core::ModelProviderAuthStrategy;
 use codex_core::ModelProviderInfo;
 use codex_core::WireApi;
 use codex_protocol::protocol::EventMsg;
@@ -67,6 +68,8 @@ async fn continue_after_stream_error() {
         name: "mock-openai".into(),
         api_key: None,
         base_url: Some(format!("{}/v1", server.uri())),
+        auth_strategy: ModelProviderAuthStrategy::ApiKey,
+        oauth: None,
         env_key: Some("PATH".into()),
         env_key_instructions: None,
         experimental_bearer_token: None,

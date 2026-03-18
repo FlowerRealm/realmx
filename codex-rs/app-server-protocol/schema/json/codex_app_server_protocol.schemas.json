@@ -4798,6 +4798,22 @@
           },
           {
             "properties": {
+              "type": {
+                "enum": [
+                  "oauth"
+                ],
+                "title": "OauthAccountType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "OauthAccount",
+            "type": "object"
+          },
+          {
+            "properties": {
               "email": {
                 "type": "string"
               },
@@ -4881,6 +4897,18 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "providerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "providerName": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         },
@@ -5462,6 +5490,13 @@
             "description": "OpenAI API key provided by the caller and stored by Codex.",
             "enum": [
               "apikey"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Provider OAuth managed by Codex and persisted by Codex.",
+            "enum": [
+              "oauth"
             ],
             "type": "string"
           },
@@ -7822,6 +7857,24 @@
               }
             ]
           },
+          "providerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "providerName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requiresAuth": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "requiresOpenaiAuth": {
             "type": "boolean"
           }
@@ -8407,6 +8460,22 @@
             "type": "object"
           },
           {
+            "properties": {
+              "type": {
+                "enum": [
+                  "oauth"
+                ],
+                "title": "Oauthv2::LoginAccountParamsType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "Oauthv2::LoginAccountParams",
+            "type": "object"
+          },
+          {
             "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.",
             "properties": {
               "accessToken": {
@@ -8460,6 +8529,30 @@
               "type"
             ],
             "title": "ApiKeyv2::LoginAccountResponse",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "authUrl": {
+                "type": "string"
+              },
+              "loginId": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "oauth"
+                ],
+                "title": "Oauthv2::LoginAccountResponseType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "authUrl",
+              "loginId",
+              "type"
+            ],
+            "title": "Oauthv2::LoginAccountResponse",
             "type": "object"
           },
           {

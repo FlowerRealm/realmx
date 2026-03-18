@@ -38,6 +38,22 @@
       "type": "object"
     },
     {
+      "properties": {
+        "type": {
+          "enum": [
+            "oauth"
+          ],
+          "title": "Oauthv2::LoginAccountParamsType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Oauthv2::LoginAccountParams",
+      "type": "object"
+    },
+    {
       "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.",
       "properties": {
         "accessToken": {

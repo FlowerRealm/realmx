@@ -44,6 +44,8 @@ async fn responses_stream_includes_subagent_header_on_review() {
         name: "mock".into(),
         api_key: None,
         base_url: Some(format!("{}/v1", server.uri())),
+        auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+        oauth: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -88,8 +90,11 @@ async fn responses_stream_includes_subagent_header_on_review() {
 
     let client = ModelClient::new(
         None,
+        config.codex_home.clone(),
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
+        config.mcp_oauth_credentials_store_mode,
         session_source,
         config.model_verbosity,
         false,
@@ -157,6 +162,8 @@ async fn responses_stream_includes_subagent_header_on_other() {
         name: "mock".into(),
         api_key: None,
         base_url: Some(format!("{}/v1", server.uri())),
+        auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+        oauth: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -202,8 +209,11 @@ async fn responses_stream_includes_subagent_header_on_other() {
 
     let client = ModelClient::new(
         None,
+        config.codex_home.clone(),
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
+        config.mcp_oauth_credentials_store_mode,
         session_source,
         config.model_verbosity,
         false,
@@ -265,6 +275,8 @@ async fn responses_respects_model_info_overrides_from_config() {
         name: "mock".into(),
         api_key: None,
         base_url: Some(format!("{}/v1", server.uri())),
+        auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+        oauth: None,
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
@@ -315,8 +327,11 @@ async fn responses_respects_model_info_overrides_from_config() {
 
     let client = ModelClient::new(
         None,
+        config.codex_home.clone(),
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
+        config.mcp_oauth_credentials_store_mode,
         session_source,
         config.model_verbosity,
         false,

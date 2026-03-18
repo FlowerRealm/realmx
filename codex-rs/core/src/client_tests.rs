@@ -19,8 +19,11 @@ fn test_model_client(session_source: SessionSource) -> ModelClient {
     );
     ModelClient::new(
         None,
+        std::env::temp_dir(),
         ThreadId::new(),
+        "test-provider".to_string(),
         provider,
+        codex_rmcp_client::OAuthCredentialsStoreMode::File,
         session_source,
         None,
         false,

@@ -1,10 +1,19 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_core::AuthManager;
+use codex_core::ModelProviderInfo;
+use codex_core::OAuthCredentialsStoreMode;
+use codex_core::OauthLoginHandle;
+use codex_core::ProviderCredentialMode;
+use codex_core::activate_provider_api_key;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::read_openai_api_key_from_env;
+use codex_core::detect_provider_credential_mode;
+use codex_core::perform_oauth_login_return_url;
+use codex_core::provider_login_capabilities;
+use codex_core::provider_oauth_url;
 use codex_login::DeviceCode;
 use codex_login::ServerOptions;
 use codex_login::ShutdownHandle;
@@ -30,8 +39,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
-use codex_core::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
+use std::env;
 use std::sync::RwLock;
 
 use crate::LoginStatus;
@@ -89,6 +98,8 @@ pub(crate) enum SignInState {
     ChatGptDeviceCode(ContinueWithDeviceCodeState),
     ChatGptSuccessMessage,
     ChatGptSuccess,
+    OAuthContinueInBrowser(ContinueInBrowserState),
+    OAuthConfigured,
     ApiKeyEntry(ApiKeyInputState),
     ApiKeyConfigured,
 }
@@ -97,10 +108,13 @@ pub(crate) enum SignInState {
 pub(crate) enum SignInOption {
     ChatGpt,
     DeviceCode,
+    OAuth,
     ApiKey,
+    Back,
 }
 
 const API_KEY_DISABLED_MESSAGE: &str = "API key login is disabled.";
+pub(super) const BACK_TO_SIGN_IN_OPTIONS_LABEL: &str = "Back to sign-in options";
 
 #[derive(Clone, Default)]
 pub(crate) struct ApiKeyInputState {
@@ -151,6 +165,9 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Char('3') => {
                 self.select_option_by_index(/*index*/ 2);
             }
+            KeyCode::Char('4') => {
+                self.select_option_by_index(3);
+            }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
                 match sign_in_state {
@@ -167,7 +184,16 @@ impl KeyboardHandler for AuthModeWidget {
                 tracing::info!("Esc pressed");
                 let mut sign_in_state = self.sign_in_state.write().unwrap();
                 match &*sign_in_state {
+                    SignInState::PickMode => {
+                        drop(sign_in_state);
+                        self.request_provider_selection();
+                    }
                     SignInState::ChatGptContinueInBrowser(_) => {
+                        *sign_in_state = SignInState::PickMode;
+                        drop(sign_in_state);
+                        self.request_frame.schedule_frame();
+                    }
+                    SignInState::OAuthContinueInBrowser(_) => {
                         *sign_in_state = SignInState::PickMode;
                         drop(sign_in_state);
                         self.request_frame.schedule_frame();
@@ -198,44 +224,135 @@ pub(crate) struct AuthModeWidget {
     pub highlighted_mode: SignInOption,
     pub error: Option<String>,
     pub sign_in_state: Arc<RwLock<SignInState>>,
+    pub provider_id: String,
+    pub provider: ModelProviderInfo,
     pub codex_home: PathBuf,
     pub cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
+    pub oauth_credentials_store_mode: OAuthCredentialsStoreMode,
+    pub mcp_oauth_callback_port: Option<u16>,
+    pub mcp_oauth_callback_uri: Option<String>,
     pub login_status: LoginStatus,
     pub auth_manager: Arc<AuthManager>,
     pub forced_chatgpt_workspace_id: Option<String>,
     pub forced_login_method: Option<ForcedLoginMethod>,
     pub animations_enabled: bool,
+    pub back_to_provider_selection_requested: bool,
 }
 
 impl AuthModeWidget {
+    pub(crate) fn set_provider(&mut self, provider_id: String, provider: ModelProviderInfo) {
+        let provider_changed = self.provider_id != provider_id || self.provider != provider;
+        self.provider_id = provider_id;
+        self.provider = provider;
+        self.login_status = self.detect_login_status();
+
+        if provider_changed {
+            self.error = None;
+            *self.sign_in_state.write().unwrap() = SignInState::PickMode;
+            self.highlighted_mode = self.default_highlighted_mode();
+            self.back_to_provider_selection_requested = false;
+        }
+    }
+
+    fn detect_login_status(&self) -> LoginStatus {
+        match detect_provider_credential_mode(
+            &self.codex_home,
+            &self.provider_id,
+            &self.provider,
+            self.auth_manager.auth_cached().as_ref(),
+            self.oauth_credentials_store_mode,
+        ) {
+            Ok(Some(mode)) => LoginStatus::AuthMode(mode),
+            Ok(None) | Err(_) => LoginStatus::NotAuthenticated,
+        }
+    }
+
+    fn default_highlighted_mode(&self) -> SignInOption {
+        if self.uses_openai_auth() {
+            match self.forced_login_method {
+                Some(ForcedLoginMethod::Api) => SignInOption::ApiKey,
+                _ => SignInOption::ChatGpt,
+            }
+        } else if self.login_capabilities().oauth {
+            SignInOption::OAuth
+        } else {
+            SignInOption::ApiKey
+        }
+    }
+
+    pub(crate) fn is_authenticated(&self) -> bool {
+        self.login_status != LoginStatus::NotAuthenticated
+    }
+
+    pub(crate) fn take_provider_selection_requested(&mut self) -> bool {
+        std::mem::take(&mut self.back_to_provider_selection_requested)
+    }
+
+    fn uses_openai_auth(&self) -> bool {
+        self.login_capabilities().uses_openai_auth()
+    }
+
+    fn login_capabilities(&self) -> codex_core::ProviderLoginCapabilities {
+        provider_login_capabilities(&self.provider_id, &self.provider)
+    }
+
     fn is_api_login_allowed(&self) -> bool {
-        !matches!(self.forced_login_method, Some(ForcedLoginMethod::Chatgpt))
+        if self.uses_openai_auth() {
+            !matches!(self.forced_login_method, Some(ForcedLoginMethod::Chatgpt))
+        } else {
+            self.login_capabilities().api_key
+        }
     }
 
     fn is_chatgpt_login_allowed(&self) -> bool {
-        !matches!(self.forced_login_method, Some(ForcedLoginMethod::Api))
+        self.uses_openai_auth() && !matches!(self.forced_login_method, Some(ForcedLoginMethod::Api))
+    }
+
+    fn is_oauth_login_allowed(&self) -> bool {
+        !self.uses_openai_auth() && self.login_capabilities().oauth
     }
 
     fn displayed_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = vec![SignInOption::ChatGpt];
-        if self.is_chatgpt_login_allowed() {
-            options.push(SignInOption::DeviceCode);
+        let mut options = Vec::new();
+        if self.uses_openai_auth() {
+            options.push(SignInOption::ChatGpt);
+            if self.is_chatgpt_login_allowed() {
+                options.push(SignInOption::DeviceCode);
+            }
+            if self.is_api_login_allowed() {
+                options.push(SignInOption::ApiKey);
+            }
+        } else {
+            if self.is_oauth_login_allowed() {
+                options.push(SignInOption::OAuth);
+            }
+            if self.is_api_login_allowed() {
+                options.push(SignInOption::ApiKey);
+            }
         }
-        if self.is_api_login_allowed() {
-            options.push(SignInOption::ApiKey);
-        }
+        options.push(SignInOption::Back);
         options
     }
 
     fn selectable_sign_in_options(&self) -> Vec<SignInOption> {
         let mut options = Vec::new();
-        if self.is_chatgpt_login_allowed() {
-            options.push(SignInOption::ChatGpt);
-            options.push(SignInOption::DeviceCode);
+        if self.uses_openai_auth() {
+            if self.is_chatgpt_login_allowed() {
+                options.push(SignInOption::ChatGpt);
+                options.push(SignInOption::DeviceCode);
+            }
+            if self.is_api_login_allowed() {
+                options.push(SignInOption::ApiKey);
+            }
+        } else {
+            if self.is_oauth_login_allowed() {
+                options.push(SignInOption::OAuth);
+            }
+            if self.is_api_login_allowed() {
+                options.push(SignInOption::ApiKey);
+            }
         }
-        if self.is_api_login_allowed() {
-            options.push(SignInOption::ApiKey);
-        }
+        options.push(SignInOption::Back);
         options
     }
 
@@ -273,6 +390,11 @@ impl AuthModeWidget {
                     self.start_device_code_login();
                 }
             }
+            SignInOption::OAuth => {
+                if self.is_oauth_login_allowed() {
+                    self.start_oauth_login();
+                }
+            }
             SignInOption::ApiKey => {
                 if self.is_api_login_allowed() {
                     self.start_api_key_entry();
@@ -280,28 +402,52 @@ impl AuthModeWidget {
                     self.disallow_api_login();
                 }
             }
+            SignInOption::Back => self.request_provider_selection(),
         }
     }
 
+    fn request_provider_selection(&mut self) {
+        self.back_to_provider_selection_requested = true;
+        self.error = None;
+        *self.sign_in_state.write().unwrap() = SignInState::PickMode;
+        self.highlighted_mode = self.default_highlighted_mode();
+        self.request_frame.schedule_frame();
+    }
+
+    pub(super) fn back_action_line(label: &'static str) -> Line<'static> {
+        Line::from(format!("< {label} (Esc)")).cyan()
+    }
+
     fn disallow_api_login(&mut self) {
-        self.highlighted_mode = SignInOption::ChatGpt;
+        self.highlighted_mode = self.default_highlighted_mode();
         self.error = Some(API_KEY_DISABLED_MESSAGE.to_string());
         *self.sign_in_state.write().unwrap() = SignInState::PickMode;
         self.request_frame.schedule_frame();
     }
 
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
-        let mut lines: Vec<Line> = vec![
-            Line::from(vec![
-                "  ".into(),
-                "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
-            ]),
-            Line::from(vec![
-                "  ".into(),
-                "or connect an API key for usage-based billing".into(),
-            ]),
-            "".into(),
-        ];
+        let mut lines: Vec<Line> = if self.uses_openai_auth() {
+            vec![
+                Line::from(vec![
+                    "  ".into(),
+                    "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                ]),
+                Line::from(vec![
+                    "  ".into(),
+                    "or connect an API key for usage-based billing".into(),
+                ]),
+                "".into(),
+            ]
+        } else {
+            vec![
+                Line::from(vec![
+                    "  ".into(),
+                    format!("Connect {} before continuing.", self.provider.name).into(),
+                ]),
+                Line::from(vec!["  ".into(), "Use an API key to continue.".into()]),
+                "".into(),
+            ]
+        };
 
         let create_mode_item = |idx: usize,
                                 selected_mode: SignInOption,
@@ -357,19 +503,39 @@ impl AuthModeWidget {
                         device_code_description,
                     ));
                 }
+                SignInOption::OAuth => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with OAuth",
+                        "Open a browser and authorize this provider",
+                    ));
+                }
                 SignInOption::ApiKey => {
                     lines.extend(create_mode_item(
                         idx,
                         option,
                         "Provide your own API key",
-                        "Pay for what you use",
+                        if self.uses_openai_auth() {
+                            "Pay for what you use"
+                        } else {
+                            "Store a provider-specific key securely on this machine"
+                        },
+                    ));
+                }
+                SignInOption::Back => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Back to provider selection",
+                        "Choose another provider or create a custom one",
                     ));
                 }
             }
             lines.push("".into());
         }
 
-        if !self.is_api_login_allowed() {
+        if self.uses_openai_auth() && !self.is_api_login_allowed() {
             lines.push(
                 "  API key login is disabled by this workspace. Sign in with ChatGPT to continue."
                     .dim()
@@ -382,6 +548,7 @@ impl AuthModeWidget {
             //     But leaving this for a future cleanup.
             "  Press Enter to continue".dim().into(),
         );
+        lines.push("  Press Esc to go back".dim().into());
         if let Some(err) = &self.error {
             lines.push("".into());
             lines.push(err.as_str().red().into());
@@ -405,28 +572,43 @@ impl AuthModeWidget {
         let mut lines = vec![spans.into(), "".into()];
 
         let sign_in_state = self.sign_in_state.read().unwrap();
-        let auth_url = if let SignInState::ChatGptContinueInBrowser(state) = &*sign_in_state
-            && !state.auth_url.is_empty()
-        {
-            lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
-            lines.push("".into());
-            lines.push(Line::from(vec![
-                "  ".into(),
-                state.auth_url.as_str().cyan().underlined(),
-            ]));
-            lines.push("".into());
-            lines.push(Line::from(vec![
-                "  On a remote or headless machine? Press Esc and choose ".into(),
-                "Sign in with Device Code".cyan(),
-                ".".into(),
-            ]));
-            lines.push("".into());
-            Some(state.auth_url.clone())
-        } else {
-            None
+        let auth_url = match &*sign_in_state {
+            SignInState::ChatGptContinueInBrowser(state) if !state.auth_url.is_empty() => {
+                lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
+                lines.push("".into());
+                lines.push(Line::from(vec![
+                    "  ".into(),
+                    state.auth_url.as_str().cyan().underlined(),
+                ]));
+                lines.push("".into());
+                lines.push(Line::from(vec![
+                    "  On a remote or headless machine? Press Esc and choose ".into(),
+                    "Sign in with Device Code".cyan(),
+                    ".".into(),
+                ]));
+                lines.push("".into());
+                lines.push(Self::back_action_line(BACK_TO_SIGN_IN_OPTIONS_LABEL));
+                Some(state.auth_url.clone())
+            }
+            SignInState::OAuthContinueInBrowser(state) if !state.auth_url.is_empty() => {
+                lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
+                lines.push("".into());
+                lines.push(Line::from(vec![
+                    "  ".into(),
+                    state.auth_url.as_str().cyan().underlined(),
+                ]));
+                lines.push("".into());
+                lines.push(
+                    "  Complete the OAuth flow in your browser, then return here."
+                        .dim()
+                        .into(),
+                );
+                lines.push("".into());
+                lines.push(Self::back_action_line(BACK_TO_SIGN_IN_OPTIONS_LABEL));
+                Some(state.auth_url.clone())
+            }
+            _ => None,
         };
-
-        lines.push("  Press Esc to cancel".dim().into());
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .render(area, buf);
@@ -482,10 +664,34 @@ impl AuthModeWidget {
     }
 
     fn render_api_key_configured(&self, area: Rect, buf: &mut Buffer) {
+        let lines = if self.uses_openai_auth() {
+            vec![
+                "✓ API key configured".fg(Color::Green).into(),
+                "".into(),
+                "  Codex will use usage-based billing with your API key.".into(),
+            ]
+        } else {
+            vec![
+                "✓ API key configured".fg(Color::Green).into(),
+                "".into(),
+                format!(
+                    "  Stored a secure API key for provider `{}`.",
+                    self.provider_id
+                )
+                .into(),
+            ]
+        };
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_oauth_configured(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            "✓ API key configured".fg(Color::Green).into(),
+            "✓ OAuth configured".fg(Color::Green).into(),
             "".into(),
-            "  Codex will use usage-based billing with your API key.".into(),
+            format!("  Connected provider `{}`.", self.provider_id).into(),
         ];
 
         Paragraph::new(lines)
@@ -501,17 +707,37 @@ impl AuthModeWidget {
         ])
         .areas(area);
 
-        let mut intro_lines: Vec<Line> = vec![
-            Line::from(vec![
-                "> ".into(),
-                "Use your own OpenAI API key for usage-based billing".bold(),
-            ]),
-            "".into(),
-            "  Paste or type your API key below. It will be stored locally in auth.json.".into(),
-            "".into(),
-        ];
+        let mut intro_lines: Vec<Line> = if self.uses_openai_auth() {
+            vec![
+                Line::from(vec![
+                    "> ".into(),
+                    "Use your own OpenAI API key for usage-based billing".bold(),
+                ]),
+                "".into(),
+                "  Paste or type your API key below. It will be stored locally in auth.json."
+                    .into(),
+                "".into(),
+            ]
+        } else {
+            vec![
+                Line::from(vec![
+                    "> ".into(),
+                    format!("Use your own API key for {}", self.provider.name).bold(),
+                ]),
+                "".into(),
+                "  Paste or type your provider API key below. It will be stored securely on this machine."
+                    .into(),
+                "".into(),
+            ]
+        };
         if state.prepopulated_from_env {
-            intro_lines.push("  Detected OPENAI_API_KEY environment variable.".into());
+            intro_lines.push(if self.uses_openai_auth() {
+                "  Detected OPENAI_API_KEY environment variable.".into()
+            } else if let Some(env_key) = self.provider.env_key.as_deref() {
+                format!("  Detected {env_key} environment variable.").into()
+            } else {
+                "  Detected a provider API key from the environment.".into()
+            });
             intro_lines.push(
                 "  Paste a different key if you prefer to use another account."
                     .dim()
@@ -540,8 +766,9 @@ impl AuthModeWidget {
             .render(input_area, buf);
 
         let mut footer_lines: Vec<Line> = vec![
+            Self::back_action_line(BACK_TO_SIGN_IN_OPTIONS_LABEL),
+            "".into(),
             "  Press Enter to save".dim().into(),
-            "  Press Esc to go back".dim().into(),
         ];
         if let Some(error) = &self.error {
             footer_lines.push("".into());
@@ -644,7 +871,15 @@ impl AuthModeWidget {
             return;
         }
         self.error = None;
-        let prefill_from_env = read_openai_api_key_from_env();
+        let prefill_from_env = if self.uses_openai_auth() {
+            read_openai_api_key_from_env()
+        } else {
+            self.provider
+                .env_key
+                .as_deref()
+                .and_then(|env_key| env::var(env_key).ok())
+                .filter(|value| !value.trim().is_empty())
+        };
         let mut guard = self.sign_in_state.write().unwrap();
         match &mut *guard {
             SignInState::ApiKeyEntry(state) => {
@@ -673,14 +908,26 @@ impl AuthModeWidget {
             self.disallow_api_login();
             return;
         }
-        match login_with_api_key(
-            &self.codex_home,
-            &api_key,
-            self.cli_auth_credentials_store_mode,
-        ) {
+        let result = if self.uses_openai_auth() {
+            login_with_api_key(
+                &self.codex_home,
+                &api_key,
+                self.cli_auth_credentials_store_mode,
+            )
+        } else {
+            activate_provider_api_key(
+                &self.codex_home,
+                &self.provider_id,
+                &self.provider,
+                self.oauth_credentials_store_mode,
+                &api_key,
+            )
+            .map_err(std::io::Error::other)
+        };
+        match result {
             Ok(()) => {
                 self.error = None;
-                self.login_status = LoginStatus::AuthMode(AuthMode::ApiKey);
+                self.login_status = LoginStatus::AuthMode(ProviderCredentialMode::ApiKey);
                 self.auth_manager.reload();
                 *self.sign_in_state.write().unwrap() = SignInState::ApiKeyConfigured;
             }
@@ -704,8 +951,94 @@ impl AuthModeWidget {
         self.request_frame.schedule_frame();
     }
 
+    fn start_oauth_login(&mut self) {
+        let Some(server_url) =
+            provider_oauth_url(&self.provider_id, &self.provider).map(ToString::to_string)
+        else {
+            self.error = Some("This provider does not define an OAuth URL.".to_string());
+            self.request_frame.schedule_frame();
+            return;
+        };
+
+        self.error = None;
+        let provider_id = self.provider_id.clone();
+        let provider = self.provider.clone();
+        let store_mode = self.oauth_credentials_store_mode;
+        let callback_port = self.mcp_oauth_callback_port;
+        let callback_uri = self.mcp_oauth_callback_uri.clone();
+        let request_frame = self.request_frame.clone();
+        let sign_in_state = self.sign_in_state.clone();
+        let provider_name = self.provider.name.clone();
+
+        tokio::spawn(async move {
+            let scopes = provider
+                .oauth
+                .as_ref()
+                .and_then(|oauth| oauth.scopes.clone())
+                .unwrap_or_default();
+            let oauth_resource = provider
+                .oauth
+                .as_ref()
+                .and_then(|oauth| oauth.oauth_resource.as_deref())
+                .map(ToString::to_string);
+
+            let handle: Result<OauthLoginHandle, _> = perform_oauth_login_return_url(
+                &format!("model-provider:{provider_id}"),
+                &server_url,
+                store_mode,
+                provider.http_headers.clone(),
+                provider.env_http_headers.clone(),
+                &scopes,
+                oauth_resource.as_deref(),
+                None,
+                callback_port,
+                callback_uri.as_deref(),
+            )
+            .await;
+
+            match handle {
+                Ok(handle) => {
+                    let auth_url = handle.authorization_url().to_string();
+                    if webbrowser::open(&auth_url).is_err() {
+                        tracing::warn!("failed to open browser for provider oauth login");
+                    }
+
+                    *sign_in_state.write().unwrap() =
+                        SignInState::OAuthContinueInBrowser(ContinueInBrowserState {
+                            auth_url,
+                            shutdown_flag: None,
+                        });
+                    request_frame.schedule_frame();
+
+                    match handle.wait().await {
+                        Ok(()) => {
+                            *sign_in_state.write().unwrap() = SignInState::OAuthConfigured;
+                        }
+                        Err(err) => {
+                            *sign_in_state.write().unwrap() = SignInState::PickMode;
+                            tracing::warn!(
+                                "provider oauth login failed for {provider_name}: {err:#}"
+                            );
+                        }
+                    }
+                    request_frame.schedule_frame();
+                }
+                Err(err) => {
+                    *sign_in_state.write().unwrap() = SignInState::PickMode;
+                    tracing::warn!(
+                        "failed to start provider oauth login for {provider_name}: {err:#}"
+                    );
+                    request_frame.schedule_frame();
+                }
+            }
+        });
+    }
+
     fn handle_existing_chatgpt_login(&mut self) -> bool {
-        if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::Chatgpt)) {
+        if matches!(
+            self.login_status,
+            LoginStatus::AuthMode(ProviderCredentialMode::Chatgpt)
+        ) {
             *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccess;
             self.request_frame.schedule_frame();
             true
@@ -793,9 +1126,12 @@ impl StepStateProvider for AuthModeWidget {
             SignInState::PickMode
             | SignInState::ApiKeyEntry(_)
             | SignInState::ChatGptContinueInBrowser(_)
+            | SignInState::OAuthContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
             | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured => StepState::Complete,
+            SignInState::ChatGptSuccess
+            | SignInState::OAuthConfigured
+            | SignInState::ApiKeyConfigured => StepState::Complete,
         }
     }
 }
@@ -810,6 +1146,9 @@ impl WidgetRef for AuthModeWidget {
             SignInState::ChatGptContinueInBrowser(_) => {
                 self.render_continue_in_browser(area, buf);
             }
+            SignInState::OAuthContinueInBrowser(_) => {
+                self.render_continue_in_browser(area, buf);
+            }
             SignInState::ChatGptDeviceCode(state) => {
                 headless_chatgpt_login::render_device_code_login(self, area, buf, state);
             }
@@ -818,6 +1157,9 @@ impl WidgetRef for AuthModeWidget {
             }
             SignInState::ChatGptSuccess => {
                 self.render_chatgpt_success(area, buf);
+            }
+            SignInState::OAuthConfigured => {
+                self.render_oauth_configured(area, buf);
             }
             SignInState::ApiKeyEntry(state) => {
                 self.render_api_key_entry(area, buf, state);
@@ -832,11 +1174,15 @@ impl WidgetRef for AuthModeWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_backend::VT100Backend;
+    use codex_core::ModelProviderAuthStrategy;
+    use codex_core::ModelProviderInfo;
     use pretty_assertions::assert_eq;
+    use ratatui::Terminal;
+    use ratatui::widgets::WidgetRef;
     use tempfile::TempDir;
 
     use codex_core::auth::AuthCredentialsStoreMode;
-
     fn widget_forced_chatgpt() -> (AuthModeWidget, TempDir) {
         let codex_home = TempDir::new().unwrap();
         let codex_home_path = codex_home.path().to_path_buf();
@@ -845,8 +1191,31 @@ mod tests {
             highlighted_mode: SignInOption::ChatGpt,
             error: None,
             sign_in_state: Arc::new(RwLock::new(SignInState::PickMode)),
+            provider_id: "openai".to_string(),
+            provider: ModelProviderInfo {
+                name: "OpenAI".to_string(),
+                base_url: None,
+                auth_strategy: ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: codex_core::WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
             codex_home: codex_home_path.clone(),
             cli_auth_credentials_store_mode: AuthCredentialsStoreMode::File,
+            oauth_credentials_store_mode: OAuthCredentialsStoreMode::File,
+            mcp_oauth_callback_port: None,
+            mcp_oauth_callback_uri: None,
             login_status: LoginStatus::NotAuthenticated,
             auth_manager: AuthManager::shared(
                 codex_home_path,
@@ -856,8 +1225,73 @@ mod tests {
             forced_chatgpt_workspace_id: None,
             forced_login_method: Some(ForcedLoginMethod::Chatgpt),
             animations_enabled: true,
+            back_to_provider_selection_requested: false,
         };
         (widget, codex_home)
+    }
+
+    fn widget_for_provider() -> (AuthModeWidget, TempDir) {
+        let codex_home = TempDir::new().unwrap();
+        let codex_home_path = codex_home.path().to_path_buf();
+        let widget = AuthModeWidget {
+            request_frame: FrameRequester::test_dummy(),
+            highlighted_mode: SignInOption::ApiKey,
+            error: None,
+            sign_in_state: Arc::new(RwLock::new(SignInState::PickMode)),
+            provider_id: "acme".to_string(),
+            provider: ModelProviderInfo {
+                name: "Acme AI".to_string(),
+                base_url: Some("https://api.acme.test".to_string()),
+                auth_strategy: ModelProviderAuthStrategy::ApiKey,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: codex_core::WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                supports_websockets: false,
+            },
+            codex_home: codex_home_path.clone(),
+            cli_auth_credentials_store_mode: AuthCredentialsStoreMode::File,
+            oauth_credentials_store_mode: OAuthCredentialsStoreMode::File,
+            mcp_oauth_callback_port: None,
+            mcp_oauth_callback_uri: None,
+            login_status: LoginStatus::NotAuthenticated,
+            auth_manager: AuthManager::shared(
+                codex_home_path,
+                false,
+                AuthCredentialsStoreMode::File,
+            ),
+            forced_chatgpt_workspace_id: None,
+            forced_login_method: None,
+            animations_enabled: false,
+            back_to_provider_selection_requested: false,
+        };
+        (widget, codex_home)
+    }
+
+    fn compact_render(output: &str) -> String {
+        output
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn render(widget: &AuthModeWidget, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(VT100Backend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|f| widget.render_ref(f.area(), f.buffer_mut()))
+            .expect("draw");
+        compact_render(&terminal.backend().to_string())
     }
 
     #[test]
@@ -887,6 +1321,103 @@ mod tests {
         assert_eq!(widget.login_status, LoginStatus::NotAuthenticated);
     }
 
+    #[test]
+    fn escape_in_pick_mode_requests_provider_selection() {
+        let (mut widget, _tmp) = widget_for_provider();
+
+        widget.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(widget.take_provider_selection_requested());
+        assert!(matches!(
+            &*widget.sign_in_state.read().unwrap(),
+            SignInState::PickMode
+        ));
+        assert_eq!(widget.error, None);
+    }
+
+    #[test]
+    fn pick_mode_renders_back_option_snapshot() {
+        let (widget, _tmp) = widget_for_provider();
+
+        insta::assert_snapshot!(
+                                                                                    render(&widget, 72, 18),
+                                                                                    @r"
+Connect Acme AI before continuing.
+Use an API key to continue.
+> 1. Provide your own API key
+     Store a provider-specific key securely on this machine
+  2. Back to provider selection
+     Choose another provider or create a custom one
+  Press Enter to continue
+  Press Esc to go back
+"
+                                                                                );
+    }
+
+    #[test]
+    fn continue_in_browser_renders_back_action_snapshot() {
+        let (widget, _tmp) = widget_for_provider();
+        *widget.sign_in_state.write().unwrap() =
+            SignInState::OAuthContinueInBrowser(ContinueInBrowserState {
+                auth_url: "https://auth.acme.test/oauth".to_string(),
+                shutdown_flag: None,
+            });
+
+        insta::assert_snapshot!(
+                                                                                    render(&widget, 72, 18),
+                                                                                    @r"
+Finish signing in via your browser
+  If the link doesn't open automatically, open the following link to
+authenticate:
+  https://auth.acme.test/oauth
+  Complete the OAuth flow in your browser, then return here.
+< Back to sign-in options (Esc)
+"
+                                                                                );
+    }
+
+    #[test]
+    fn api_key_entry_renders_back_action_snapshot() {
+        let (widget, _tmp) = widget_for_provider();
+        *widget.sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(ApiKeyInputState {
+            value: String::new(),
+            prepopulated_from_env: false,
+        });
+
+        insta::assert_snapshot!(
+                                                                                    render(&widget, 72, 18),
+                                                                                    @r"
+> Use your own API key for Acme AI
+  Paste or type your provider API key below. It will be stored securely
+on this machine.
+╭API key──────────────────────────────────────────────────────────────╮
+│Paste or type your API key                                          │
+╰─────────────────────────────────────────────────────────────────────╯
+< Back to sign-in options (Esc)
+  Press Enter to save
+"
+                                                                                );
+    }
+
+    #[test]
+    fn device_code_renders_back_action_snapshot() {
+        let (widget, _tmp) = widget_forced_chatgpt();
+        *widget.sign_in_state.write().unwrap() =
+            SignInState::ChatGptDeviceCode(ContinueWithDeviceCodeState {
+                device_code: None,
+                cancel: Some(Arc::new(Notify::new())),
+            });
+
+        insta::assert_snapshot!(
+                                                                                    render(&widget, 72, 20),
+                                                                                    @r"
+Finish signing in via your browser
+  Requesting a one-time code...
+< Back to sign-in options (Esc)
+"
+                                                                                );
+    }
+
     /// Collects all buffer cell symbols that contain the OSC 8 open sequence
     /// for the given URL.  Returns the concatenated "inner" characters.
     fn collect_osc8_chars(buf: &Buffer, area: Rect, url: &str) -> String {
@@ -896,10 +1427,10 @@ mod tests {
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
                 let sym = buf[(x, y)].symbol();
-                if let Some(rest) = sym.strip_prefix(open.as_str())
-                    && let Some(ch) = rest.strip_suffix(close)
-                {
-                    chars.push_str(ch);
+                if let Some(rest) = sym.strip_prefix(open.as_str()) {
+                    if let Some(ch) = rest.strip_suffix(close) {
+                        chars.push_str(ch);
+                    }
                 }
             }
         }

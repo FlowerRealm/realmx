@@ -15,9 +15,9 @@ use codex_cloud_requirements::cloud_requirements_loader;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::INTERACTIVE_SESSION_SOURCES;
+use codex_core::ProviderCredentialMode;
 use codex_core::RolloutRecorder;
 use codex_core::ThreadSortKey;
-use codex_core::auth::AuthMode;
 use codex_core::auth::enforce_login_restrictions;
 use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::Config;
@@ -31,10 +31,12 @@ use codex_core::config_loader::ConfigLoadError;
 use codex_core::config_loader::LoaderOverrides;
 use codex_core::config_loader::format_config_error_with_source;
 use codex_core::default_client::set_default_client_residency_requirement;
+use codex_core::detect_provider_credential_mode;
 use codex_core::find_thread_path_by_id_str;
 use codex_core::find_thread_path_by_name_str;
 use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
+use codex_core::provider_login_capabilities;
 use codex_core::read_session_meta_line;
 use codex_core::state_db::get_state_db;
 use codex_core::terminal::Multiplexer;
@@ -1214,25 +1216,40 @@ fn determine_alt_screen_mode(no_alt_screen: bool, tui_alternate_screen: AltScree
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginStatus {
-    AuthMode(AuthMode),
+    AuthMode(ProviderCredentialMode),
     NotAuthenticated,
 }
 
 fn get_login_status(config: &Config) -> LoginStatus {
-    if config.model_provider.requires_openai_auth {
-        // Reading the OpenAI API key is an async operation because it may need
-        // to refresh the token. Block on it.
-        let codex_home = config.codex_home.clone();
-        match CodexAuth::from_auth_storage(&codex_home, config.cli_auth_credentials_store_mode) {
-            Ok(Some(auth)) => LoginStatus::AuthMode(auth.auth_mode()),
+    if !provider_login_capabilities(&config.model_provider_id, &config.model_provider)
+        .requires_auth()
+    {
+        LoginStatus::NotAuthenticated
+    } else {
+        let openai_auth = match CodexAuth::from_auth_storage(
+            &config.codex_home,
+            config.cli_auth_credentials_store_mode,
+        ) {
+            Ok(auth) => auth,
+            Err(err) => {
+                error!("Failed to read auth storage: {err}");
+                None
+            }
+        };
+        match detect_provider_credential_mode(
+            &config.codex_home,
+            &config.model_provider_id,
+            &config.model_provider,
+            openai_auth.as_ref(),
+            config.mcp_oauth_credentials_store_mode,
+        ) {
+            Ok(Some(mode)) => LoginStatus::AuthMode(mode),
             Ok(None) => LoginStatus::NotAuthenticated,
             Err(err) => {
-                error!("Failed to read auth.json: {err}");
+                error!("Failed to read provider credentials: {err}");
                 LoginStatus::NotAuthenticated
             }
         }
-    } else {
-        LoginStatus::NotAuthenticated
     }
 }
 
@@ -1291,9 +1308,9 @@ fn should_show_onboarding(
 }
 
 fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool {
-    // Only show the login screen for providers that actually require OpenAI auth
-    // (OpenAI or equivalents). For OSS/other providers, skip login entirely.
-    if !config.model_provider.requires_openai_auth {
+    if !provider_login_capabilities(&config.model_provider_id, &config.model_provider)
+        .requires_auth()
+    {
         return false;
     }
 

@@ -277,6 +277,9 @@ struct LoginCommand {
     #[clap(skip)]
     config_overrides: CliConfigOverrides,
 
+    #[arg(long = "provider", value_name = "PROVIDER_ID")]
+    provider: Option<String>,
+
     #[arg(
         long = "with-api-key",
         help = "Read the API key from stdin by piping it to this command"
@@ -317,6 +320,9 @@ enum LoginSubcommand {
 struct LogoutCommand {
     #[clap(skip)]
     config_overrides: CliConfigOverrides,
+
+    #[arg(long = "provider", value_name = "PROVIDER_ID")]
+    provider: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -742,12 +748,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             );
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
-                    run_login_status(login_cli.config_overrides).await;
+                    run_login_status(login_cli.config_overrides, login_cli.provider).await;
                 }
                 None => {
                     if login_cli.use_device_code {
                         run_login_with_device_code(
                             login_cli.config_overrides,
+                            login_cli.provider,
                             login_cli.issuer_base_url,
                             login_cli.client_id,
                         )
@@ -760,9 +767,15 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
                         let api_key = read_api_key_from_stdin();
-                        run_login_with_api_key(login_cli.config_overrides, api_key).await;
+                        run_login_with_api_key(
+                            login_cli.config_overrides,
+                            login_cli.provider,
+                            api_key,
+                        )
+                        .await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        run_login_with_chatgpt(login_cli.config_overrides, login_cli.provider)
+                            .await;
                     }
                 }
             }
@@ -773,7 +786,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 &mut logout_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            run_logout(logout_cli.config_overrides).await;
+            run_logout(logout_cli.config_overrides, logout_cli.provider).await;
         }
         Some(Subcommand::Completion(completion_cli)) => {
             reject_remote_mode_for_subcommand(root_remote.as_deref(), "completion")?;

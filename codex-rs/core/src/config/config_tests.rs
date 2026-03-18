@@ -4152,6 +4152,8 @@ model_verbosity = "high"
     let openai_custom_provider = ModelProviderInfo {
         name: "OpenAI custom".to_string(),
         base_url: Some("https://api.openai.com/v1".to_string()),
+        auth_strategy: crate::ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: Some("OPENAI_API_KEY".to_string()),
         wire_api: crate::WireApi::Responses,

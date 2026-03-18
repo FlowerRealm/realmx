@@ -33,6 +33,28 @@ const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer su
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderAuthStrategy {
+    #[default]
+    None,
+    OpenAi,
+    ApiKey,
+    OAuth,
+    OAuthOrApiKey,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ModelProviderOAuthConfig {
+    /// Optional URL used for OAuth discovery/login. Defaults to `base_url`.
+    pub url: Option<String>,
+    /// Optional OAuth scopes requested during generic provider login.
+    pub scopes: Option<Vec<String>>,
+    /// Optional OAuth resource parameter (RFC 8707).
+    pub oauth_resource: Option<String>,
+}
+
 /// Wire protocol that the provider speaks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -73,7 +95,15 @@ pub struct ModelProviderInfo {
     pub name: String,
     /// Base URL for the provider's OpenAI-compatible API.
     pub base_url: Option<String>,
+    /// Authentication strategy for this provider.
+    #[serde(default)]
+    pub auth_strategy: ModelProviderAuthStrategy,
+    /// Optional OAuth configuration for generic provider login.
+    pub oauth: Option<ModelProviderOAuthConfig>,
     /// API key stored directly in config.toml for this provider.
+    ///
+    /// Deprecated: legacy compatibility only. Runtime credentials should be
+    /// stored outside config and are automatically migrated on load.
     pub api_key: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
@@ -217,6 +247,86 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn inline_api_key(&self) -> Option<String> {
+        self.api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }
+
+    pub fn api_key_from_env(&self) -> crate::error::Result<Option<String>> {
+        match &self.env_key {
+            Some(env_key) => {
+                let api_key = std::env::var(env_key)
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .ok_or_else(|| {
+                        crate::error::CodexErr::EnvVar(EnvVarError {
+                            var: env_key.clone(),
+                            instructions: self.env_key_instructions.clone(),
+                        })
+                    })?;
+                Ok(Some(api_key))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn resolved_auth_strategy(&self) -> ModelProviderAuthStrategy {
+        if self.auth_strategy != ModelProviderAuthStrategy::None {
+            return self.auth_strategy;
+        }
+
+        if self.requires_openai_auth {
+            return ModelProviderAuthStrategy::OpenAi;
+        }
+
+        if self.inline_api_key().is_some() || self.env_key.is_some() {
+            return ModelProviderAuthStrategy::ApiKey;
+        }
+
+        ModelProviderAuthStrategy::None
+    }
+
+    pub fn uses_openai_auth(&self) -> bool {
+        self.resolved_auth_strategy() == ModelProviderAuthStrategy::OpenAi
+    }
+
+    pub fn supports_generic_api_key_auth(&self) -> bool {
+        matches!(
+            self.resolved_auth_strategy(),
+            ModelProviderAuthStrategy::ApiKey | ModelProviderAuthStrategy::OAuthOrApiKey
+        )
+    }
+
+    pub fn supports_generic_oauth_auth(&self) -> bool {
+        matches!(
+            self.resolved_auth_strategy(),
+            ModelProviderAuthStrategy::OAuth | ModelProviderAuthStrategy::OAuthOrApiKey
+        )
+    }
+
+    pub fn requires_auth(&self) -> bool {
+        !matches!(
+            self.resolved_auth_strategy(),
+            ModelProviderAuthStrategy::None
+        )
+    }
+
+    pub fn oauth_url(&self) -> Option<&str> {
+        self.oauth
+            .as_ref()
+            .and_then(|oauth| oauth.url.as_deref())
+            .or(self.base_url.as_deref())
+    }
+
+    pub fn sanitized_for_config_persistence(&self) -> Self {
+        let mut provider = self.clone();
+        provider.api_key = None;
+        provider
+    }
+
     /// Effective maximum number of request retries for this provider.
     pub fn request_max_retries(&self) -> u64 {
         self.request_max_retries
@@ -242,6 +352,8 @@ impl ModelProviderInfo {
         ModelProviderInfo {
             name: OPENAI_PROVIDER_NAME.into(),
             base_url,
+            auth_strategy: ModelProviderAuthStrategy::OpenAi,
+            oauth: None,
             api_key: None,
             env_key: None,
             env_key_instructions: None,
@@ -334,6 +446,8 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
     ModelProviderInfo {
         name: "gpt-oss".into(),
         base_url: Some(base_url.into()),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: None,
         env_key_instructions: None,

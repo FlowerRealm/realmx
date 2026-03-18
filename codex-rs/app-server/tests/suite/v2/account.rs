@@ -49,12 +49,16 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 struct CreateConfigTomlParams {
     forced_method: Option<String>,
     forced_workspace_id: Option<String>,
+    provider_id: Option<String>,
+    auth_strategy: Option<String>,
     requires_openai_auth: Option<bool>,
+    oauth_url: Option<String>,
     base_url: Option<String>,
 }
 
 fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
+    let provider_id = params.provider_id.unwrap_or_else(|| "openai".to_string());
     let base_url = params
         .base_url
         .unwrap_or_else(|| "http://127.0.0.1:0/v1".to_string());
@@ -68,10 +72,36 @@ fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std:
     } else {
         String::new()
     };
+    let auth_strategy_line = params
+        .auth_strategy
+        .map(|auth_strategy| format!("auth_strategy = \"{auth_strategy}\"\n"))
+        .unwrap_or_default();
     let requires_line = match params.requires_openai_auth {
-        Some(true) => "requires_openai_auth = true\n".to_string(),
-        Some(false) => String::new(),
-        None => String::new(),
+        Some(true) if provider_id != "openai" => "requires_openai_auth = true\n".to_string(),
+        Some(false) | Some(true) | None => String::new(),
+    };
+    let oauth_line = params
+        .oauth_url
+        .map(|oauth_url| format!("oauth = {{ url = \"{oauth_url}\" }}\n"))
+        .unwrap_or_default();
+    let openai_base_url_line = if provider_id == "openai" {
+        format!("openai_base_url = \"{base_url}\"\n")
+    } else {
+        String::new()
+    };
+    let provider_block = if provider_id == "openai" {
+        String::new()
+    } else {
+        format!(
+            r#"
+[model_providers.{provider_id}]
+name = "Mock provider for test"
+base_url = "{base_url}"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+{auth_strategy_line}{requires_line}{oauth_line}"#
+        )
     };
     let contents = format!(
         r#"
@@ -81,18 +111,13 @@ sandbox_mode = "danger-full-access"
 {forced_line}
 {forced_workspace_line}
 
-model_provider = "mock_provider"
+model_provider = "{provider_id}"
+{openai_base_url_line}
 
 [features]
 shell_snapshot = false
 
-[model_providers.mock_provider]
-name = "Mock provider for test"
-base_url = "{base_url}"
-wire_api = "responses"
-request_max_retries = 0
-stream_max_retries = 0
-{requires_line}
+{provider_block}
 "#
     );
     std::fs::write(config_toml, contents)
@@ -226,6 +251,9 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
                 plan_type: AccountPlanType::Pro,
             }),
             requires_openai_auth: true,
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 
@@ -293,6 +321,9 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
                 plan_type: AccountPlanType::Pro,
             }),
             requires_openai_auth: true,
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 
@@ -1151,6 +1182,9 @@ async fn get_account_with_api_key() -> Result<()> {
     let expected = GetAccountResponse {
         account: Some(Account::ApiKey {}),
         requires_openai_auth: true,
+        requires_auth: Some(true),
+        provider_id: Some("openai".to_string()),
+        provider_name: Some("OpenAI".to_string()),
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1162,6 +1196,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
             requires_openai_auth: Some(false),
             ..Default::default()
         },
@@ -1185,8 +1220,126 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     let expected = GetAccountResponse {
         account: None,
         requires_openai_auth: false,
+        requires_auth: Some(false),
+        provider_id: Some("mock_provider".to_string()),
+        provider_name: Some("Mock provider for test".to_string()),
     };
     assert_eq!(received, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
+            requires_openai_auth: Some(true),
+            oauth_url: Some("https://auth.example.test/oauth".to_string()),
+            ..Default::default()
+        },
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let login_request_id = mcp
+        .send_login_account_api_key_request("sk-test-key")
+        .await?;
+    let login_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(login_request_id)),
+    )
+    .await??;
+    let login: LoginAccountResponse = to_response(login_resp)?;
+    assert_eq!(login, LoginAccountResponse::ApiKey {});
+
+    let request_id = mcp
+        .send_get_account_request(GetAccountParams {
+            refresh_token: false,
+        })
+        .await?;
+    let resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    let received: GetAccountResponse = to_response(resp)?;
+
+    assert_eq!(
+        received,
+        GetAccountResponse {
+            account: Some(Account::ApiKey {}),
+            requires_openai_auth: false,
+            requires_auth: Some(true),
+            provider_id: Some("mock_provider".to_string()),
+            provider_name: Some("Mock provider for test".to_string()),
+        }
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_custom_provider_chatgpt_login_is_rejected() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
+            requires_openai_auth: Some(true),
+            oauth_url: Some("https://auth.example.test/oauth".to_string()),
+            ..Default::default()
+        },
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        err.error.message,
+        "provider `mock_provider` does not support ChatGPT login"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_custom_provider_oauth_login_is_rejected() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
+            requires_openai_auth: Some(true),
+            oauth_url: Some("https://auth.example.test/oauth".to_string()),
+            ..Default::default()
+        },
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp.send_login_account_oauth_request().await?;
+    let err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        err.error.message,
+        "provider `mock_provider` does not support OAuth login"
+    );
     Ok(())
 }
 
@@ -1229,6 +1382,9 @@ async fn get_account_with_chatgpt() -> Result<()> {
             plan_type: AccountPlanType::Pro,
         }),
         requires_openai_auth: true,
+        requires_auth: Some(true),
+        provider_id: Some("openai".to_string()),
+        provider_name: Some("OpenAI".to_string()),
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1271,6 +1427,9 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
             plan_type: AccountPlanType::Unknown,
         }),
         requires_openai_auth: true,
+        requires_auth: Some(true),
+        provider_id: Some("openai".to_string()),
+        provider_name: Some("OpenAI".to_string()),
     };
     assert_eq!(received, expected);
     Ok(())

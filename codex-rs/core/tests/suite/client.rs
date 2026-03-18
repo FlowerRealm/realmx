@@ -1,5 +1,6 @@
 use codex_core::CodexAuth;
 use codex_core::ModelClient;
+use codex_core::ModelProviderAuthStrategy;
 use codex_core::ModelProviderInfo;
 use codex_core::NewThread;
 use codex_core::Prompt;
@@ -1782,6 +1783,8 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     let provider = ModelProviderInfo {
         name: "azure".into(),
         base_url: Some(format!("{}/openai", server.uri())),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
         api_key: None,
         env_key: None,
         env_key_instructions: None,
@@ -1826,8 +1829,11 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
 
     let client = ModelClient::new(
         None,
+        config.codex_home.clone(),
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
+        config.mcp_oauth_credentials_store_mode,
         SessionSource::Exec,
         config.model_verbosity,
         false,
@@ -2377,6 +2383,8 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
     let provider = ModelProviderInfo {
         name: "custom".to_string(),
         base_url: Some(format!("{}/openai", server.uri())),
+        auth_strategy: ModelProviderAuthStrategy::ApiKey,
+        oauth: None,
         api_key: None,
         // Reuse the existing environment variable to avoid using unsafe code
         env_key: Some(existing_env_var_with_random_value.to_string()),
@@ -2462,6 +2470,8 @@ async fn env_var_overrides_loaded_auth() {
     let provider = ModelProviderInfo {
         name: "custom".to_string(),
         base_url: Some(format!("{}/openai", server.uri())),
+        auth_strategy: ModelProviderAuthStrategy::ApiKey,
+        oauth: None,
         api_key: None,
         // Reuse the existing environment variable to avoid using unsafe code
         env_key: Some(existing_env_var_with_random_value.to_string()),
