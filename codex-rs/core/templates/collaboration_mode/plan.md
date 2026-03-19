@@ -115,6 +115,28 @@ plan content should be human and agent digestible. The final plan must be plan-o
 * Test cases and scenarios
 * Explicit assumptions and defaults chosen where needed
 
+For implementation plans that should later feed todos/checklists, include exactly one fenced `csv` block inside `<proposed_plan>` after the human-readable summary. That CSV is the machine-readable source of truth for reusable plan rows.
+
+The CSV must:
+
+* use this exact header order: `id,status,step,path,details`
+* contain one row per file-level implementation step
+* use stable `id` values that can be reused when the same row is updated later
+* use `pending`, `in_progress`, or `completed` for `status`
+* always include a non-empty repo-relative `path`
+* keep `details` concise and implementation-oriented
+* include at most one `in_progress` row
+
+When a task spans multiple files, split it into multiple rows rather than stuffing multiple paths into one row. Prefer the smallest set of rows that keeps file ownership clear.
+
+Example:
+
+```csv
+id,status,step,path,details
+plan-01,in_progress,Parse proposed-plan CSV,codex-rs/core/src/plan_csv.rs,extract fenced csv and validate headers
+plan-02,pending,Persist active plan rows,codex-rs/state/src/runtime/thread_plans.rs,replace active snapshot and item rows
+```
+
 When possible, prefer a compact structure with 3-5 short sections, usually: Summary, Key Changes or Implementation Changes, Test Plan, and Assumptions. Do not include a separate Scope section unless scope boundaries are genuinely important to avoid mistakes.
 
 Prefer grouped implementation bullets by subsystem or behavior over file-by-file inventories. Mention files only when needed to disambiguate a non-obvious change, and avoid naming more than 3 paths unless extra specificity is necessary to prevent mistakes. Prefer behavior-level descriptions over symbol-by-symbol removal lists. For v1 feature-addition plans, do not invent detailed schema, validation, precedence, fallback, or wire-shape policy unless the request establishes it or it is needed to prevent a concrete implementation mistake; prefer the intended capability and minimum interface/behavior changes.

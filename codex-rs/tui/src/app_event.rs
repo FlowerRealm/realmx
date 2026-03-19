@@ -21,7 +21,6 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
-use serde::Deserialize;
 
 use crate::settings::data::SettingsScope;
 use crate::settings::data::SettingsScreen;

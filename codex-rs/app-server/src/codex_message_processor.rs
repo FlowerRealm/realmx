@@ -113,6 +113,8 @@ use codex_app_server_protocol::SkillsRemoteReadResponse;
 use codex_app_server_protocol::SkillsRemoteWriteParams;
 use codex_app_server_protocol::SkillsRemoteWriteResponse;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadActivePlan;
+use codex_app_server_protocol::ThreadActivePlanRow;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadArchivedNotification;
@@ -1418,15 +1420,15 @@ impl CodexMessageProcessor {
         login_id: Uuid,
     ) -> std::result::Result<CanceledLoginKind, CancelLoginError> {
         let mut guard = self.active_login.lock().await;
-        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
-            if let Some(active) = guard.take() {
-                let kind = match &active.kind {
-                    ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
-                    ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
-                };
-                drop(active);
-                return Ok(kind);
-            }
+        if guard.as_ref().map(|l| l.login_id) == Some(login_id)
+            && let Some(active) = guard.take()
+        {
+            let kind = match &active.kind {
+                ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
+                ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
+            };
+            drop(active);
+            return Ok(kind);
         }
         Err(CancelLoginError::NotFound)
     }
@@ -4160,6 +4162,54 @@ impl CodexMessageProcessor {
                 warn!("Failed to read thread name for {thread_id}: {err}");
             }
         }
+        thread.active_plan = self.active_plan_for_thread(thread_id).await;
+    }
+
+    async fn active_plan_for_thread(&self, thread_id: ThreadId) -> Option<ThreadActivePlan> {
+        let runtime = if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
+            if let Some(state_db) = thread.state_db() {
+                state_db
+            } else {
+                self.state_db_ctx_for_thread().await?
+            }
+        } else {
+            self.state_db_ctx_for_thread().await?
+        };
+        let active_plan = runtime
+            .get_active_thread_plan(thread_id.to_string().as_str())
+            .await
+            .ok()??;
+        Some(ThreadActivePlan {
+            snapshot_id: active_plan.snapshot.id,
+            source_turn_id: active_plan.snapshot.source_turn_id,
+            source_item_id: active_plan.snapshot.source_item_id,
+            raw_markdown: active_plan.snapshot.raw_markdown,
+            rows: active_plan
+                .items
+                .into_iter()
+                .map(|item| ThreadActivePlanRow {
+                    id: item.row_id,
+                    step: item.step,
+                    status: match item.status {
+                        codex_state::ThreadPlanItemStatus::Pending => {
+                            codex_app_server_protocol::TurnPlanStepStatus::Pending
+                        }
+                        codex_state::ThreadPlanItemStatus::InProgress => {
+                            codex_app_server_protocol::TurnPlanStepStatus::InProgress
+                        }
+                        codex_state::ThreadPlanItemStatus::Completed => {
+                            codex_app_server_protocol::TurnPlanStepStatus::Completed
+                        }
+                    },
+                    path: item.path,
+                    details: item.details,
+                })
+                .collect(),
+        })
+    }
+
+    async fn state_db_ctx_for_thread(&self) -> Option<StateDbHandle> {
+        get_state_db(&self.config).await
     }
 
     async fn thread_fork(&mut self, request_id: ConnectionRequestId, params: ThreadForkParams) {
@@ -8453,6 +8503,7 @@ fn build_thread_from_snapshot(
         git_info: None,
         name: None,
         turns: Vec::new(),
+        active_plan: None,
     }
 }
 
@@ -8495,6 +8546,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         git_info,
         name: None,
         turns: Vec::new(),
+        active_plan: None,
     }
 }
 

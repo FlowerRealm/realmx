@@ -15,8 +15,14 @@ pub enum StepStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct PlanItemArg {
+    #[serde(default)]
+    pub id: Option<String>,
     pub step: String,
     pub status: StepStatus,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub details: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

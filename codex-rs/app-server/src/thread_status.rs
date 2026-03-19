@@ -803,6 +803,7 @@ mod tests {
             git_info: None,
             name: None,
             turns: Vec::new(),
+            active_plan: None,
         }
     }
 }

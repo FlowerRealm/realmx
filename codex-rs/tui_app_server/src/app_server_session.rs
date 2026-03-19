@@ -863,7 +863,7 @@ fn started_thread_from_resume_response(
         session_configured: SessionConfiguredEvent {
             initial_messages: thread_initial_messages(
                 &session_configured.session_id,
-                &response.thread.turns,
+                &response.thread,
                 show_raw_agent_reasoning,
             ),
             ..session_configured
@@ -881,7 +881,7 @@ fn started_thread_from_fork_response(
         session_configured: SessionConfiguredEvent {
             initial_messages: thread_initial_messages(
                 &session_configured.session_id,
-                &response.thread.turns,
+                &response.thread,
                 show_raw_agent_reasoning,
             ),
             ..session_configured
@@ -1004,13 +1004,47 @@ fn session_configured_from_thread_response(
 
 fn thread_initial_messages(
     thread_id: &ThreadId,
-    turns: &[codex_app_server_protocol::Turn],
+    thread: &codex_app_server_protocol::Thread,
     show_raw_agent_reasoning: bool,
 ) -> Option<Vec<EventMsg>> {
-    let events: Vec<EventMsg> = turns
-        .iter()
-        .flat_map(|turn| turn_initial_messages(thread_id, turn, show_raw_agent_reasoning))
-        .collect();
+    let mut events: Vec<EventMsg> = thread
+        .active_plan
+        .as_ref()
+        .map(|active_plan| {
+            vec![EventMsg::PlanUpdate(
+                codex_protocol::plan_tool::UpdatePlanArgs {
+                    explanation: Some("Restored active plan".to_string()),
+                    plan: active_plan
+                        .rows
+                        .iter()
+                        .map(|row| codex_protocol::plan_tool::PlanItemArg {
+                            id: Some(row.id.clone()),
+                            step: row.step.clone(),
+                            status: match row.status {
+                                codex_app_server_protocol::TurnPlanStepStatus::Pending => {
+                                    codex_protocol::plan_tool::StepStatus::Pending
+                                }
+                                codex_app_server_protocol::TurnPlanStepStatus::InProgress => {
+                                    codex_protocol::plan_tool::StepStatus::InProgress
+                                }
+                                codex_app_server_protocol::TurnPlanStepStatus::Completed => {
+                                    codex_protocol::plan_tool::StepStatus::Completed
+                                }
+                            },
+                            path: Some(row.path.clone()),
+                            details: (!row.details.is_empty()).then_some(row.details.clone()),
+                        })
+                        .collect(),
+                },
+            )]
+        })
+        .unwrap_or_default();
+    events.extend(
+        thread
+            .turns
+            .iter()
+            .flat_map(|turn| turn_initial_messages(thread_id, turn, show_raw_agent_reasoning)),
+    );
     (!events.is_empty()).then_some(events)
 }
 
@@ -1252,6 +1286,7 @@ mod tests {
                     status: TurnStatus::Completed,
                     error: None,
                 }],
+                active_plan: None,
             },
             model: "gpt-5.4".to_string(),
             model_provider: "openai".to_string(),

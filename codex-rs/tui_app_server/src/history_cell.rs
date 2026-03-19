@@ -2214,7 +2214,14 @@ impl HistoryCell for PlanUpdateCell {
             out
         };
 
-        let render_step = |status: &StepStatus, text: &str| -> Vec<Line<'static>> {
+        let render_step = |item: &PlanItemArg| -> Vec<Line<'static>> {
+            let PlanItemArg {
+                step,
+                status,
+                path,
+                details,
+                ..
+            } = item;
             let (box_str, step_style) = match status {
                 StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
                 StepStatus::InProgress => ("□ ", Style::default().cyan().bold()),
@@ -2224,8 +2231,21 @@ impl HistoryCell for PlanUpdateCell {
             let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
                 .initial_indent(box_str.into())
                 .subsequent_indent("  ".into());
-            let step = Line::from(text.to_string().set_style(step_style));
-            let wrapped = adaptive_wrap_line(&step, opts);
+            let mut text = step.clone();
+            if let Some(path) = path.as_ref().filter(|path| !path.trim().is_empty()) {
+                text.push_str(" (");
+                text.push_str(path);
+                text.push(')');
+            }
+            if let Some(details) = details
+                .as_ref()
+                .filter(|details| !details.trim().is_empty())
+            {
+                text.push_str(": ");
+                text.push_str(details);
+            }
+            let line = Line::from(text.set_style(step_style));
+            let wrapped = adaptive_wrap_line(&line, opts);
             let mut out = Vec::new();
             push_owned_lines(&wrapped, &mut out);
             out
@@ -2247,8 +2267,8 @@ impl HistoryCell for PlanUpdateCell {
         if self.plan.is_empty() {
             indented_lines.push(Line::from("(no steps provided)".dim().italic()));
         } else {
-            for PlanItemArg { step, status } in self.plan.iter() {
-                indented_lines.extend(render_step(status, step));
+            for item in &self.plan {
+                indented_lines.extend(render_step(item));
             }
         }
         lines.extend(prefix_lines(indented_lines, "  └ ".dim(), "    ".into()));
@@ -4029,16 +4049,25 @@ mod tests {
             ),
             plan: vec![
                 PlanItemArg {
+                    id: None,
                     step: "Investigate existing error paths and logging around HTTP timeouts".into(),
                     status: StepStatus::Completed,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "Harden Grafana client error handling with retry/backoff and user‑friendly messages".into(),
                     status: StepStatus::InProgress,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "Add tests for transient failure scenarios and surfacing to the UI".into(),
                     status: StepStatus::Pending,
+                    path: None,
+                    details: None,
                 },
             ],
         };
@@ -4056,12 +4085,18 @@ mod tests {
             explanation: None,
             plan: vec![
                 PlanItemArg {
+                    id: None,
                     step: "Define error taxonomy".into(),
                     status: StepStatus::InProgress,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "Implement mapping to user messages".into(),
                     status: StepStatus::Pending,
+                    path: None,
+                    details: None,
                 },
             ],
         };
@@ -4082,8 +4117,11 @@ mod tests {
                 "Investigate failures under {note_url} immediately."
             )),
             plan: vec![PlanItemArg {
+                id: None,
                 step: format!("Validate callbacks under {step_url} before rollout."),
                 status: StepStatus::InProgress,
+                path: None,
+                details: None,
             }],
         };
 

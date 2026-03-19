@@ -244,12 +244,18 @@ fn plan_update_emits_todo_list_started_updated_and_completed() {
             explanation: None,
             plan: vec![
                 PlanItemArg {
+                    id: None,
                     step: "step one".to_string(),
                     status: StepStatus::Pending,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "step two".to_string(),
                     status: StepStatus::InProgress,
+                    path: None,
+                    details: None,
                 },
             ],
         }),
@@ -283,12 +289,18 @@ fn plan_update_emits_todo_list_started_updated_and_completed() {
             explanation: None,
             plan: vec![
                 PlanItemArg {
+                    id: None,
                     step: "step one".to_string(),
                     status: StepStatus::Completed,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "step two".to_string(),
                     status: StepStatus::InProgress,
+                    path: None,
+                    details: None,
                 },
             ],
         }),
@@ -685,8 +697,11 @@ fn plan_update_after_complete_starts_new_todo_list_with_new_id() {
         EventMsg::PlanUpdate(UpdatePlanArgs {
             explanation: None,
             plan: vec![PlanItemArg {
+                id: None,
                 step: "only".to_string(),
                 status: StepStatus::Pending,
+                path: None,
+                details: None,
             }],
         }),
     );
@@ -706,8 +721,11 @@ fn plan_update_after_complete_starts_new_todo_list_with_new_id() {
         EventMsg::PlanUpdate(UpdatePlanArgs {
             explanation: None,
             plan: vec![PlanItemArg {
+                id: None,
                 step: "again".to_string(),
                 status: StepStatus::Pending,
+                path: None,
+                details: None,
             }],
         }),
     );

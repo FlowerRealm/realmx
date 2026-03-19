@@ -3,6 +3,7 @@ use crate::client_common::tools::ToolSpec;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::function_tool::FunctionCallError;
+use crate::plan_csv::update_plan_from_thread_plan_items;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -19,11 +20,29 @@ pub struct PlanHandler;
 
 pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
     let mut plan_item_props = BTreeMap::new();
+    plan_item_props.insert(
+        "id".to_string(),
+        JsonSchema::String {
+            description: Some("Stable row id for reusing an existing active plan item".to_string()),
+        },
+    );
     plan_item_props.insert("step".to_string(), JsonSchema::String { description: None });
     plan_item_props.insert(
         "status".to_string(),
         JsonSchema::String {
             description: Some("One of: pending, in_progress, completed".to_string()),
+        },
+    );
+    plan_item_props.insert(
+        "path".to_string(),
+        JsonSchema::String {
+            description: Some("Repo path owned by this plan row".to_string()),
+        },
+    );
+    plan_item_props.insert(
+        "details".to_string(),
+        JsonSchema::String {
+            description: Some("Optional implementation notes for this row".to_string()),
         },
     );
 
@@ -46,7 +65,8 @@ pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
     ToolSpec::Function(ResponsesApiTool {
         name: "update_plan".to_string(),
         description: r#"Updates the task plan.
-Provide an optional explanation and a list of plan items, each with a step and status.
+Provide an optional explanation and a list of plan items.
+Each item must include step and status, and may also include id/path/details.
 At most one step can be in_progress at a time.
 "#
         .to_string(),
@@ -110,6 +130,12 @@ pub(crate) async fn handle_update_plan(
         ));
     }
     let args = parse_update_plan_arguments(&arguments)?;
+    if let Some(active_plan) = try_update_active_thread_plan(session, &args).await? {
+        session
+            .send_event(turn_context, EventMsg::PlanUpdate(active_plan))
+            .await;
+        return Ok("Plan updated".to_string());
+    }
     session
         .send_event(turn_context, EventMsg::PlanUpdate(args))
         .await;
@@ -120,4 +146,69 @@ fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, Functi
     serde_json::from_str::<UpdatePlanArgs>(arguments).map_err(|e| {
         FunctionCallError::RespondToModel(format!("failed to parse function arguments: {e}"))
     })
+}
+
+async fn try_update_active_thread_plan(
+    session: &Session,
+    args: &UpdatePlanArgs,
+) -> Result<Option<UpdatePlanArgs>, FunctionCallError> {
+    let Some(state_db) = session.state_db() else {
+        return Ok(None);
+    };
+    let thread_id = session.conversation_id.to_string();
+    let Some(active_plan) = state_db
+        .get_active_thread_plan(thread_id.as_str())
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("failed to load active thread plan: {err}"))
+        })?
+    else {
+        return Ok(None);
+    };
+
+    let mut updated = false;
+    for item in &args.plan {
+        let Some(row_id) = item.id.as_deref() else {
+            continue;
+        };
+        state_db
+            .update_active_thread_plan_item_status(
+                thread_id.as_str(),
+                row_id,
+                match item.status {
+                    codex_protocol::plan_tool::StepStatus::Pending => {
+                        codex_state::ThreadPlanItemStatus::Pending
+                    }
+                    codex_protocol::plan_tool::StepStatus::InProgress => {
+                        codex_state::ThreadPlanItemStatus::InProgress
+                    }
+                    codex_protocol::plan_tool::StepStatus::Completed => {
+                        codex_state::ThreadPlanItemStatus::Completed
+                    }
+                },
+            )
+            .await
+            .map_err(|err| {
+                FunctionCallError::RespondToModel(format!(
+                    "failed to update active thread plan row {row_id}: {err}"
+                ))
+            })?;
+        updated = true;
+    }
+    if !updated {
+        return Ok(None);
+    }
+    let refreshed = state_db
+        .get_active_thread_plan(thread_id.as_str())
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to refresh active thread plan: {err}"
+            ))
+        })?
+        .unwrap_or(active_plan);
+    Ok(Some(update_plan_from_thread_plan_items(
+        refreshed.items.as_slice(),
+        args.explanation.clone(),
+    )))
 }

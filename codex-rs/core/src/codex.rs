@@ -221,6 +221,8 @@ use crate::mentions::collect_explicit_app_ids;
 use crate::mentions::collect_explicit_plugin_mentions;
 use crate::mentions::collect_tool_mentions_from_messages;
 use crate::network_policy_decision::execpolicy_network_rule_amendment;
+use crate::plan_csv::parse_plan_csv;
+use crate::plan_csv::update_plan_from_thread_plan_items;
 use crate::plugins::PluginsManager;
 use crate::plugins::build_plugin_injections;
 use crate::plugins::render_plugins_section;
@@ -2701,6 +2703,13 @@ impl Session {
         turn_context: &TurnContext,
         item: TurnItem,
     ) {
+        if let TurnItem::Plan(plan_item) = &item
+            && let Err(err) = self
+                .persist_active_thread_plan(turn_context, plan_item)
+                .await
+        {
+            warn!("failed to persist active thread plan: {err}");
+        }
         record_turn_ttfm_metric(turn_context, &item).await;
         self.send_event(
             turn_context,
@@ -2711,6 +2720,38 @@ impl Session {
             }),
         )
         .await;
+    }
+
+    async fn persist_active_thread_plan(
+        &self,
+        turn_context: &TurnContext,
+        plan_item: &PlanItem,
+    ) -> anyhow::Result<()> {
+        let Some(state_db) = self.state_db() else {
+            return Ok(());
+        };
+        let rows = parse_plan_csv(plan_item.text.as_str())?;
+        let active_plan = state_db
+            .replace_active_thread_plan(
+                &codex_state::ThreadPlanSnapshotCreateParams {
+                    id: Uuid::new_v4().to_string(),
+                    thread_id: self.conversation_id.to_string(),
+                    source_turn_id: turn_context.sub_id.clone(),
+                    source_item_id: plan_item.id.clone(),
+                    raw_markdown: plan_item.text.clone(),
+                },
+                rows.as_slice(),
+            )
+            .await?;
+        self.send_event(
+            turn_context,
+            EventMsg::PlanUpdate(update_plan_from_thread_plan_items(
+                active_plan.items.as_slice(),
+                Some("Imported from proposed plan CSV".to_string()),
+            )),
+        )
+        .await;
+        Ok(())
     }
 
     /// Adds an execpolicy amendment to both the in-memory and on-disk policies so future

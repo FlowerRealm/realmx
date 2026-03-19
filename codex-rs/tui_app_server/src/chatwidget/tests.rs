@@ -3095,8 +3095,11 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
     chat.on_plan_update(UpdatePlanArgs {
         explanation: None,
         plan: vec![PlanItemArg {
+            id: None,
             step: "First".to_string(),
             status: StepStatus::Pending,
+            path: None,
+            details: None,
         }],
     });
     chat.on_task_complete(None, false);
@@ -3227,8 +3230,11 @@ async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
     chat.on_plan_update(UpdatePlanArgs {
         explanation: None,
         plan: vec![PlanItemArg {
+            id: None,
             step: "First".to_string(),
             status: StepStatus::Pending,
+            path: None,
+            details: None,
         }],
     });
     chat.on_rate_limit_snapshot(Some(snapshot(92.0)));
@@ -10115,16 +10121,25 @@ async fn plan_update_renders_history_cell() {
         explanation: Some("Adapting plan".to_string()),
         plan: vec![
             PlanItemArg {
+                id: None,
                 step: "Explore codebase".into(),
                 status: StepStatus::Completed,
+                path: None,
+                details: None,
             },
             PlanItemArg {
+                id: None,
                 step: "Implement feature".into(),
                 status: StepStatus::InProgress,
+                path: None,
+                details: None,
             },
             PlanItemArg {
+                id: None,
                 step: "Write tests".into(),
                 status: StepStatus::Pending,
+                path: None,
+                details: None,
             },
         ],
     };

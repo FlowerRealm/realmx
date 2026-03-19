@@ -24,6 +24,7 @@ pub use runtime::StateRuntime;
 /// Most consumers should prefer [`StateRuntime`].
 pub use extract::apply_rollout_item;
 pub use extract::rollout_item_affects_thread_metadata;
+pub use model::ActiveThreadPlan;
 pub use model::AgentJob;
 pub use model::AgentJobCreateParams;
 pub use model::AgentJobItem;
@@ -44,6 +45,11 @@ pub use model::Stage1OutputRef;
 pub use model::Stage1StartupClaimParams;
 pub use model::ThreadMetadata;
 pub use model::ThreadMetadataBuilder;
+pub use model::ThreadPlanItem;
+pub use model::ThreadPlanItemCreateParams;
+pub use model::ThreadPlanItemStatus;
+pub use model::ThreadPlanSnapshot;
+pub use model::ThreadPlanSnapshotCreateParams;
 pub use model::ThreadsPage;
 pub use runtime::logs_db_filename;
 pub use runtime::logs_db_path;
@@ -56,7 +62,7 @@ pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";
 pub const LOGS_DB_FILENAME: &str = "logs";
 pub const LOGS_DB_VERSION: u32 = 1;
 pub const STATE_DB_FILENAME: &str = "state";
-pub const STATE_DB_VERSION: u32 = 5;
+pub const STATE_DB_VERSION: u32 = 6;
 
 /// Errors encountered during DB operations. Tags: [stage]
 pub const DB_ERROR_METRIC: &str = "codex.db.error";

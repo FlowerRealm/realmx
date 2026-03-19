@@ -3305,12 +3305,18 @@ mod tests {
             explanation: Some("need plan".to_string()),
             plan: vec![
                 PlanItemArg {
+                    id: None,
                     step: "first".to_string(),
                     status: StepStatus::Pending,
+                    path: None,
+                    details: None,
                 },
                 PlanItemArg {
+                    id: None,
                     step: "second".to_string(),
                     status: StepStatus::Completed,
+                    path: None,
+                    details: None,
                 },
             ],
         };
