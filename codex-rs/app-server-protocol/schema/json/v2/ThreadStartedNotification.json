@@ -641,6 +641,16 @@
     },
     "Thread": {
       "properties": {
+        "activePlan": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivePlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "agentNickname": {
           "description": "Optional random unique nickname assigned to an AgentControl-spawned sub-agent.",
           "type": [
@@ -758,6 +768,90 @@
         "waitingOnUserInput"
       ],
       "type": "string"
+    },
+    "ThreadActivePlan": {
+      "properties": {
+        "rawMarkdown": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/definitions/ThreadActivePlanRow"
+          },
+          "type": "array"
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "sourceItemId": {
+          "type": "string"
+        },
+        "sourceTurnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rawMarkdown",
+        "rows",
+        "snapshotId",
+        "sourceItemId",
+        "sourceTurnId"
+      ],
+      "type": "object"
+    },
+    "ThreadActivePlanRow": {
+      "properties": {
+        "acceptance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dependsOn": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "details": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TurnPlanStepStatus"
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dependsOn",
+        "details",
+        "id",
+        "inputs",
+        "outputs",
+        "path",
+        "status",
+        "step"
+      ],
+      "type": "object"
     },
     "ThreadId": {
       "type": "string"
@@ -1486,6 +1580,14 @@
         "message"
       ],
       "type": "object"
+    },
+    "TurnPlanStepStatus": {
+      "enum": [
+        "pending",
+        "inProgress",
+        "completed"
+      ],
+      "type": "string"
     },
     "TurnStatus": {
       "enum": [

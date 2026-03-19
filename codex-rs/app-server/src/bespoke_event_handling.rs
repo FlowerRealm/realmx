@@ -3305,18 +3305,26 @@ mod tests {
             explanation: Some("need plan".to_string()),
             plan: vec![
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-01".to_string()),
                     step: "first".to_string(),
                     status: StepStatus::Pending,
                     path: None,
                     details: None,
+                    inputs: Some(vec!["prompt".to_string()]),
+                    outputs: Some(vec!["draft plan".to_string()]),
+                    depends_on: None,
+                    acceptance: Some("draft exists".to_string()),
                 },
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-02".to_string()),
                     step: "second".to_string(),
                     status: StepStatus::Completed,
                     path: None,
                     details: None,
+                    inputs: Some(vec!["draft plan".to_string()]),
+                    outputs: Some(vec!["final plan".to_string()]),
+                    depends_on: Some(vec!["plan-01".to_string()]),
+                    acceptance: Some("final plan emitted".to_string()),
                 },
             ],
         };
@@ -3341,8 +3349,11 @@ mod tests {
                 assert_eq!(n.plan.len(), 2);
                 assert_eq!(n.plan[0].step, "first");
                 assert_eq!(n.plan[0].status, TurnPlanStepStatus::Pending);
+                assert_eq!(n.plan[0].inputs, Some(vec!["prompt".to_string()]));
+                assert_eq!(n.plan[0].acceptance.as_deref(), Some("draft exists"));
                 assert_eq!(n.plan[1].step, "second");
                 assert_eq!(n.plan[1].status, TurnPlanStepStatus::Completed);
+                assert_eq!(n.plan[1].depends_on, Some(vec!["plan-01".to_string()]));
             }
             other => bail!("unexpected message: {other:?}"),
         }

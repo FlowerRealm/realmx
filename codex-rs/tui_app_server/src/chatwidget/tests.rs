@@ -3100,6 +3100,10 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
             status: StepStatus::Pending,
             path: None,
             details: None,
+            inputs: None,
+            outputs: None,
+            depends_on: None,
+            acceptance: None,
         }],
     });
     chat.on_task_complete(None, false);
@@ -3235,6 +3239,10 @@ async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
             status: StepStatus::Pending,
             path: None,
             details: None,
+            inputs: None,
+            outputs: None,
+            depends_on: None,
+            acceptance: None,
         }],
     });
     chat.on_rate_limit_snapshot(Some(snapshot(92.0)));
@@ -10126,6 +10134,10 @@ async fn plan_update_renders_history_cell() {
                 status: StepStatus::Completed,
                 path: None,
                 details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
             PlanItemArg {
                 id: None,
@@ -10133,6 +10145,10 @@ async fn plan_update_renders_history_cell() {
                 status: StepStatus::InProgress,
                 path: None,
                 details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
             PlanItemArg {
                 id: None,
@@ -10140,6 +10156,10 @@ async fn plan_update_renders_history_cell() {
                 status: StepStatus::Pending,
                 path: None,
                 details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
         ],
     };

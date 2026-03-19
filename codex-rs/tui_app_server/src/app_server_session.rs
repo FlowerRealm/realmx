@@ -1033,6 +1033,11 @@ fn thread_initial_messages(
                             },
                             path: Some(row.path.clone()),
                             details: (!row.details.is_empty()).then_some(row.details.clone()),
+                            inputs: (!row.inputs.is_empty()).then_some(row.inputs.clone()),
+                            outputs: (!row.outputs.is_empty()).then_some(row.outputs.clone()),
+                            depends_on: (!row.depends_on.is_empty())
+                                .then_some(row.depends_on.clone()),
+                            acceptance: row.acceptance.clone(),
                         })
                         .collect(),
                 },

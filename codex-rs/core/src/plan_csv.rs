@@ -8,6 +8,18 @@ use std::collections::HashSet;
 
 const CSV_OPEN_FENCE: &str = "```csv";
 const CSV_CLOSE_FENCE: &str = "```";
+const LEGACY_HEADERS: [&str; 5] = ["id", "status", "step", "path", "details"];
+const STRUCTURED_HEADERS: [&str; 9] = [
+    "id",
+    "status",
+    "step",
+    "path",
+    "details",
+    "inputs",
+    "outputs",
+    "depends_on",
+    "acceptance",
+];
 
 pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
     let csv = extract_csv_block(markdown)?;
@@ -16,14 +28,19 @@ pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanIte
         .flexible(false)
         .from_reader(csv.as_bytes());
     let headers = reader.headers()?;
-    let expected_headers = ["id", "status", "step", "path", "details"];
-    if headers.iter().collect::<Vec<_>>() != expected_headers {
-        let found = headers.iter().collect::<Vec<_>>().join(",");
-        let expected = expected_headers.join(",");
+    let headers = headers.iter().collect::<Vec<_>>();
+    let format = if headers == LEGACY_HEADERS {
+        PlanCsvFormat::Legacy
+    } else if headers == STRUCTURED_HEADERS {
+        PlanCsvFormat::Structured
+    } else {
+        let found = headers.join(",");
+        let expected = STRUCTURED_HEADERS.join(",");
         return Err(anyhow::anyhow!(
-            "plan csv headers must be {expected}; found {found}"
+            "plan csv headers must be {expected} or {}; found {found}",
+            LEGACY_HEADERS.join(",")
         ));
-    }
+    };
 
     let mut rows = Vec::new();
     let mut seen_ids = HashSet::new();
@@ -54,6 +71,10 @@ pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanIte
             return Err(anyhow::anyhow!("plan csv row {row_id} is missing path"));
         }
         let details = record.get(4).unwrap_or_default().trim().to_string();
+        let inputs = format.parse_list(&record, 5);
+        let outputs = format.parse_list(&record, 6);
+        let depends_on = format.parse_list(&record, 7);
+        let acceptance = format.parse_optional_string(&record, 8);
         rows.push(ThreadPlanItemCreateParams {
             row_id,
             row_index: index as i64,
@@ -61,6 +82,10 @@ pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanIte
             step,
             path,
             details,
+            inputs,
+            outputs,
+            depends_on,
+            acceptance,
         });
     }
     if rows.is_empty() {
@@ -73,6 +98,7 @@ pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanIte
             "plan csv may include at most one in_progress row"
         ));
     }
+    validate_dependencies(rows.as_slice())?;
     Ok(rows)
 }
 
@@ -90,6 +116,10 @@ pub(crate) fn update_plan_from_thread_plan_items(
                 status: thread_plan_status_to_step_status(item.status),
                 path: Some(item.path.clone()),
                 details: (!item.details.is_empty()).then_some(item.details.clone()),
+                inputs: (!item.inputs.is_empty()).then_some(item.inputs.clone()),
+                outputs: (!item.outputs.is_empty()).then_some(item.outputs.clone()),
+                depends_on: (!item.depends_on.is_empty()).then_some(item.depends_on.clone()),
+                acceptance: item.acceptance.clone(),
             })
             .collect(),
     }
@@ -132,6 +162,63 @@ fn thread_plan_status_to_step_status(status: ThreadPlanItemStatus) -> StepStatus
     }
 }
 
+#[derive(Clone, Copy)]
+enum PlanCsvFormat {
+    Legacy,
+    Structured,
+}
+
+impl PlanCsvFormat {
+    fn parse_list(self, record: &csv::StringRecord, index: usize) -> Vec<String> {
+        if matches!(self, Self::Legacy) {
+            return Vec::new();
+        }
+        split_pipe_list(record.get(index).unwrap_or_default())
+    }
+
+    fn parse_optional_string(self, record: &csv::StringRecord, index: usize) -> Option<String> {
+        if matches!(self, Self::Legacy) {
+            return None;
+        }
+        let value = record.get(index).unwrap_or_default().trim();
+        (!value.is_empty()).then_some(value.to_string())
+    }
+}
+
+fn split_pipe_list(value: &str) -> Vec<String> {
+    value
+        .split('|')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn validate_dependencies(rows: &[ThreadPlanItemCreateParams]) -> anyhow::Result<()> {
+    let ids = rows
+        .iter()
+        .map(|row| row.row_id.as_str())
+        .collect::<HashSet<_>>();
+    for row in rows {
+        for dependency in &row.depends_on {
+            if dependency == &row.row_id {
+                return Err(anyhow::anyhow!(
+                    "plan csv row {} cannot depend on itself",
+                    row.row_id
+                ));
+            }
+            if !ids.contains(dependency.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "plan csv row {} depends on unknown id: {}",
+                    row.row_id,
+                    dependency
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_plan_csv;
@@ -153,6 +240,7 @@ plan-02,pending,Touch tui,codex-rs/tui/src/chatwidget.rs,
         assert_eq!(rows[0].row_id, "plan-01");
         assert_eq!(rows[0].path, "codex-rs/state/src/runtime.rs");
         assert_eq!(rows[1].details, "");
+        assert!(rows[0].inputs.is_empty());
     }
 
     #[test]
@@ -180,6 +268,58 @@ plan-02,in_progress,Touch tui,codex-rs/tui/src/chatwidget.rs,second row
         assert_eq!(
             err.to_string(),
             "plan csv may include at most one in_progress row"
+        );
+    }
+
+    #[test]
+    fn parses_structured_rows() {
+        let markdown = r#"
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows,plan markdown|csv body,thread plan rows,,rows persist
+plan-02,pending,Sync protocol,codex-rs/protocol/src/plan_tool.rs,add fields,thread plan rows,protocol rows,plan-01,notifications include fields
+```
+"#;
+        let rows = parse_plan_csv(markdown).expect("structured csv should parse");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].inputs,
+            vec!["plan markdown".to_string(), "csv body".to_string()]
+        );
+        assert_eq!(rows[1].depends_on, vec!["plan-01".to_string()]);
+        assert_eq!(
+            rows[1].acceptance.as_deref(),
+            Some("notifications include fields")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_dependency() {
+        let markdown = r#"
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,,,,plan-99,
+```
+"#;
+        let err = parse_plan_csv(markdown).expect_err("unknown dependency should fail");
+        assert_eq!(
+            err.to_string(),
+            "plan csv row plan-01 depends on unknown id: plan-99"
+        );
+    }
+
+    #[test]
+    fn rejects_self_dependency() {
+        let markdown = r#"
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,,,,plan-01,
+```
+"#;
+        let err = parse_plan_csv(markdown).expect_err("self dependency should fail");
+        assert_eq!(
+            err.to_string(),
+            "plan csv row plan-01 cannot depend on itself"
         );
     }
 }

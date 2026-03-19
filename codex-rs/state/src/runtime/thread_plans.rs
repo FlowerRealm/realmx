@@ -64,10 +64,14 @@ INSERT INTO thread_plan_items (
     step,
     path,
     details,
+    inputs,
+    outputs,
+    depends_on,
+    acceptance,
     created_at,
     updated_at,
     completed_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(snapshot.id.as_str())
@@ -77,6 +81,10 @@ INSERT INTO thread_plan_items (
             .bind(item.step.as_str())
             .bind(item.path.as_str())
             .bind(item.details.as_str())
+            .bind(string_list_json(item.inputs.as_slice()))
+            .bind(string_list_json(item.outputs.as_slice()))
+            .bind(string_list_json(item.depends_on.as_slice()))
+            .bind(item.acceptance.as_deref())
             .bind(now)
             .bind(now)
             .bind(completed_at)
@@ -129,6 +137,10 @@ SELECT
     step,
     path,
     details,
+    inputs,
+    outputs,
+    depends_on,
+    acceptance,
     created_at,
     updated_at,
     completed_at
@@ -211,6 +223,10 @@ mod tests {
                 step: "Persist plan".to_string(),
                 path: "codex-rs/state/src/runtime/thread_plans.rs".to_string(),
                 details: "write active snapshot".to_string(),
+                inputs: vec!["plan markdown".to_string()],
+                outputs: vec!["active plan rows".to_string()],
+                depends_on: Vec::new(),
+                acceptance: Some("active plan reloads".to_string()),
             },
             ThreadPlanItemCreateParams {
                 row_id: "plan-02".to_string(),
@@ -219,6 +235,10 @@ mod tests {
                 step: "Render plan".to_string(),
                 path: "codex-rs/tui/src/history_cell.rs".to_string(),
                 details: String::new(),
+                inputs: vec!["active plan rows".to_string()],
+                outputs: vec!["history cell update".to_string()],
+                depends_on: vec!["plan-01".to_string()],
+                acceptance: None,
             },
         ];
 
@@ -230,6 +250,8 @@ mod tests {
         assert_eq!(created.items.len(), 2);
         assert_eq!(created.items[0].row_id, "plan-01");
         assert_eq!(created.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(created.items[0].inputs, vec!["plan markdown".to_string()]);
+        assert_eq!(created.items[1].depends_on, vec!["plan-01".to_string()]);
 
         let loaded = runtime
             .get_active_thread_plan(thread_id)
@@ -253,4 +275,8 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }
+}
+
+fn string_list_json(values: &[String]) -> String {
+    serde_json::to_string(values).expect("thread plan string list should serialize")
 }

@@ -45,6 +45,33 @@ pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
             description: Some("Optional implementation notes for this row".to_string()),
         },
     );
+    plan_item_props.insert(
+        "inputs".to_string(),
+        JsonSchema::Array {
+            description: Some("Optional structured inputs consumed by this row".to_string()),
+            items: Box::new(JsonSchema::String { description: None }),
+        },
+    );
+    plan_item_props.insert(
+        "outputs".to_string(),
+        JsonSchema::Array {
+            description: Some("Optional structured outputs produced by this row".to_string()),
+            items: Box::new(JsonSchema::String { description: None }),
+        },
+    );
+    plan_item_props.insert(
+        "depends_on".to_string(),
+        JsonSchema::Array {
+            description: Some("Optional row ids that must complete before this row".to_string()),
+            items: Box::new(JsonSchema::String { description: None }),
+        },
+    );
+    plan_item_props.insert(
+        "acceptance".to_string(),
+        JsonSchema::String {
+            description: Some("Optional completion criteria for this row".to_string()),
+        },
+    );
 
     let plan_items_schema = JsonSchema::Array {
         description: Some("The list of steps".to_string()),
@@ -66,7 +93,7 @@ pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
         name: "update_plan".to_string(),
         description: r#"Updates the task plan.
 Provide an optional explanation and a list of plan items.
-Each item must include step and status, and may also include id/path/details.
+Each item must include step and status, and may also include id/path/details/inputs/outputs/depends_on/acceptance.
 At most one step can be in_progress at a time.
 "#
         .to_string(),

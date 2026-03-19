@@ -4,20 +4,16 @@
 from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing import Annotated, Any, Literal
-from enum import Enum
+from enum import StrEnum
 
 
 class CodexAppServerProtocolV2(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
 class AbsolutePathBuf(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str,
         Field(
@@ -26,11 +22,30 @@ class AbsolutePathBuf(RootModel[str]):
     ]
 
 
+class ApiKeyAccountType(RootModel[Literal["apiKey"]]):
+    root: Annotated[Literal["apiKey"], Field(title="ApiKeyAccountType")]
+
+
 class ApiKeyAccount(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["apiKey"], Field(title="ApiKeyAccountType")]
+    type: Annotated[ApiKeyAccountType, Field(title="ApiKeyAccountType")]
+
+
+class OauthAccountType(RootModel[Literal["oauth"]]):
+    root: Annotated[Literal["oauth"], Field(title="OauthAccountType")]
+
+
+class OauthAccount(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[OauthAccountType, Field(title="OauthAccountType")]
+
+
+class ChatgptAccountType(RootModel[Literal["chatgpt"]]):
+    root: Annotated[Literal["chatgpt"], Field(title="ChatgptAccountType")]
 
 
 class AccountLoginCompletedNotification(BaseModel):
@@ -98,7 +113,7 @@ class AppSummary(BaseModel):
     name: str
 
 
-class AppToolApproval(Enum):
+class AppToolApproval(StrEnum):
     auto = "auto"
     prompt = "prompt"
     approve = "approve"
@@ -113,13 +128,12 @@ class AppToolConfig(BaseModel):
 
 
 class AppToolsConfig(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class ApprovalsReviewer(Enum):
+class ApprovalsReviewer(StrEnum):
     user = "user"
     guardian_subagent = "guardian_subagent"
 
@@ -164,7 +178,7 @@ class AppsListParams(BaseModel):
     ] = None
 
 
-class AskForApprovalValue(Enum):
+class AskForApprovalValue(StrEnum):
     untrusted = "untrusted"
     on_failure = "on-failure"
     on_request = "on-request"
@@ -191,14 +205,12 @@ class GranularAskForApproval(BaseModel):
 
 
 class AskForApproval(RootModel[AskForApprovalValue | GranularAskForApproval]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: AskForApprovalValue | GranularAskForApproval
 
 
-class AuthMode(Enum):
+class AuthMode(StrEnum):
     apikey = "apikey"
+    oauth = "oauth"
     chatgpt = "chatgpt"
     chatgpt_auth_tokens = "chatgptAuthTokens"
 
@@ -218,7 +230,7 @@ class CancelLoginAccountParams(BaseModel):
     login_id: Annotated[str, Field(alias="loginId")]
 
 
-class CancelLoginAccountStatus(Enum):
+class CancelLoginAccountStatus(StrEnum):
     canceled = "canceled"
     not_found = "notFound"
 
@@ -232,7 +244,331 @@ class ClientInfo(BaseModel):
     version: str
 
 
-class CodexErrorInfoValue(Enum):
+class InitializeRequestMethod(RootModel[Literal["initialize"]]):
+    root: Annotated[Literal["initialize"], Field(title="InitializeRequestMethod")]
+
+
+class ThreadStartRequestMethod(RootModel[Literal["thread/start"]]):
+    root: Annotated[Literal["thread/start"], Field(title="Thread/startRequestMethod")]
+
+
+class ThreadResumeRequestMethod(RootModel[Literal["thread/resume"]]):
+    root: Annotated[Literal["thread/resume"], Field(title="Thread/resumeRequestMethod")]
+
+
+class ThreadForkRequestMethod(RootModel[Literal["thread/fork"]]):
+    root: Annotated[Literal["thread/fork"], Field(title="Thread/forkRequestMethod")]
+
+
+class ThreadArchiveRequestMethod(RootModel[Literal["thread/archive"]]):
+    root: Annotated[
+        Literal["thread/archive"], Field(title="Thread/archiveRequestMethod")
+    ]
+
+
+class ThreadUnsubscribeRequestMethod(RootModel[Literal["thread/unsubscribe"]]):
+    root: Annotated[
+        Literal["thread/unsubscribe"], Field(title="Thread/unsubscribeRequestMethod")
+    ]
+
+
+class ThreadNameSetRequestMethod(RootModel[Literal["thread/name/set"]]):
+    root: Annotated[
+        Literal["thread/name/set"], Field(title="Thread/name/setRequestMethod")
+    ]
+
+
+class ThreadMetadataUpdateRequestMethod(RootModel[Literal["thread/metadata/update"]]):
+    root: Annotated[
+        Literal["thread/metadata/update"],
+        Field(title="Thread/metadata/updateRequestMethod"),
+    ]
+
+
+class ThreadUnarchiveRequestMethod(RootModel[Literal["thread/unarchive"]]):
+    root: Annotated[
+        Literal["thread/unarchive"], Field(title="Thread/unarchiveRequestMethod")
+    ]
+
+
+class ThreadCompactStartRequestMethod(RootModel[Literal["thread/compact/start"]]):
+    root: Annotated[
+        Literal["thread/compact/start"],
+        Field(title="Thread/compact/startRequestMethod"),
+    ]
+
+
+class ThreadRollbackRequestMethod(RootModel[Literal["thread/rollback"]]):
+    root: Annotated[
+        Literal["thread/rollback"], Field(title="Thread/rollbackRequestMethod")
+    ]
+
+
+class ThreadListRequestMethod(RootModel[Literal["thread/list"]]):
+    root: Annotated[Literal["thread/list"], Field(title="Thread/listRequestMethod")]
+
+
+class ThreadLoadedListRequestMethod(RootModel[Literal["thread/loaded/list"]]):
+    root: Annotated[
+        Literal["thread/loaded/list"], Field(title="Thread/loaded/listRequestMethod")
+    ]
+
+
+class ThreadReadRequestMethod(RootModel[Literal["thread/read"]]):
+    root: Annotated[Literal["thread/read"], Field(title="Thread/readRequestMethod")]
+
+
+class SkillsListRequestMethod(RootModel[Literal["skills/list"]]):
+    root: Annotated[Literal["skills/list"], Field(title="Skills/listRequestMethod")]
+
+
+class PluginListRequestMethod(RootModel[Literal["plugin/list"]]):
+    root: Annotated[Literal["plugin/list"], Field(title="Plugin/listRequestMethod")]
+
+
+class PluginReadRequestMethod(RootModel[Literal["plugin/read"]]):
+    root: Annotated[Literal["plugin/read"], Field(title="Plugin/readRequestMethod")]
+
+
+class SkillsRemoteListRequestMethod(RootModel[Literal["skills/remote/list"]]):
+    root: Annotated[
+        Literal["skills/remote/list"], Field(title="Skills/remote/listRequestMethod")
+    ]
+
+
+class SkillsRemoteExportRequestMethod(RootModel[Literal["skills/remote/export"]]):
+    root: Annotated[
+        Literal["skills/remote/export"],
+        Field(title="Skills/remote/exportRequestMethod"),
+    ]
+
+
+class AppListRequestMethod(RootModel[Literal["app/list"]]):
+    root: Annotated[Literal["app/list"], Field(title="App/listRequestMethod")]
+
+
+class FsReadFileRequestMethod(RootModel[Literal["fs/readFile"]]):
+    root: Annotated[Literal["fs/readFile"], Field(title="Fs/readFileRequestMethod")]
+
+
+class FsWriteFileRequestMethod(RootModel[Literal["fs/writeFile"]]):
+    root: Annotated[Literal["fs/writeFile"], Field(title="Fs/writeFileRequestMethod")]
+
+
+class FsCreateDirectoryRequestMethod(RootModel[Literal["fs/createDirectory"]]):
+    root: Annotated[
+        Literal["fs/createDirectory"], Field(title="Fs/createDirectoryRequestMethod")
+    ]
+
+
+class FsGetMetadataRequestMethod(RootModel[Literal["fs/getMetadata"]]):
+    root: Annotated[
+        Literal["fs/getMetadata"], Field(title="Fs/getMetadataRequestMethod")
+    ]
+
+
+class FsReadDirectoryRequestMethod(RootModel[Literal["fs/readDirectory"]]):
+    root: Annotated[
+        Literal["fs/readDirectory"], Field(title="Fs/readDirectoryRequestMethod")
+    ]
+
+
+class FsRemoveRequestMethod(RootModel[Literal["fs/remove"]]):
+    root: Annotated[Literal["fs/remove"], Field(title="Fs/removeRequestMethod")]
+
+
+class FsCopyRequestMethod(RootModel[Literal["fs/copy"]]):
+    root: Annotated[Literal["fs/copy"], Field(title="Fs/copyRequestMethod")]
+
+
+class SkillsConfigWriteRequestMethod(RootModel[Literal["skills/config/write"]]):
+    root: Annotated[
+        Literal["skills/config/write"], Field(title="Skills/config/writeRequestMethod")
+    ]
+
+
+class PluginInstallRequestMethod(RootModel[Literal["plugin/install"]]):
+    root: Annotated[
+        Literal["plugin/install"], Field(title="Plugin/installRequestMethod")
+    ]
+
+
+class PluginUninstallRequestMethod(RootModel[Literal["plugin/uninstall"]]):
+    root: Annotated[
+        Literal["plugin/uninstall"], Field(title="Plugin/uninstallRequestMethod")
+    ]
+
+
+class TurnStartRequestMethod(RootModel[Literal["turn/start"]]):
+    root: Annotated[Literal["turn/start"], Field(title="Turn/startRequestMethod")]
+
+
+class TurnSteerRequestMethod(RootModel[Literal["turn/steer"]]):
+    root: Annotated[Literal["turn/steer"], Field(title="Turn/steerRequestMethod")]
+
+
+class TurnInterruptRequestMethod(RootModel[Literal["turn/interrupt"]]):
+    root: Annotated[
+        Literal["turn/interrupt"], Field(title="Turn/interruptRequestMethod")
+    ]
+
+
+class ReviewStartRequestMethod(RootModel[Literal["review/start"]]):
+    root: Annotated[Literal["review/start"], Field(title="Review/startRequestMethod")]
+
+
+class ModelListRequestMethod(RootModel[Literal["model/list"]]):
+    root: Annotated[Literal["model/list"], Field(title="Model/listRequestMethod")]
+
+
+class ExperimentalFeatureListRequestMethod(
+    RootModel[Literal["experimentalFeature/list"]]
+):
+    root: Annotated[
+        Literal["experimentalFeature/list"],
+        Field(title="ExperimentalFeature/listRequestMethod"),
+    ]
+
+
+class McpServerOauthLoginRequestMethod(RootModel[Literal["mcpServer/oauth/login"]]):
+    root: Annotated[
+        Literal["mcpServer/oauth/login"],
+        Field(title="McpServer/oauth/loginRequestMethod"),
+    ]
+
+
+class ConfigMcpServerReloadRequestMethod(RootModel[Literal["config/mcpServer/reload"]]):
+    root: Annotated[
+        Literal["config/mcpServer/reload"],
+        Field(title="Config/mcpServer/reloadRequestMethod"),
+    ]
+
+
+class McpServerStatusListRequestMethod(RootModel[Literal["mcpServerStatus/list"]]):
+    root: Annotated[
+        Literal["mcpServerStatus/list"],
+        Field(title="McpServerStatus/listRequestMethod"),
+    ]
+
+
+class WindowsSandboxSetupStartRequestMethod(
+    RootModel[Literal["windowsSandbox/setupStart"]]
+):
+    root: Annotated[
+        Literal["windowsSandbox/setupStart"],
+        Field(title="WindowsSandbox/setupStartRequestMethod"),
+    ]
+
+
+class AccountLoginStartRequestMethod(RootModel[Literal["account/login/start"]]):
+    root: Annotated[
+        Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
+    ]
+
+
+class AccountLoginCancelRequestMethod(RootModel[Literal["account/login/cancel"]]):
+    root: Annotated[
+        Literal["account/login/cancel"],
+        Field(title="Account/login/cancelRequestMethod"),
+    ]
+
+
+class AccountLogoutRequestMethod(RootModel[Literal["account/logout"]]):
+    root: Annotated[
+        Literal["account/logout"], Field(title="Account/logoutRequestMethod")
+    ]
+
+
+class AccountRateLimitsReadRequestMethod(RootModel[Literal["account/rateLimits/read"]]):
+    root: Annotated[
+        Literal["account/rateLimits/read"],
+        Field(title="Account/rateLimits/readRequestMethod"),
+    ]
+
+
+class FeedbackUploadRequestMethod(RootModel[Literal["feedback/upload"]]):
+    root: Annotated[
+        Literal["feedback/upload"], Field(title="Feedback/uploadRequestMethod")
+    ]
+
+
+class CommandExecRequestMethod(RootModel[Literal["command/exec"]]):
+    root: Annotated[Literal["command/exec"], Field(title="Command/execRequestMethod")]
+
+
+class CommandExecWriteRequestMethod(RootModel[Literal["command/exec/write"]]):
+    root: Annotated[
+        Literal["command/exec/write"], Field(title="Command/exec/writeRequestMethod")
+    ]
+
+
+class CommandExecTerminateRequestMethod(RootModel[Literal["command/exec/terminate"]]):
+    root: Annotated[
+        Literal["command/exec/terminate"],
+        Field(title="Command/exec/terminateRequestMethod"),
+    ]
+
+
+class CommandExecResizeRequestMethod(RootModel[Literal["command/exec/resize"]]):
+    root: Annotated[
+        Literal["command/exec/resize"], Field(title="Command/exec/resizeRequestMethod")
+    ]
+
+
+class ConfigReadRequestMethod(RootModel[Literal["config/read"]]):
+    root: Annotated[Literal["config/read"], Field(title="Config/readRequestMethod")]
+
+
+class ExternalAgentConfigDetectRequestMethod(
+    RootModel[Literal["externalAgentConfig/detect"]]
+):
+    root: Annotated[
+        Literal["externalAgentConfig/detect"],
+        Field(title="ExternalAgentConfig/detectRequestMethod"),
+    ]
+
+
+class ExternalAgentConfigImportRequestMethod(
+    RootModel[Literal["externalAgentConfig/import"]]
+):
+    root: Annotated[
+        Literal["externalAgentConfig/import"],
+        Field(title="ExternalAgentConfig/importRequestMethod"),
+    ]
+
+
+class ConfigValueWriteRequestMethod(RootModel[Literal["config/value/write"]]):
+    root: Annotated[
+        Literal["config/value/write"], Field(title="Config/value/writeRequestMethod")
+    ]
+
+
+class ConfigBatchWriteRequestMethod(RootModel[Literal["config/batchWrite"]]):
+    root: Annotated[
+        Literal["config/batchWrite"], Field(title="Config/batchWriteRequestMethod")
+    ]
+
+
+class ConfigRequirementsReadRequestMethod(
+    RootModel[Literal["configRequirements/read"]]
+):
+    root: Annotated[
+        Literal["configRequirements/read"],
+        Field(title="ConfigRequirements/readRequestMethod"),
+    ]
+
+
+class AccountReadRequestMethod(RootModel[Literal["account/read"]]):
+    root: Annotated[Literal["account/read"], Field(title="Account/readRequestMethod")]
+
+
+class FuzzyFileSearchRequestMethod(RootModel[Literal["fuzzyFileSearch"]]):
+    root: Annotated[
+        Literal["fuzzyFileSearch"], Field(title="FuzzyFileSearchRequestMethod")
+    ]
+
+
+class CodexErrorInfoValue(StrEnum):
     context_window_exceeded = "contextWindowExceeded"
     usage_limit_exceeded = "usageLimitExceeded"
     server_overloaded = "serverOverloaded"
@@ -321,9 +657,6 @@ class CodexErrorInfo(
         | ResponseTooManyFailedAttemptsCodexErrorInfo
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         CodexErrorInfoValue
         | HttpConnectionFailedCodexErrorInfo
@@ -336,16 +669,17 @@ class CodexErrorInfo(
     ]
 
 
-class CollabAgentStatus(Enum):
+class CollabAgentStatus(StrEnum):
     pending_init = "pendingInit"
     running = "running"
+    interrupted = "interrupted"
     completed = "completed"
     errored = "errored"
     shutdown = "shutdown"
     not_found = "notFound"
 
 
-class CollabAgentTool(Enum):
+class CollabAgentTool(StrEnum):
     spawn_agent = "spawnAgent"
     send_input = "sendInput"
     resume_agent = "resumeAgent"
@@ -353,10 +687,14 @@ class CollabAgentTool(Enum):
     close_agent = "closeAgent"
 
 
-class CollabAgentToolCallStatus(Enum):
+class CollabAgentToolCallStatus(StrEnum):
     in_progress = "inProgress"
     completed = "completed"
     failed = "failed"
+
+
+class ReadCommandActionType(RootModel[Literal["read"]]):
+    root: Annotated[Literal["read"], Field(title="ReadCommandActionType")]
 
 
 class ReadCommandAction(BaseModel):
@@ -366,7 +704,11 @@ class ReadCommandAction(BaseModel):
     command: str
     name: str
     path: str
-    type: Annotated[Literal["read"], Field(title="ReadCommandActionType")]
+    type: Annotated[ReadCommandActionType, Field(title="ReadCommandActionType")]
+
+
+class ListFilesCommandActionType(RootModel[Literal["listFiles"]]):
+    root: Annotated[Literal["listFiles"], Field(title="ListFilesCommandActionType")]
 
 
 class ListFilesCommandAction(BaseModel):
@@ -375,7 +717,13 @@ class ListFilesCommandAction(BaseModel):
     )
     command: str
     path: str | None = None
-    type: Annotated[Literal["listFiles"], Field(title="ListFilesCommandActionType")]
+    type: Annotated[
+        ListFilesCommandActionType, Field(title="ListFilesCommandActionType")
+    ]
+
+
+class SearchCommandActionType(RootModel[Literal["search"]]):
+    root: Annotated[Literal["search"], Field(title="SearchCommandActionType")]
 
 
 class SearchCommandAction(BaseModel):
@@ -385,7 +733,11 @@ class SearchCommandAction(BaseModel):
     command: str
     path: str | None = None
     query: str | None = None
-    type: Annotated[Literal["search"], Field(title="SearchCommandActionType")]
+    type: Annotated[SearchCommandActionType, Field(title="SearchCommandActionType")]
+
+
+class UnknownCommandActionType(RootModel[Literal["unknown"]]):
+    root: Annotated[Literal["unknown"], Field(title="UnknownCommandActionType")]
 
 
 class UnknownCommandAction(BaseModel):
@@ -393,7 +745,7 @@ class UnknownCommandAction(BaseModel):
         populate_by_name=True,
     )
     command: str
-    type: Annotated[Literal["unknown"], Field(title="UnknownCommandActionType")]
+    type: Annotated[UnknownCommandActionType, Field(title="UnknownCommandActionType")]
 
 
 class CommandAction(
@@ -404,9 +756,6 @@ class CommandAction(
         | UnknownCommandAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         ReadCommandAction
         | ListFilesCommandAction
@@ -415,13 +764,12 @@ class CommandAction(
     )
 
 
-class CommandExecOutputStream(Enum):
+class CommandExecOutputStream(StrEnum):
     stdout = "stdout"
     stderr = "stderr"
 
 
 class CommandExecResizeResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -468,7 +816,6 @@ class CommandExecTerminateParams(BaseModel):
 
 
 class CommandExecTerminateResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -502,7 +849,6 @@ class CommandExecWriteParams(BaseModel):
 
 
 class CommandExecWriteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -518,11 +864,15 @@ class CommandExecutionOutputDeltaNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
-class CommandExecutionStatus(Enum):
+class CommandExecutionStatus(StrEnum):
     in_progress = "inProgress"
     completed = "completed"
     failed = "failed"
     declined = "declined"
+
+
+class MdmConfigLayerSourceType(RootModel[Literal["mdm"]]):
+    root: Annotated[Literal["mdm"], Field(title="MdmConfigLayerSourceType")]
 
 
 class MdmConfigLayerSource(BaseModel):
@@ -531,7 +881,11 @@ class MdmConfigLayerSource(BaseModel):
     )
     domain: str
     key: str
-    type: Annotated[Literal["mdm"], Field(title="MdmConfigLayerSourceType")]
+    type: Annotated[MdmConfigLayerSourceType, Field(title="MdmConfigLayerSourceType")]
+
+
+class SystemConfigLayerSourceType(RootModel[Literal["system"]]):
+    root: Annotated[Literal["system"], Field(title="SystemConfigLayerSourceType")]
 
 
 class SystemConfigLayerSource(BaseModel):
@@ -544,7 +898,13 @@ class SystemConfigLayerSource(BaseModel):
             description="This is the path to the system config.toml file, though it is not guaranteed to exist."
         ),
     ]
-    type: Annotated[Literal["system"], Field(title="SystemConfigLayerSourceType")]
+    type: Annotated[
+        SystemConfigLayerSourceType, Field(title="SystemConfigLayerSourceType")
+    ]
+
+
+class UserConfigLayerSourceType(RootModel[Literal["user"]]):
+    root: Annotated[Literal["user"], Field(title="UserConfigLayerSourceType")]
 
 
 class UserConfigLayerSource(BaseModel):
@@ -557,7 +917,11 @@ class UserConfigLayerSource(BaseModel):
             description="This is the path to the user's config.toml file, though it is not guaranteed to exist."
         ),
     ]
-    type: Annotated[Literal["user"], Field(title="UserConfigLayerSourceType")]
+    type: Annotated[UserConfigLayerSourceType, Field(title="UserConfigLayerSourceType")]
+
+
+class ProjectConfigLayerSourceType(RootModel[Literal["project"]]):
+    root: Annotated[Literal["project"], Field(title="ProjectConfigLayerSourceType")]
 
 
 class ProjectConfigLayerSource(BaseModel):
@@ -565,7 +929,15 @@ class ProjectConfigLayerSource(BaseModel):
         populate_by_name=True,
     )
     dot_codex_folder: Annotated[AbsolutePathBuf, Field(alias="dotCodexFolder")]
-    type: Annotated[Literal["project"], Field(title="ProjectConfigLayerSourceType")]
+    type: Annotated[
+        ProjectConfigLayerSourceType, Field(title="ProjectConfigLayerSourceType")
+    ]
+
+
+class SessionFlagsConfigLayerSourceType(RootModel[Literal["sessionFlags"]]):
+    root: Annotated[
+        Literal["sessionFlags"], Field(title="SessionFlagsConfigLayerSourceType")
+    ]
 
 
 class SessionFlagsConfigLayerSource(BaseModel):
@@ -573,7 +945,17 @@ class SessionFlagsConfigLayerSource(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["sessionFlags"], Field(title="SessionFlagsConfigLayerSourceType")
+        SessionFlagsConfigLayerSourceType,
+        Field(title="SessionFlagsConfigLayerSourceType"),
+    ]
+
+
+class LegacyManagedConfigTomlFromFileConfigLayerSourceType(
+    RootModel[Literal["legacyManagedConfigTomlFromFile"]]
+):
+    root: Annotated[
+        Literal["legacyManagedConfigTomlFromFile"],
+        Field(title="LegacyManagedConfigTomlFromFileConfigLayerSourceType"),
     ]
 
 
@@ -583,8 +965,17 @@ class LegacyManagedConfigTomlFromFileConfigLayerSource(BaseModel):
     )
     file: AbsolutePathBuf
     type: Annotated[
-        Literal["legacyManagedConfigTomlFromFile"],
+        LegacyManagedConfigTomlFromFileConfigLayerSourceType,
         Field(title="LegacyManagedConfigTomlFromFileConfigLayerSourceType"),
+    ]
+
+
+class LegacyManagedConfigTomlFromMdmConfigLayerSourceType(
+    RootModel[Literal["legacyManagedConfigTomlFromMdm"]]
+):
+    root: Annotated[
+        Literal["legacyManagedConfigTomlFromMdm"],
+        Field(title="LegacyManagedConfigTomlFromMdmConfigLayerSourceType"),
     ]
 
 
@@ -593,7 +984,7 @@ class LegacyManagedConfigTomlFromMdmConfigLayerSource(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["legacyManagedConfigTomlFromMdm"],
+        LegacyManagedConfigTomlFromMdmConfigLayerSourceType,
         Field(title="LegacyManagedConfigTomlFromMdmConfigLayerSourceType"),
     ]
 
@@ -609,9 +1000,6 @@ class ConfigLayerSource(
         | LegacyManagedConfigTomlFromMdmConfigLayerSource
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         MdmConfigLayerSource
         | SystemConfigLayerSource
@@ -636,12 +1024,20 @@ class ConfigReadParams(BaseModel):
     include_layers: Annotated[bool | None, Field(alias="includeLayers")] = False
 
 
+class InputTextContentItemType(RootModel[Literal["input_text"]]):
+    root: Annotated[Literal["input_text"], Field(title="InputTextContentItemType")]
+
+
 class InputTextContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     text: str
-    type: Annotated[Literal["input_text"], Field(title="InputTextContentItemType")]
+    type: Annotated[InputTextContentItemType, Field(title="InputTextContentItemType")]
+
+
+class InputImageContentItemType(RootModel[Literal["input_image"]]):
+    root: Annotated[Literal["input_image"], Field(title="InputImageContentItemType")]
 
 
 class InputImageContentItem(BaseModel):
@@ -649,7 +1045,11 @@ class InputImageContentItem(BaseModel):
         populate_by_name=True,
     )
     image_url: str
-    type: Annotated[Literal["input_image"], Field(title="InputImageContentItemType")]
+    type: Annotated[InputImageContentItemType, Field(title="InputImageContentItemType")]
+
+
+class OutputTextContentItemType(RootModel[Literal["output_text"]]):
+    root: Annotated[Literal["output_text"], Field(title="OutputTextContentItemType")]
 
 
 class OutputTextContentItem(BaseModel):
@@ -657,15 +1057,12 @@ class OutputTextContentItem(BaseModel):
         populate_by_name=True,
     )
     text: str
-    type: Annotated[Literal["output_text"], Field(title="OutputTextContentItemType")]
+    type: Annotated[OutputTextContentItemType, Field(title="OutputTextContentItemType")]
 
 
 class ContentItem(
     RootModel[InputTextContentItem | InputImageContentItem | OutputTextContentItem]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: InputTextContentItem | InputImageContentItem | OutputTextContentItem
 
 
@@ -699,14 +1096,28 @@ class DeprecationNoticeNotification(BaseModel):
     summary: Annotated[str, Field(description="Concise summary of what is deprecated.")]
 
 
+class InputTextDynamicToolCallOutputContentItemType(RootModel[Literal["inputText"]]):
+    root: Annotated[
+        Literal["inputText"],
+        Field(title="InputTextDynamicToolCallOutputContentItemType"),
+    ]
+
+
 class InputTextDynamicToolCallOutputContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     text: str
     type: Annotated[
-        Literal["inputText"],
+        InputTextDynamicToolCallOutputContentItemType,
         Field(title="InputTextDynamicToolCallOutputContentItemType"),
+    ]
+
+
+class InputImageDynamicToolCallOutputContentItemType(RootModel[Literal["inputImage"]]):
+    root: Annotated[
+        Literal["inputImage"],
+        Field(title="InputImageDynamicToolCallOutputContentItemType"),
     ]
 
 
@@ -716,7 +1127,7 @@ class InputImageDynamicToolCallOutputContentItem(BaseModel):
     )
     image_url: Annotated[str, Field(alias="imageUrl")]
     type: Annotated[
-        Literal["inputImage"],
+        InputImageDynamicToolCallOutputContentItemType,
         Field(title="InputImageDynamicToolCallOutputContentItemType"),
     ]
 
@@ -727,16 +1138,13 @@ class DynamicToolCallOutputContentItem(
         | InputImageDynamicToolCallOutputContentItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         InputTextDynamicToolCallOutputContentItem
         | InputImageDynamicToolCallOutputContentItem
     )
 
 
-class DynamicToolCallStatus(Enum):
+class DynamicToolCallStatus(StrEnum):
     in_progress = "inProgress"
     completed = "completed"
     failed = "failed"
@@ -746,6 +1154,7 @@ class DynamicToolSpec(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    defer_loading: Annotated[bool | None, Field(alias="deferLoading")] = None
     description: str
     input_schema: Annotated[Any, Field(alias="inputSchema")]
     name: str
@@ -768,7 +1177,7 @@ class ExperimentalFeatureListParams(BaseModel):
     ] = None
 
 
-class ExperimentalFeatureStage(Enum):
+class ExperimentalFeatureStage(StrEnum):
     beta = "beta"
     under_development = "underDevelopment"
     stable = "stable"
@@ -796,13 +1205,12 @@ class ExternalAgentConfigDetectParams(BaseModel):
 
 
 class ExternalAgentConfigImportResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class ExternalAgentConfigMigrationItemType(Enum):
+class ExternalAgentConfigMigrationItemType(StrEnum):
     agents_md = "AGENTS_MD"
     config = "CONFIG"
     skills = "SKILLS"
@@ -837,7 +1245,7 @@ class FileChangeOutputDeltaNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
-class ForcedLoginMethod(Enum):
+class ForcedLoginMethod(StrEnum):
     chatgpt = "chatgpt"
     api = "api"
 
@@ -860,7 +1268,6 @@ class FsCopyParams(BaseModel):
 
 
 class FsCopyResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -882,7 +1289,6 @@ class FsCreateDirectoryParams(BaseModel):
 
 
 class FsCreateDirectoryResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1010,7 +1416,6 @@ class FsRemoveParams(BaseModel):
 
 
 class FsRemoveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1027,10 +1432,15 @@ class FsWriteFileParams(BaseModel):
 
 
 class FsWriteFileResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
+
+
+class InputTextFunctionCallOutputContentItemType(RootModel[Literal["input_text"]]):
+    root: Annotated[
+        Literal["input_text"], Field(title="InputTextFunctionCallOutputContentItemType")
+    ]
 
 
 class InputTextFunctionCallOutputContentItem(BaseModel):
@@ -1039,7 +1449,15 @@ class InputTextFunctionCallOutputContentItem(BaseModel):
     )
     text: str
     type: Annotated[
-        Literal["input_text"], Field(title="InputTextFunctionCallOutputContentItemType")
+        InputTextFunctionCallOutputContentItemType,
+        Field(title="InputTextFunctionCallOutputContentItemType"),
+    ]
+
+
+class InputImageFunctionCallOutputContentItemType(RootModel[Literal["input_image"]]):
+    root: Annotated[
+        Literal["input_image"],
+        Field(title="InputImageFunctionCallOutputContentItemType"),
     ]
 
 
@@ -1053,9 +1471,6 @@ class FuzzyFileSearchParams(BaseModel):
 
 
 class Indice(RootModel[int]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[int, Field(ge=0)]
 
 
@@ -1118,43 +1533,43 @@ class GitInfo(BaseModel):
     sha: str | None = None
 
 
-class GuardianApprovalReviewStatus(Enum):
+class GuardianApprovalReviewStatus(StrEnum):
     in_progress = "inProgress"
     approved = "approved"
     denied = "denied"
     aborted = "aborted"
 
 
-class GuardianRiskLevel(Enum):
+class GuardianRiskLevel(StrEnum):
     low = "low"
     medium = "medium"
     high = "high"
 
 
-class HazelnutScope(Enum):
+class HazelnutScope(StrEnum):
     example = "example"
     workspace_shared = "workspace-shared"
     all_shared = "all-shared"
     personal = "personal"
 
 
-class HookEventName(Enum):
+class HookEventName(StrEnum):
     session_start = "sessionStart"
     stop = "stop"
 
 
-class HookExecutionMode(Enum):
+class HookExecutionMode(StrEnum):
     sync = "sync"
     async_ = "async"
 
 
-class HookHandlerType(Enum):
+class HookHandlerType(StrEnum):
     command = "command"
     prompt = "prompt"
     agent = "agent"
 
 
-class HookOutputEntryKind(Enum):
+class HookOutputEntryKind(StrEnum):
     warning = "warning"
     stop = "stop"
     feedback = "feedback"
@@ -1162,7 +1577,7 @@ class HookOutputEntryKind(Enum):
     error = "error"
 
 
-class HookRunStatus(Enum):
+class HookRunStatus(StrEnum):
     running = "running"
     completed = "completed"
     failed = "failed"
@@ -1170,12 +1585,12 @@ class HookRunStatus(Enum):
     stopped = "stopped"
 
 
-class HookScope(Enum):
+class HookScope(StrEnum):
     thread = "thread"
     turn = "turn"
 
 
-class ImageDetail(Enum):
+class ImageDetail(StrEnum):
     auto = "auto"
     low = "low"
     high = "high"
@@ -1210,7 +1625,7 @@ class InitializeParams(BaseModel):
     client_info: Annotated[ClientInfo, Field(alias="clientInfo")]
 
 
-class InputModality(Enum):
+class InputModality(StrEnum):
     text = "text"
     image = "image"
 
@@ -1231,6 +1646,10 @@ class ListMcpServerStatusParams(BaseModel):
     ] = None
 
 
+class ExecLocalShellActionType(RootModel[Literal["exec"]]):
+    root: Annotated[Literal["exec"], Field(title="ExecLocalShellActionType")]
+
+
 class ExecLocalShellAction(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1238,22 +1657,23 @@ class ExecLocalShellAction(BaseModel):
     command: list[str]
     env: dict[str, Any] | None = None
     timeout_ms: Annotated[int | None, Field(ge=0)] = None
-    type: Annotated[Literal["exec"], Field(title="ExecLocalShellActionType")]
+    type: Annotated[ExecLocalShellActionType, Field(title="ExecLocalShellActionType")]
     user: str | None = None
     working_directory: str | None = None
 
 
 class LocalShellAction(RootModel[ExecLocalShellAction]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ExecLocalShellAction
 
 
-class LocalShellStatus(Enum):
+class LocalShellStatus(StrEnum):
     completed = "completed"
     in_progress = "in_progress"
     incomplete = "incomplete"
+
+
+class ApiKeyv2LoginAccountParamsType(RootModel[Literal["apiKey"]]):
+    root: Annotated[Literal["apiKey"], Field(title="ApiKeyv2::LoginAccountParamsType")]
 
 
 class ApiKeyLoginAccountParams(BaseModel):
@@ -1261,7 +1681,15 @@ class ApiKeyLoginAccountParams(BaseModel):
         populate_by_name=True,
     )
     api_key: Annotated[str, Field(alias="apiKey")]
-    type: Annotated[Literal["apiKey"], Field(title="ApiKeyv2::LoginAccountParamsType")]
+    type: Annotated[
+        ApiKeyv2LoginAccountParamsType, Field(title="ApiKeyv2::LoginAccountParamsType")
+    ]
+
+
+class Chatgptv2LoginAccountParamsType(RootModel[Literal["chatgpt"]]):
+    root: Annotated[
+        Literal["chatgpt"], Field(title="Chatgptv2::LoginAccountParamsType")
+    ]
 
 
 class ChatgptLoginAccountParams(BaseModel):
@@ -1269,7 +1697,30 @@ class ChatgptLoginAccountParams(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["chatgpt"], Field(title="Chatgptv2::LoginAccountParamsType")
+        Chatgptv2LoginAccountParamsType,
+        Field(title="Chatgptv2::LoginAccountParamsType"),
+    ]
+
+
+class Oauthv2LoginAccountParamsType(RootModel[Literal["oauth"]]):
+    root: Annotated[Literal["oauth"], Field(title="Oauthv2::LoginAccountParamsType")]
+
+
+class OauthLoginAccountParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Oauthv2LoginAccountParamsType, Field(title="Oauthv2::LoginAccountParamsType")
+    ]
+
+
+class ChatgptAuthTokensv2LoginAccountParamsType(
+    RootModel[Literal["chatgptAuthTokens"]]
+):
+    root: Annotated[
+        Literal["chatgptAuthTokens"],
+        Field(title="ChatgptAuthTokensv2::LoginAccountParamsType"),
     ]
 
 
@@ -1299,7 +1750,7 @@ class ChatgptAuthTokensLoginAccountParams(BaseModel):
         ),
     ] = None
     type: Annotated[
-        Literal["chatgptAuthTokens"],
+        ChatgptAuthTokensv2LoginAccountParamsType,
         Field(title="ChatgptAuthTokensv2::LoginAccountParamsType"),
     ]
 
@@ -1308,17 +1759,22 @@ class LoginAccountParams(
     RootModel[
         ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
+        | OauthLoginAccountParams
         | ChatgptAuthTokensLoginAccountParams
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
+        | OauthLoginAccountParams
         | ChatgptAuthTokensLoginAccountParams,
         Field(title="LoginAccountParams"),
+    ]
+
+
+class ApiKeyv2LoginAccountResponseType(RootModel[Literal["apiKey"]]):
+    root: Annotated[
+        Literal["apiKey"], Field(title="ApiKeyv2::LoginAccountResponseType")
     ]
 
 
@@ -1327,7 +1783,30 @@ class ApiKeyLoginAccountResponse(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["apiKey"], Field(title="ApiKeyv2::LoginAccountResponseType")
+        ApiKeyv2LoginAccountResponseType,
+        Field(title="ApiKeyv2::LoginAccountResponseType"),
+    ]
+
+
+class Oauthv2LoginAccountResponseType(RootModel[Literal["oauth"]]):
+    root: Annotated[Literal["oauth"], Field(title="Oauthv2::LoginAccountResponseType")]
+
+
+class OauthLoginAccountResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    auth_url: Annotated[str, Field(alias="authUrl")]
+    login_id: Annotated[str, Field(alias="loginId")]
+    type: Annotated[
+        Oauthv2LoginAccountResponseType,
+        Field(title="Oauthv2::LoginAccountResponseType"),
+    ]
+
+
+class Chatgptv2LoginAccountResponseType(RootModel[Literal["chatgpt"]]):
+    root: Annotated[
+        Literal["chatgpt"], Field(title="Chatgptv2::LoginAccountResponseType")
     ]
 
 
@@ -1344,7 +1823,17 @@ class ChatgptLoginAccountResponse(BaseModel):
     ]
     login_id: Annotated[str, Field(alias="loginId")]
     type: Annotated[
-        Literal["chatgpt"], Field(title="Chatgptv2::LoginAccountResponseType")
+        Chatgptv2LoginAccountResponseType,
+        Field(title="Chatgptv2::LoginAccountResponseType"),
+    ]
+
+
+class ChatgptAuthTokensv2LoginAccountResponseType(
+    RootModel[Literal["chatgptAuthTokens"]]
+):
+    root: Annotated[
+        Literal["chatgptAuthTokens"],
+        Field(title="ChatgptAuthTokensv2::LoginAccountResponseType"),
     ]
 
 
@@ -1353,7 +1842,7 @@ class ChatgptAuthTokensLoginAccountResponse(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["chatgptAuthTokens"],
+        ChatgptAuthTokensv2LoginAccountResponseType,
         Field(title="ChatgptAuthTokensv2::LoginAccountResponseType"),
     ]
 
@@ -1361,15 +1850,14 @@ class ChatgptAuthTokensLoginAccountResponse(BaseModel):
 class LoginAccountResponse(
     RootModel[
         ApiKeyLoginAccountResponse
+        | OauthLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptAuthTokensLoginAccountResponse
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ApiKeyLoginAccountResponse
+        | OauthLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptAuthTokensLoginAccountResponse,
         Field(title="LoginAccountResponse"),
@@ -1377,13 +1865,12 @@ class LoginAccountResponse(
 
 
 class LogoutAccountResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class McpAuthStatus(Enum):
+class McpAuthStatus(StrEnum):
     unsupported = "unsupported"
     not_logged_in = "notLoggedIn"
     bearer_token = "bearerToken"
@@ -1416,7 +1903,6 @@ class McpServerOauthLoginResponse(BaseModel):
 
 
 class McpServerRefreshResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1443,28 +1929,29 @@ class McpToolCallResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    content: list
+    content: list[Any]
     structured_content: Annotated[Any | None, Field(alias="structuredContent")] = None
 
 
-class McpToolCallStatus(Enum):
+class McpToolCallStatus(StrEnum):
     in_progress = "inProgress"
     completed = "completed"
     failed = "failed"
 
 
-class MergeStrategy(Enum):
+class MergeStrategy(StrEnum):
     replace = "replace"
     upsert = "upsert"
 
 
-class MessagePhase(Enum):
+class MessagePhase(StrEnum):
     commentary = "commentary"
     final_answer = "final_answer"
 
 
-class ModeKind(Enum):
+class ModeKind(StrEnum):
     plan = "plan"
+    auto_plan = "auto_plan"
     default = "default"
 
 
@@ -1500,9 +1987,6 @@ class ModelListParams(BaseModel):
 
 
 class ModelRerouteReason(RootModel[Literal["highRiskCyberActivity"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["highRiskCyberActivity"]
 
 
@@ -1527,7 +2011,7 @@ class ModelUpgradeInfo(BaseModel):
     upgrade_copy: Annotated[str | None, Field(alias="upgradeCopy")] = None
 
 
-class NetworkAccess(Enum):
+class NetworkAccess(StrEnum):
     restricted = "restricted"
     enabled = "enabled"
 
@@ -1556,25 +2040,37 @@ class NetworkRequirements(BaseModel):
     socks_port: Annotated[int | None, Field(alias="socksPort", ge=0)] = None
 
 
-class PatchApplyStatus(Enum):
+class PatchApplyStatus(StrEnum):
     in_progress = "inProgress"
     completed = "completed"
     failed = "failed"
     declined = "declined"
 
 
+class AddPatchChangeKindType(RootModel[Literal["add"]]):
+    root: Annotated[Literal["add"], Field(title="AddPatchChangeKindType")]
+
+
 class AddPatchChangeKind(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["add"], Field(title="AddPatchChangeKindType")]
+    type: Annotated[AddPatchChangeKindType, Field(title="AddPatchChangeKindType")]
+
+
+class DeletePatchChangeKindType(RootModel[Literal["delete"]]):
+    root: Annotated[Literal["delete"], Field(title="DeletePatchChangeKindType")]
 
 
 class DeletePatchChangeKind(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["delete"], Field(title="DeletePatchChangeKindType")]
+    type: Annotated[DeletePatchChangeKindType, Field(title="DeletePatchChangeKindType")]
+
+
+class UpdatePatchChangeKindType(RootModel[Literal["update"]]):
+    root: Annotated[Literal["update"], Field(title="UpdatePatchChangeKindType")]
 
 
 class UpdatePatchChangeKind(BaseModel):
@@ -1582,19 +2078,16 @@ class UpdatePatchChangeKind(BaseModel):
         populate_by_name=True,
     )
     move_path: str | None = None
-    type: Annotated[Literal["update"], Field(title="UpdatePatchChangeKindType")]
+    type: Annotated[UpdatePatchChangeKindType, Field(title="UpdatePatchChangeKindType")]
 
 
 class PatchChangeKind(
     RootModel[AddPatchChangeKind | DeletePatchChangeKind | UpdatePatchChangeKind]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: AddPatchChangeKind | DeletePatchChangeKind | UpdatePatchChangeKind
 
 
-class Personality(Enum):
+class Personality(StrEnum):
     none = "none"
     friendly = "friendly"
     pragmatic = "pragmatic"
@@ -1610,7 +2103,7 @@ class PlanDeltaNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
-class PlanType(Enum):
+class PlanType(StrEnum):
     free = "free"
     go = "go"
     plus = "plus"
@@ -1622,7 +2115,7 @@ class PlanType(Enum):
     unknown = "unknown"
 
 
-class PluginAuthPolicy(Enum):
+class PluginAuthPolicy(StrEnum):
     on_install = "ON_INSTALL"
     on_use = "ON_USE"
 
@@ -1635,7 +2128,7 @@ class PluginInstallParams(BaseModel):
     plugin_name: Annotated[str, Field(alias="pluginName")]
 
 
-class PluginInstallPolicy(Enum):
+class PluginInstallPolicy(StrEnum):
     not_available = "NOT_AVAILABLE"
     available = "AVAILABLE"
     installed_by_default = "INSTALLED_BY_DEFAULT"
@@ -1657,7 +2150,13 @@ class PluginInterface(BaseModel):
     capabilities: list[str]
     category: str | None = None
     composer_icon: Annotated[AbsolutePathBuf | None, Field(alias="composerIcon")] = None
-    default_prompt: Annotated[str | None, Field(alias="defaultPrompt")] = None
+    default_prompt: Annotated[
+        list[str] | None,
+        Field(
+            alias="defaultPrompt",
+            description="Starter prompts for the plugin. Capped at 3 entries with a maximum of 128 characters per entry.",
+        ),
+    ] = None
     developer_name: Annotated[str | None, Field(alias="developerName")] = None
     display_name: Annotated[str | None, Field(alias="displayName")] = None
     logo: AbsolutePathBuf | None = None
@@ -1696,18 +2195,19 @@ class PluginReadParams(BaseModel):
     plugin_name: Annotated[str, Field(alias="pluginName")]
 
 
+class LocalPluginSourceType(RootModel[Literal["local"]]):
+    root: Annotated[Literal["local"], Field(title="LocalPluginSourceType")]
+
+
 class LocalPluginSource(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     path: AbsolutePathBuf
-    type: Annotated[Literal["local"], Field(title="LocalPluginSourceType")]
+    type: Annotated[LocalPluginSourceType, Field(title="LocalPluginSourceType")]
 
 
 class PluginSource(RootModel[LocalPluginSource]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: LocalPluginSource
 
 
@@ -1733,13 +2233,12 @@ class PluginUninstallParams(BaseModel):
 
 
 class PluginUninstallResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class ProductSurface(Enum):
+class ProductSurface(StrEnum):
     chatgpt = "chatgpt"
     codex = "codex"
     api = "api"
@@ -1757,6 +2256,10 @@ class RateLimitWindow(BaseModel):
     )
 
 
+class RestrictedReadOnlyAccessType(RootModel[Literal["restricted"]]):
+    root: Annotated[Literal["restricted"], Field(title="RestrictedReadOnlyAccessType")]
+
+
 class RestrictedReadOnlyAccess(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1765,26 +2268,31 @@ class RestrictedReadOnlyAccess(BaseModel):
         bool | None, Field(alias="includePlatformDefaults")
     ] = True
     readable_roots: Annotated[
-        list[AbsolutePathBuf] | None, Field(alias="readableRoots")
-    ] = []
-    type: Annotated[Literal["restricted"], Field(title="RestrictedReadOnlyAccessType")]
+        list[AbsolutePathBuf] | None, Field(default_factory=list, alias="readableRoots")
+    ]
+    type: Annotated[
+        RestrictedReadOnlyAccessType, Field(title="RestrictedReadOnlyAccessType")
+    ]
+
+
+class FullAccessReadOnlyAccessType(RootModel[Literal["fullAccess"]]):
+    root: Annotated[Literal["fullAccess"], Field(title="FullAccessReadOnlyAccessType")]
 
 
 class FullAccessReadOnlyAccess(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["fullAccess"], Field(title="FullAccessReadOnlyAccessType")]
+    type: Annotated[
+        FullAccessReadOnlyAccessType, Field(title="FullAccessReadOnlyAccessType")
+    ]
 
 
 class ReadOnlyAccess(RootModel[RestrictedReadOnlyAccess | FullAccessReadOnlyAccess]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: RestrictedReadOnlyAccess | FullAccessReadOnlyAccess
 
 
-class ReasoningEffort(Enum):
+class ReasoningEffort(StrEnum):
     none = "none"
     minimal = "minimal"
     low = "low"
@@ -1801,14 +2309,25 @@ class ReasoningEffortOption(BaseModel):
     reasoning_effort: Annotated[ReasoningEffort, Field(alias="reasoningEffort")]
 
 
+class ReasoningTextReasoningItemContentType(RootModel[Literal["reasoning_text"]]):
+    root: Annotated[
+        Literal["reasoning_text"], Field(title="ReasoningTextReasoningItemContentType")
+    ]
+
+
 class ReasoningTextReasoningItemContent(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     text: str
     type: Annotated[
-        Literal["reasoning_text"], Field(title="ReasoningTextReasoningItemContentType")
+        ReasoningTextReasoningItemContentType,
+        Field(title="ReasoningTextReasoningItemContentType"),
     ]
+
+
+class TextReasoningItemContentType(RootModel[Literal["text"]]):
+    root: Annotated[Literal["text"], Field(title="TextReasoningItemContentType")]
 
 
 class TextReasoningItemContent(BaseModel):
@@ -1816,16 +2335,22 @@ class TextReasoningItemContent(BaseModel):
         populate_by_name=True,
     )
     text: str
-    type: Annotated[Literal["text"], Field(title="TextReasoningItemContentType")]
+    type: Annotated[
+        TextReasoningItemContentType, Field(title="TextReasoningItemContentType")
+    ]
 
 
 class ReasoningItemContent(
     RootModel[ReasoningTextReasoningItemContent | TextReasoningItemContent]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ReasoningTextReasoningItemContent | TextReasoningItemContent
+
+
+class SummaryTextReasoningItemReasoningSummaryType(RootModel[Literal["summary_text"]]):
+    root: Annotated[
+        Literal["summary_text"],
+        Field(title="SummaryTextReasoningItemReasoningSummaryType"),
+    ]
 
 
 class SummaryTextReasoningItemReasoningSummary(BaseModel):
@@ -1834,7 +2359,7 @@ class SummaryTextReasoningItemReasoningSummary(BaseModel):
     )
     text: str
     type: Annotated[
-        Literal["summary_text"],
+        SummaryTextReasoningItemReasoningSummaryType,
         Field(title="SummaryTextReasoningItemReasoningSummaryType"),
     ]
 
@@ -1842,24 +2367,28 @@ class SummaryTextReasoningItemReasoningSummary(BaseModel):
 class ReasoningItemReasoningSummary(
     RootModel[SummaryTextReasoningItemReasoningSummary]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: SummaryTextReasoningItemReasoningSummary
 
 
-class ReasoningSummaryValue(Enum):
+class ReasoningSummaryValue(StrEnum):
     auto = "auto"
     concise = "concise"
     detailed = "detailed"
 
 
-class ReasoningSummary(RootModel[ReasoningSummaryValue | Literal["none"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
+class NoneReasoningSummary(RootModel[Literal["none"]]):
     root: Annotated[
-        ReasoningSummaryValue | Literal["none"],
+        Literal["none"],
+        Field(
+            description="Option to disable reasoning summaries.",
+            title="NoneReasoningSummary",
+        ),
+    ]
+
+
+class ReasoningSummary(RootModel[ReasoningSummaryValue | NoneReasoningSummary]):
+    root: Annotated[
+        ReasoningSummaryValue | NoneReasoningSummary,
         Field(
             description="A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries"
         ),
@@ -1908,16 +2437,10 @@ class RemoteSkillSummary(BaseModel):
 
 
 class RequestId(RootModel[str | int]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str | int
 
 
 class ResidencyRequirement(RootModel[Literal["us"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["us"]
 
 
@@ -1928,7 +2451,7 @@ class Resource(BaseModel):
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
     annotations: Any | None = None
     description: str | None = None
-    icons: list | None = None
+    icons: list[Any] | None = None
     mime_type: Annotated[str | None, Field(alias="mimeType")] = None
     name: str
     size: int | None = None
@@ -1948,6 +2471,10 @@ class ResourceTemplate(BaseModel):
     uri_template: Annotated[str, Field(alias="uriTemplate")]
 
 
+class MessageResponseItemType(RootModel[Literal["message"]]):
+    root: Annotated[Literal["message"], Field(title="MessageResponseItemType")]
+
+
 class MessageResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1957,7 +2484,11 @@ class MessageResponseItem(BaseModel):
     id: str | None = None
     phase: MessagePhase | None = None
     role: str
-    type: Annotated[Literal["message"], Field(title="MessageResponseItemType")]
+    type: Annotated[MessageResponseItemType, Field(title="MessageResponseItemType")]
+
+
+class ReasoningResponseItemType(RootModel[Literal["reasoning"]]):
+    root: Annotated[Literal["reasoning"], Field(title="ReasoningResponseItemType")]
 
 
 class ReasoningResponseItem(BaseModel):
@@ -1968,7 +2499,13 @@ class ReasoningResponseItem(BaseModel):
     encrypted_content: str | None = None
     id: str
     summary: list[ReasoningItemReasoningSummary]
-    type: Annotated[Literal["reasoning"], Field(title="ReasoningResponseItemType")]
+    type: Annotated[ReasoningResponseItemType, Field(title="ReasoningResponseItemType")]
+
+
+class LocalShellCallResponseItemType(RootModel[Literal["local_shell_call"]]):
+    root: Annotated[
+        Literal["local_shell_call"], Field(title="LocalShellCallResponseItemType")
+    ]
 
 
 class LocalShellCallResponseItem(BaseModel):
@@ -1987,7 +2524,13 @@ class LocalShellCallResponseItem(BaseModel):
     ] = None
     status: LocalShellStatus
     type: Annotated[
-        Literal["local_shell_call"], Field(title="LocalShellCallResponseItemType")
+        LocalShellCallResponseItemType, Field(title="LocalShellCallResponseItemType")
+    ]
+
+
+class FunctionCallResponseItemType(RootModel[Literal["function_call"]]):
+    root: Annotated[
+        Literal["function_call"], Field(title="FunctionCallResponseItemType")
     ]
 
 
@@ -2001,7 +2544,13 @@ class FunctionCallResponseItem(BaseModel):
     name: str
     namespace: str | None = None
     type: Annotated[
-        Literal["function_call"], Field(title="FunctionCallResponseItemType")
+        FunctionCallResponseItemType, Field(title="FunctionCallResponseItemType")
+    ]
+
+
+class ToolSearchCallResponseItemType(RootModel[Literal["tool_search_call"]]):
+    root: Annotated[
+        Literal["tool_search_call"], Field(title="ToolSearchCallResponseItemType")
     ]
 
 
@@ -2015,7 +2564,20 @@ class ToolSearchCallResponseItem(BaseModel):
     id: str | None = None
     status: str | None = None
     type: Annotated[
-        Literal["tool_search_call"], Field(title="ToolSearchCallResponseItemType")
+        ToolSearchCallResponseItemType, Field(title="ToolSearchCallResponseItemType")
+    ]
+
+
+class FunctionCallOutputResponseItemType(RootModel[Literal["function_call_output"]]):
+    root: Annotated[
+        Literal["function_call_output"],
+        Field(title="FunctionCallOutputResponseItemType"),
+    ]
+
+
+class CustomToolCallResponseItemType(RootModel[Literal["custom_tool_call"]]):
+    root: Annotated[
+        Literal["custom_tool_call"], Field(title="CustomToolCallResponseItemType")
     ]
 
 
@@ -2029,7 +2591,22 @@ class CustomToolCallResponseItem(BaseModel):
     name: str
     status: str | None = None
     type: Annotated[
-        Literal["custom_tool_call"], Field(title="CustomToolCallResponseItemType")
+        CustomToolCallResponseItemType, Field(title="CustomToolCallResponseItemType")
+    ]
+
+
+class CustomToolCallOutputResponseItemType(
+    RootModel[Literal["custom_tool_call_output"]]
+):
+    root: Annotated[
+        Literal["custom_tool_call_output"],
+        Field(title="CustomToolCallOutputResponseItemType"),
+    ]
+
+
+class ToolSearchOutputResponseItemType(RootModel[Literal["tool_search_output"]]):
+    root: Annotated[
+        Literal["tool_search_output"], Field(title="ToolSearchOutputResponseItemType")
     ]
 
 
@@ -2040,9 +2617,23 @@ class ToolSearchOutputResponseItem(BaseModel):
     call_id: str | None = None
     execution: str
     status: str
-    tools: list
+    tools: list[Any]
     type: Annotated[
-        Literal["tool_search_output"], Field(title="ToolSearchOutputResponseItemType")
+        ToolSearchOutputResponseItemType,
+        Field(title="ToolSearchOutputResponseItemType"),
+    ]
+
+
+class WebSearchCallResponseItemType(RootModel[Literal["web_search_call"]]):
+    root: Annotated[
+        Literal["web_search_call"], Field(title="WebSearchCallResponseItemType")
+    ]
+
+
+class ImageGenerationCallResponseItemType(RootModel[Literal["image_generation_call"]]):
+    root: Annotated[
+        Literal["image_generation_call"],
+        Field(title="ImageGenerationCallResponseItemType"),
     ]
 
 
@@ -2055,8 +2646,14 @@ class ImageGenerationCallResponseItem(BaseModel):
     revised_prompt: str | None = None
     status: str
     type: Annotated[
-        Literal["image_generation_call"],
+        ImageGenerationCallResponseItemType,
         Field(title="ImageGenerationCallResponseItemType"),
+    ]
+
+
+class GhostSnapshotResponseItemType(RootModel[Literal["ghost_snapshot"]]):
+    root: Annotated[
+        Literal["ghost_snapshot"], Field(title="GhostSnapshotResponseItemType")
     ]
 
 
@@ -2066,8 +2663,12 @@ class GhostSnapshotResponseItem(BaseModel):
     )
     ghost_commit: GhostCommit
     type: Annotated[
-        Literal["ghost_snapshot"], Field(title="GhostSnapshotResponseItemType")
+        GhostSnapshotResponseItemType, Field(title="GhostSnapshotResponseItemType")
     ]
+
+
+class CompactionResponseItemType(RootModel[Literal["compaction"]]):
+    root: Annotated[Literal["compaction"], Field(title="CompactionResponseItemType")]
 
 
 class CompactionResponseItem(BaseModel):
@@ -2075,14 +2676,26 @@ class CompactionResponseItem(BaseModel):
         populate_by_name=True,
     )
     encrypted_content: str
-    type: Annotated[Literal["compaction"], Field(title="CompactionResponseItemType")]
+    type: Annotated[
+        CompactionResponseItemType, Field(title="CompactionResponseItemType")
+    ]
+
+
+class OtherResponseItemType(RootModel[Literal["other"]]):
+    root: Annotated[Literal["other"], Field(title="OtherResponseItemType")]
 
 
 class OtherResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["other"], Field(title="OtherResponseItemType")]
+    type: Annotated[OtherResponseItemType, Field(title="OtherResponseItemType")]
+
+
+class SearchResponsesApiWebSearchActionType(RootModel[Literal["search"]]):
+    root: Annotated[
+        Literal["search"], Field(title="SearchResponsesApiWebSearchActionType")
+    ]
 
 
 class SearchResponsesApiWebSearchAction(BaseModel):
@@ -2092,7 +2705,14 @@ class SearchResponsesApiWebSearchAction(BaseModel):
     queries: list[str] | None = None
     query: str | None = None
     type: Annotated[
-        Literal["search"], Field(title="SearchResponsesApiWebSearchActionType")
+        SearchResponsesApiWebSearchActionType,
+        Field(title="SearchResponsesApiWebSearchActionType"),
+    ]
+
+
+class OpenPageResponsesApiWebSearchActionType(RootModel[Literal["open_page"]]):
+    root: Annotated[
+        Literal["open_page"], Field(title="OpenPageResponsesApiWebSearchActionType")
     ]
 
 
@@ -2101,9 +2721,17 @@ class OpenPageResponsesApiWebSearchAction(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["open_page"], Field(title="OpenPageResponsesApiWebSearchActionType")
+        OpenPageResponsesApiWebSearchActionType,
+        Field(title="OpenPageResponsesApiWebSearchActionType"),
     ]
     url: str | None = None
+
+
+class FindInPageResponsesApiWebSearchActionType(RootModel[Literal["find_in_page"]]):
+    root: Annotated[
+        Literal["find_in_page"],
+        Field(title="FindInPageResponsesApiWebSearchActionType"),
+    ]
 
 
 class FindInPageResponsesApiWebSearchAction(BaseModel):
@@ -2112,10 +2740,16 @@ class FindInPageResponsesApiWebSearchAction(BaseModel):
     )
     pattern: str | None = None
     type: Annotated[
-        Literal["find_in_page"],
+        FindInPageResponsesApiWebSearchActionType,
         Field(title="FindInPageResponsesApiWebSearchActionType"),
     ]
     url: str | None = None
+
+
+class OtherResponsesApiWebSearchActionType(RootModel[Literal["other"]]):
+    root: Annotated[
+        Literal["other"], Field(title="OtherResponsesApiWebSearchActionType")
+    ]
 
 
 class OtherResponsesApiWebSearchAction(BaseModel):
@@ -2123,7 +2757,8 @@ class OtherResponsesApiWebSearchAction(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["other"], Field(title="OtherResponsesApiWebSearchActionType")
+        OtherResponsesApiWebSearchActionType,
+        Field(title="OtherResponsesApiWebSearchActionType"),
     ]
 
 
@@ -2135,9 +2770,6 @@ class ResponsesApiWebSearchAction(
         | OtherResponsesApiWebSearchAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         SearchResponsesApiWebSearchAction
         | OpenPageResponsesApiWebSearchAction
@@ -2146,9 +2778,15 @@ class ResponsesApiWebSearchAction(
     )
 
 
-class ReviewDelivery(Enum):
+class ReviewDelivery(StrEnum):
     inline = "inline"
     detached = "detached"
+
+
+class UncommittedChangesReviewTargetType(RootModel[Literal["uncommittedChanges"]]):
+    root: Annotated[
+        Literal["uncommittedChanges"], Field(title="UncommittedChangesReviewTargetType")
+    ]
 
 
 class UncommittedChangesReviewTarget(BaseModel):
@@ -2156,8 +2794,13 @@ class UncommittedChangesReviewTarget(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["uncommittedChanges"], Field(title="UncommittedChangesReviewTargetType")
+        UncommittedChangesReviewTargetType,
+        Field(title="UncommittedChangesReviewTargetType"),
     ]
+
+
+class BaseBranchReviewTargetType(RootModel[Literal["baseBranch"]]):
+    root: Annotated[Literal["baseBranch"], Field(title="BaseBranchReviewTargetType")]
 
 
 class BaseBranchReviewTarget(BaseModel):
@@ -2165,7 +2808,13 @@ class BaseBranchReviewTarget(BaseModel):
         populate_by_name=True,
     )
     branch: str
-    type: Annotated[Literal["baseBranch"], Field(title="BaseBranchReviewTargetType")]
+    type: Annotated[
+        BaseBranchReviewTargetType, Field(title="BaseBranchReviewTargetType")
+    ]
+
+
+class CommitReviewTargetType(RootModel[Literal["commit"]]):
+    root: Annotated[Literal["commit"], Field(title="CommitReviewTargetType")]
 
 
 class CommitReviewTarget(BaseModel):
@@ -2179,7 +2828,11 @@ class CommitReviewTarget(BaseModel):
             description="Optional human-readable label (e.g., commit subject) for UIs."
         ),
     ] = None
-    type: Annotated[Literal["commit"], Field(title="CommitReviewTargetType")]
+    type: Annotated[CommitReviewTargetType, Field(title="CommitReviewTargetType")]
+
+
+class CustomReviewTargetType(RootModel[Literal["custom"]]):
+    root: Annotated[Literal["custom"], Field(title="CustomReviewTargetType")]
 
 
 class CustomReviewTarget(BaseModel):
@@ -2187,7 +2840,7 @@ class CustomReviewTarget(BaseModel):
         populate_by_name=True,
     )
     instructions: str
-    type: Annotated[Literal["custom"], Field(title="CustomReviewTargetType")]
+    type: Annotated[CustomReviewTargetType, Field(title="CustomReviewTargetType")]
 
 
 class ReviewTarget(
@@ -2198,9 +2851,6 @@ class ReviewTarget(
         | CustomReviewTarget
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         UncommittedChangesReviewTarget
         | BaseBranchReviewTarget
@@ -2209,10 +2859,16 @@ class ReviewTarget(
     )
 
 
-class SandboxMode(Enum):
+class SandboxMode(StrEnum):
     read_only = "read-only"
     workspace_write = "workspace-write"
     danger_full_access = "danger-full-access"
+
+
+class DangerFullAccessSandboxPolicyType(RootModel[Literal["dangerFullAccess"]]):
+    root: Annotated[
+        Literal["dangerFullAccess"], Field(title="DangerFullAccessSandboxPolicyType")
+    ]
 
 
 class DangerFullAccessSandboxPolicy(BaseModel):
@@ -2220,17 +2876,31 @@ class DangerFullAccessSandboxPolicy(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[
-        Literal["dangerFullAccess"], Field(title="DangerFullAccessSandboxPolicyType")
+        DangerFullAccessSandboxPolicyType,
+        Field(title="DangerFullAccessSandboxPolicyType"),
     ]
+
+
+class ReadOnlySandboxPolicyType(RootModel[Literal["readOnly"]]):
+    root: Annotated[Literal["readOnly"], Field(title="ReadOnlySandboxPolicyType")]
 
 
 class ReadOnlySandboxPolicy(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    access: Annotated[ReadOnlyAccess | None, Field()] = {"type": "fullAccess"}
+    access: Annotated[
+        ReadOnlyAccess | None,
+        Field(default_factory=lambda: ReadOnlyAccess({"type": "fullAccess"})),
+    ]
     network_access: Annotated[bool | None, Field(alias="networkAccess")] = False
-    type: Annotated[Literal["readOnly"], Field(title="ReadOnlySandboxPolicyType")]
+    type: Annotated[ReadOnlySandboxPolicyType, Field(title="ReadOnlySandboxPolicyType")]
+
+
+class ExternalSandboxSandboxPolicyType(RootModel[Literal["externalSandbox"]]):
+    root: Annotated[
+        Literal["externalSandbox"], Field(title="ExternalSandboxSandboxPolicyType")
+    ]
 
 
 class ExternalSandboxSandboxPolicy(BaseModel):
@@ -2241,7 +2911,14 @@ class ExternalSandboxSandboxPolicy(BaseModel):
         "restricted"
     )
     type: Annotated[
-        Literal["externalSandbox"], Field(title="ExternalSandboxSandboxPolicyType")
+        ExternalSandboxSandboxPolicyType,
+        Field(title="ExternalSandboxSandboxPolicyType"),
+    ]
+
+
+class WorkspaceWriteSandboxPolicyType(RootModel[Literal["workspaceWrite"]]):
+    root: Annotated[
+        Literal["workspaceWrite"], Field(title="WorkspaceWriteSandboxPolicyType")
     ]
 
 
@@ -2255,14 +2932,18 @@ class WorkspaceWriteSandboxPolicy(BaseModel):
     ] = False
     network_access: Annotated[bool | None, Field(alias="networkAccess")] = False
     read_only_access: Annotated[
-        ReadOnlyAccess | None, Field(alias="readOnlyAccess")
-    ] = {"type": "fullAccess"}
+        ReadOnlyAccess | None,
+        Field(
+            default_factory=lambda: ReadOnlyAccess({"type": "fullAccess"}),
+            alias="readOnlyAccess",
+        ),
+    ]
     type: Annotated[
-        Literal["workspaceWrite"], Field(title="WorkspaceWriteSandboxPolicyType")
+        WorkspaceWriteSandboxPolicyType, Field(title="WorkspaceWriteSandboxPolicyType")
     ]
     writable_roots: Annotated[
-        list[AbsolutePathBuf] | None, Field(alias="writableRoots")
-    ] = []
+        list[AbsolutePathBuf] | None, Field(default_factory=list, alias="writableRoots")
+    ]
 
 
 class SandboxPolicy(
@@ -2273,9 +2954,6 @@ class SandboxPolicy(
         | WorkspaceWriteSandboxPolicy
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         DangerFullAccessSandboxPolicy
         | ReadOnlySandboxPolicy
@@ -2294,15 +2972,159 @@ class SandboxWorkspaceWrite(BaseModel):
     writable_roots: list[str] | None = []
 
 
+class ErrorNotificationMethod(RootModel[Literal["error"]]):
+    root: Annotated[Literal["error"], Field(title="ErrorNotificationMethod")]
+
+
+class ThreadStartedNotificationMethod(RootModel[Literal["thread/started"]]):
+    root: Annotated[
+        Literal["thread/started"], Field(title="Thread/startedNotificationMethod")
+    ]
+
+
+class ThreadStatusChangedNotificationMethod(
+    RootModel[Literal["thread/status/changed"]]
+):
+    root: Annotated[
+        Literal["thread/status/changed"],
+        Field(title="Thread/status/changedNotificationMethod"),
+    ]
+
+
+class ThreadArchivedNotificationMethod(RootModel[Literal["thread/archived"]]):
+    root: Annotated[
+        Literal["thread/archived"], Field(title="Thread/archivedNotificationMethod")
+    ]
+
+
+class ThreadUnarchivedNotificationMethod(RootModel[Literal["thread/unarchived"]]):
+    root: Annotated[
+        Literal["thread/unarchived"], Field(title="Thread/unarchivedNotificationMethod")
+    ]
+
+
+class ThreadClosedNotificationMethod(RootModel[Literal["thread/closed"]]):
+    root: Annotated[
+        Literal["thread/closed"], Field(title="Thread/closedNotificationMethod")
+    ]
+
+
+class SkillsChangedNotificationMethod(RootModel[Literal["skills/changed"]]):
+    root: Annotated[
+        Literal["skills/changed"], Field(title="Skills/changedNotificationMethod")
+    ]
+
+
+class SkillUsedNotificationMethod(RootModel[Literal["skill/used"]]):
+    root: Annotated[Literal["skill/used"], Field(title="Skill/usedNotificationMethod")]
+
+
+class ThreadNameUpdatedNotificationMethod(RootModel[Literal["thread/name/updated"]]):
+    root: Annotated[
+        Literal["thread/name/updated"],
+        Field(title="Thread/name/updatedNotificationMethod"),
+    ]
+
+
+class ThreadTokenUsageUpdatedNotificationMethod(
+    RootModel[Literal["thread/tokenUsage/updated"]]
+):
+    root: Annotated[
+        Literal["thread/tokenUsage/updated"],
+        Field(title="Thread/tokenUsage/updatedNotificationMethod"),
+    ]
+
+
+class TurnStartedNotificationMethod(RootModel[Literal["turn/started"]]):
+    root: Annotated[
+        Literal["turn/started"], Field(title="Turn/startedNotificationMethod")
+    ]
+
+
+class HookStartedNotificationMethod(RootModel[Literal["hook/started"]]):
+    root: Annotated[
+        Literal["hook/started"], Field(title="Hook/startedNotificationMethod")
+    ]
+
+
+class TurnCompletedNotificationMethod(RootModel[Literal["turn/completed"]]):
+    root: Annotated[
+        Literal["turn/completed"], Field(title="Turn/completedNotificationMethod")
+    ]
+
+
+class HookCompletedNotificationMethod(RootModel[Literal["hook/completed"]]):
+    root: Annotated[
+        Literal["hook/completed"], Field(title="Hook/completedNotificationMethod")
+    ]
+
+
+class TurnDiffUpdatedNotificationMethod(RootModel[Literal["turn/diff/updated"]]):
+    root: Annotated[
+        Literal["turn/diff/updated"], Field(title="Turn/diff/updatedNotificationMethod")
+    ]
+
+
+class TurnPlanUpdatedNotificationMethod(RootModel[Literal["turn/plan/updated"]]):
+    root: Annotated[
+        Literal["turn/plan/updated"], Field(title="Turn/plan/updatedNotificationMethod")
+    ]
+
+
+class ItemStartedNotificationMethod(RootModel[Literal["item/started"]]):
+    root: Annotated[
+        Literal["item/started"], Field(title="Item/startedNotificationMethod")
+    ]
+
+
+class ItemAutoApprovalReviewStartedNotificationMethod(
+    RootModel[Literal["item/autoApprovalReview/started"]]
+):
+    root: Annotated[
+        Literal["item/autoApprovalReview/started"],
+        Field(title="Item/autoApprovalReview/startedNotificationMethod"),
+    ]
+
+
+class ItemAutoApprovalReviewCompletedNotificationMethod(
+    RootModel[Literal["item/autoApprovalReview/completed"]]
+):
+    root: Annotated[
+        Literal["item/autoApprovalReview/completed"],
+        Field(title="Item/autoApprovalReview/completedNotificationMethod"),
+    ]
+
+
+class ItemCompletedNotificationMethod(RootModel[Literal["item/completed"]]):
+    root: Annotated[
+        Literal["item/completed"], Field(title="Item/completedNotificationMethod")
+    ]
+
+
+class ItemAgentMessageDeltaNotificationMethod(
+    RootModel[Literal["item/agentMessage/delta"]]
+):
+    root: Annotated[
+        Literal["item/agentMessage/delta"],
+        Field(title="Item/agentMessage/deltaNotificationMethod"),
+    ]
+
+
 class ItemAgentMessageDeltaServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/agentMessage/delta"],
+        ItemAgentMessageDeltaNotificationMethod,
         Field(title="Item/agentMessage/deltaNotificationMethod"),
     ]
     params: AgentMessageDeltaNotification
+
+
+class ItemPlanDeltaNotificationMethod(RootModel[Literal["item/plan/delta"]]):
+    root: Annotated[
+        Literal["item/plan/delta"], Field(title="Item/plan/deltaNotificationMethod")
+    ]
 
 
 class ItemPlanDeltaServerNotification(BaseModel):
@@ -2310,9 +3132,28 @@ class ItemPlanDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/plan/delta"], Field(title="Item/plan/deltaNotificationMethod")
+        ItemPlanDeltaNotificationMethod,
+        Field(title="Item/plan/deltaNotificationMethod"),
     ]
     params: PlanDeltaNotification
+
+
+class CommandExecOutputDeltaNotificationMethod(
+    RootModel[Literal["command/exec/outputDelta"]]
+):
+    root: Annotated[
+        Literal["command/exec/outputDelta"],
+        Field(title="Command/exec/outputDeltaNotificationMethod"),
+    ]
+
+
+class ItemCommandExecutionOutputDeltaNotificationMethod(
+    RootModel[Literal["item/commandExecution/outputDelta"]]
+):
+    root: Annotated[
+        Literal["item/commandExecution/outputDelta"],
+        Field(title="Item/commandExecution/outputDeltaNotificationMethod"),
+    ]
 
 
 class ItemCommandExecutionOutputDeltaServerNotification(BaseModel):
@@ -2320,10 +3161,28 @@ class ItemCommandExecutionOutputDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/commandExecution/outputDelta"],
+        ItemCommandExecutionOutputDeltaNotificationMethod,
         Field(title="Item/commandExecution/outputDeltaNotificationMethod"),
     ]
     params: CommandExecutionOutputDeltaNotification
+
+
+class ItemCommandExecutionTerminalInteractionNotificationMethod(
+    RootModel[Literal["item/commandExecution/terminalInteraction"]]
+):
+    root: Annotated[
+        Literal["item/commandExecution/terminalInteraction"],
+        Field(title="Item/commandExecution/terminalInteractionNotificationMethod"),
+    ]
+
+
+class ItemFileChangeOutputDeltaNotificationMethod(
+    RootModel[Literal["item/fileChange/outputDelta"]]
+):
+    root: Annotated[
+        Literal["item/fileChange/outputDelta"],
+        Field(title="Item/fileChange/outputDeltaNotificationMethod"),
+    ]
 
 
 class ItemFileChangeOutputDeltaServerNotification(BaseModel):
@@ -2331,10 +3190,28 @@ class ItemFileChangeOutputDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/fileChange/outputDelta"],
+        ItemFileChangeOutputDeltaNotificationMethod,
         Field(title="Item/fileChange/outputDeltaNotificationMethod"),
     ]
     params: FileChangeOutputDeltaNotification
+
+
+class ServerRequestResolvedNotificationMethod(
+    RootModel[Literal["serverRequest/resolved"]]
+):
+    root: Annotated[
+        Literal["serverRequest/resolved"],
+        Field(title="ServerRequest/resolvedNotificationMethod"),
+    ]
+
+
+class ItemMcpToolCallProgressNotificationMethod(
+    RootModel[Literal["item/mcpToolCall/progress"]]
+):
+    root: Annotated[
+        Literal["item/mcpToolCall/progress"],
+        Field(title="Item/mcpToolCall/progressNotificationMethod"),
+    ]
 
 
 class ItemMcpToolCallProgressServerNotification(BaseModel):
@@ -2342,10 +3219,19 @@ class ItemMcpToolCallProgressServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/mcpToolCall/progress"],
+        ItemMcpToolCallProgressNotificationMethod,
         Field(title="Item/mcpToolCall/progressNotificationMethod"),
     ]
     params: McpToolCallProgressNotification
+
+
+class McpServerOauthLoginCompletedNotificationMethod(
+    RootModel[Literal["mcpServer/oauthLogin/completed"]]
+):
+    root: Annotated[
+        Literal["mcpServer/oauthLogin/completed"],
+        Field(title="McpServer/oauthLogin/completedNotificationMethod"),
+    ]
 
 
 class McpServerOauthLoginCompletedServerNotification(BaseModel):
@@ -2353,10 +3239,40 @@ class McpServerOauthLoginCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["mcpServer/oauthLogin/completed"],
+        McpServerOauthLoginCompletedNotificationMethod,
         Field(title="McpServer/oauthLogin/completedNotificationMethod"),
     ]
     params: McpServerOauthLoginCompletedNotification
+
+
+class AccountUpdatedNotificationMethod(RootModel[Literal["account/updated"]]):
+    root: Annotated[
+        Literal["account/updated"], Field(title="Account/updatedNotificationMethod")
+    ]
+
+
+class AccountRateLimitsUpdatedNotificationMethod(
+    RootModel[Literal["account/rateLimits/updated"]]
+):
+    root: Annotated[
+        Literal["account/rateLimits/updated"],
+        Field(title="Account/rateLimits/updatedNotificationMethod"),
+    ]
+
+
+class AppListUpdatedNotificationMethod(RootModel[Literal["app/list/updated"]]):
+    root: Annotated[
+        Literal["app/list/updated"], Field(title="App/list/updatedNotificationMethod")
+    ]
+
+
+class ItemReasoningSummaryTextDeltaNotificationMethod(
+    RootModel[Literal["item/reasoning/summaryTextDelta"]]
+):
+    root: Annotated[
+        Literal["item/reasoning/summaryTextDelta"],
+        Field(title="Item/reasoning/summaryTextDeltaNotificationMethod"),
+    ]
 
 
 class ItemReasoningSummaryTextDeltaServerNotification(BaseModel):
@@ -2364,10 +3280,19 @@ class ItemReasoningSummaryTextDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/reasoning/summaryTextDelta"],
+        ItemReasoningSummaryTextDeltaNotificationMethod,
         Field(title="Item/reasoning/summaryTextDeltaNotificationMethod"),
     ]
     params: ReasoningSummaryTextDeltaNotification
+
+
+class ItemReasoningSummaryPartAddedNotificationMethod(
+    RootModel[Literal["item/reasoning/summaryPartAdded"]]
+):
+    root: Annotated[
+        Literal["item/reasoning/summaryPartAdded"],
+        Field(title="Item/reasoning/summaryPartAddedNotificationMethod"),
+    ]
 
 
 class ItemReasoningSummaryPartAddedServerNotification(BaseModel):
@@ -2375,10 +3300,19 @@ class ItemReasoningSummaryPartAddedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/reasoning/summaryPartAdded"],
+        ItemReasoningSummaryPartAddedNotificationMethod,
         Field(title="Item/reasoning/summaryPartAddedNotificationMethod"),
     ]
     params: ReasoningSummaryPartAddedNotification
+
+
+class ItemReasoningTextDeltaNotificationMethod(
+    RootModel[Literal["item/reasoning/textDelta"]]
+):
+    root: Annotated[
+        Literal["item/reasoning/textDelta"],
+        Field(title="Item/reasoning/textDeltaNotificationMethod"),
+    ]
 
 
 class ItemReasoningTextDeltaServerNotification(BaseModel):
@@ -2386,10 +3320,16 @@ class ItemReasoningTextDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/reasoning/textDelta"],
+        ItemReasoningTextDeltaNotificationMethod,
         Field(title="Item/reasoning/textDeltaNotificationMethod"),
     ]
     params: ReasoningTextDeltaNotification
+
+
+class ThreadCompactedNotificationMethod(RootModel[Literal["thread/compacted"]]):
+    root: Annotated[
+        Literal["thread/compacted"], Field(title="Thread/compactedNotificationMethod")
+    ]
 
 
 class ThreadCompactedServerNotification(BaseModel):
@@ -2397,9 +3337,16 @@ class ThreadCompactedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/compacted"], Field(title="Thread/compactedNotificationMethod")
+        ThreadCompactedNotificationMethod,
+        Field(title="Thread/compactedNotificationMethod"),
     ]
     params: ContextCompactedNotification
+
+
+class ModelReroutedNotificationMethod(RootModel[Literal["model/rerouted"]]):
+    root: Annotated[
+        Literal["model/rerouted"], Field(title="Model/reroutedNotificationMethod")
+    ]
 
 
 class ModelReroutedServerNotification(BaseModel):
@@ -2407,9 +3354,15 @@ class ModelReroutedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["model/rerouted"], Field(title="Model/reroutedNotificationMethod")
+        ModelReroutedNotificationMethod, Field(title="Model/reroutedNotificationMethod")
     ]
     params: ModelReroutedNotification
+
+
+class DeprecationNoticeNotificationMethod(RootModel[Literal["deprecationNotice"]]):
+    root: Annotated[
+        Literal["deprecationNotice"], Field(title="DeprecationNoticeNotificationMethod")
+    ]
 
 
 class DeprecationNoticeServerNotification(BaseModel):
@@ -2417,9 +3370,25 @@ class DeprecationNoticeServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["deprecationNotice"], Field(title="DeprecationNoticeNotificationMethod")
+        DeprecationNoticeNotificationMethod,
+        Field(title="DeprecationNoticeNotificationMethod"),
     ]
     params: DeprecationNoticeNotification
+
+
+class ConfigWarningNotificationMethod(RootModel[Literal["configWarning"]]):
+    root: Annotated[
+        Literal["configWarning"], Field(title="ConfigWarningNotificationMethod")
+    ]
+
+
+class FuzzyFileSearchSessionUpdatedNotificationMethod(
+    RootModel[Literal["fuzzyFileSearch/sessionUpdated"]]
+):
+    root: Annotated[
+        Literal["fuzzyFileSearch/sessionUpdated"],
+        Field(title="FuzzyFileSearch/sessionUpdatedNotificationMethod"),
+    ]
 
 
 class FuzzyFileSearchSessionUpdatedServerNotification(BaseModel):
@@ -2427,10 +3396,19 @@ class FuzzyFileSearchSessionUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["fuzzyFileSearch/sessionUpdated"],
+        FuzzyFileSearchSessionUpdatedNotificationMethod,
         Field(title="FuzzyFileSearch/sessionUpdatedNotificationMethod"),
     ]
     params: FuzzyFileSearchSessionUpdatedNotification
+
+
+class FuzzyFileSearchSessionCompletedNotificationMethod(
+    RootModel[Literal["fuzzyFileSearch/sessionCompleted"]]
+):
+    root: Annotated[
+        Literal["fuzzyFileSearch/sessionCompleted"],
+        Field(title="FuzzyFileSearch/sessionCompletedNotificationMethod"),
+    ]
 
 
 class FuzzyFileSearchSessionCompletedServerNotification(BaseModel):
@@ -2438,10 +3416,82 @@ class FuzzyFileSearchSessionCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["fuzzyFileSearch/sessionCompleted"],
+        FuzzyFileSearchSessionCompletedNotificationMethod,
         Field(title="FuzzyFileSearch/sessionCompletedNotificationMethod"),
     ]
     params: FuzzyFileSearchSessionCompletedNotification
+
+
+class ThreadRealtimeStartedNotificationMethod(
+    RootModel[Literal["thread/realtime/started"]]
+):
+    root: Annotated[
+        Literal["thread/realtime/started"],
+        Field(title="Thread/realtime/startedNotificationMethod"),
+    ]
+
+
+class ThreadRealtimeItemAddedNotificationMethod(
+    RootModel[Literal["thread/realtime/itemAdded"]]
+):
+    root: Annotated[
+        Literal["thread/realtime/itemAdded"],
+        Field(title="Thread/realtime/itemAddedNotificationMethod"),
+    ]
+
+
+class ThreadRealtimeOutputAudioDeltaNotificationMethod(
+    RootModel[Literal["thread/realtime/outputAudio/delta"]]
+):
+    root: Annotated[
+        Literal["thread/realtime/outputAudio/delta"],
+        Field(title="Thread/realtime/outputAudio/deltaNotificationMethod"),
+    ]
+
+
+class ThreadRealtimeErrorNotificationMethod(
+    RootModel[Literal["thread/realtime/error"]]
+):
+    root: Annotated[
+        Literal["thread/realtime/error"],
+        Field(title="Thread/realtime/errorNotificationMethod"),
+    ]
+
+
+class ThreadRealtimeClosedNotificationMethod(
+    RootModel[Literal["thread/realtime/closed"]]
+):
+    root: Annotated[
+        Literal["thread/realtime/closed"],
+        Field(title="Thread/realtime/closedNotificationMethod"),
+    ]
+
+
+class WindowsWorldWritableWarningNotificationMethod(
+    RootModel[Literal["windows/worldWritableWarning"]]
+):
+    root: Annotated[
+        Literal["windows/worldWritableWarning"],
+        Field(title="Windows/worldWritableWarningNotificationMethod"),
+    ]
+
+
+class WindowsSandboxSetupCompletedNotificationMethod(
+    RootModel[Literal["windowsSandbox/setupCompleted"]]
+):
+    root: Annotated[
+        Literal["windowsSandbox/setupCompleted"],
+        Field(title="WindowsSandbox/setupCompletedNotificationMethod"),
+    ]
+
+
+class AccountLoginCompletedNotificationMethod(
+    RootModel[Literal["account/login/completed"]]
+):
+    root: Annotated[
+        Literal["account/login/completed"],
+        Field(title="Account/login/completedNotificationMethod"),
+    ]
 
 
 class AccountLoginCompletedServerNotification(BaseModel):
@@ -2449,7 +3499,7 @@ class AccountLoginCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["account/login/completed"],
+        AccountLoginCompletedNotificationMethod,
         Field(title="Account/login/completedNotificationMethod"),
     ]
     params: AccountLoginCompletedNotification
@@ -2463,12 +3513,12 @@ class ServerRequestResolvedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
-class ServiceTier(Enum):
+class ServiceTier(StrEnum):
     fast = "fast"
     flex = "flex"
 
 
-class SessionSourceValue(Enum):
+class SessionSourceValue(StrEnum):
     cli = "cli"
     vscode = "vscode"
     exec = "exec"
@@ -2505,7 +3555,12 @@ class SkillInterface(BaseModel):
     short_description: Annotated[str | None, Field(alias="shortDescription")] = None
 
 
-class SkillScope(Enum):
+class SkillInvocationType(StrEnum):
+    explicit = "explicit"
+    implicit = "implicit"
+
+
+class SkillScope(StrEnum):
     user = "user"
     repo = "repo"
     system = "system"
@@ -2535,8 +3590,17 @@ class SkillToolDependency(BaseModel):
     value: str
 
 
+class SkillUsedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    invocation_type: Annotated[SkillInvocationType, Field(alias="invocationType")]
+    name: str
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class SkillsChangedNotification(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2626,7 +3690,7 @@ class SkillsRemoteWriteResponse(BaseModel):
     path: str
 
 
-class SubAgentSourceValue(Enum):
+class SubAgentSourceValue(StrEnum):
     review = "review"
     compact = "compact"
     memory_consolidation = "memory_consolidation"
@@ -2689,7 +3753,7 @@ class TextRange(BaseModel):
     start: TextPosition
 
 
-class ThreadActiveFlag(Enum):
+class ThreadActiveFlag(StrEnum):
     waiting_on_approval = "waitingOnApproval"
     waiting_on_user_input = "waitingOnUserInput"
 
@@ -2702,7 +3766,6 @@ class ThreadArchiveParams(BaseModel):
 
 
 class ThreadArchiveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2730,7 +3793,6 @@ class ThreadCompactStartParams(BaseModel):
 
 
 class ThreadCompactStartResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2768,10 +3830,15 @@ class ThreadForkParams(BaseModel):
 
 
 class ThreadId(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
+
+
+class UserMessageThreadItemType(RootModel[Literal["userMessage"]]):
+    root: Annotated[Literal["userMessage"], Field(title="UserMessageThreadItemType")]
+
+
+class AgentMessageThreadItemType(RootModel[Literal["agentMessage"]]):
+    root: Annotated[Literal["agentMessage"], Field(title="AgentMessageThreadItemType")]
 
 
 class AgentMessageThreadItem(BaseModel):
@@ -2781,7 +3848,13 @@ class AgentMessageThreadItem(BaseModel):
     id: str
     phase: MessagePhase | None = None
     text: str
-    type: Annotated[Literal["agentMessage"], Field(title="AgentMessageThreadItemType")]
+    type: Annotated[
+        AgentMessageThreadItemType, Field(title="AgentMessageThreadItemType")
+    ]
+
+
+class PlanThreadItemType(RootModel[Literal["plan"]]):
+    root: Annotated[Literal["plan"], Field(title="PlanThreadItemType")]
 
 
 class PlanThreadItem(BaseModel):
@@ -2790,7 +3863,11 @@ class PlanThreadItem(BaseModel):
     )
     id: str
     text: str
-    type: Annotated[Literal["plan"], Field(title="PlanThreadItemType")]
+    type: Annotated[PlanThreadItemType, Field(title="PlanThreadItemType")]
+
+
+class ReasoningThreadItemType(RootModel[Literal["reasoning"]]):
+    root: Annotated[Literal["reasoning"], Field(title="ReasoningThreadItemType")]
 
 
 class ReasoningThreadItem(BaseModel):
@@ -2800,7 +3877,13 @@ class ReasoningThreadItem(BaseModel):
     content: list[str] | None = []
     id: str
     summary: list[str] | None = []
-    type: Annotated[Literal["reasoning"], Field(title="ReasoningThreadItemType")]
+    type: Annotated[ReasoningThreadItemType, Field(title="ReasoningThreadItemType")]
+
+
+class CommandExecutionThreadItemType(RootModel[Literal["commandExecution"]]):
+    root: Annotated[
+        Literal["commandExecution"], Field(title="CommandExecutionThreadItemType")
+    ]
 
 
 class CommandExecutionThreadItem(BaseModel):
@@ -2843,8 +3926,16 @@ class CommandExecutionThreadItem(BaseModel):
     ] = None
     status: CommandExecutionStatus
     type: Annotated[
-        Literal["commandExecution"], Field(title="CommandExecutionThreadItemType")
+        CommandExecutionThreadItemType, Field(title="CommandExecutionThreadItemType")
     ]
+
+
+class FileChangeThreadItemType(RootModel[Literal["fileChange"]]):
+    root: Annotated[Literal["fileChange"], Field(title="FileChangeThreadItemType")]
+
+
+class McpToolCallThreadItemType(RootModel[Literal["mcpToolCall"]]):
+    root: Annotated[Literal["mcpToolCall"], Field(title="McpToolCallThreadItemType")]
 
 
 class McpToolCallThreadItem(BaseModel):
@@ -2865,7 +3956,13 @@ class McpToolCallThreadItem(BaseModel):
     server: str
     status: McpToolCallStatus
     tool: str
-    type: Annotated[Literal["mcpToolCall"], Field(title="McpToolCallThreadItemType")]
+    type: Annotated[McpToolCallThreadItemType, Field(title="McpToolCallThreadItemType")]
+
+
+class DynamicToolCallThreadItemType(RootModel[Literal["dynamicToolCall"]]):
+    root: Annotated[
+        Literal["dynamicToolCall"], Field(title="DynamicToolCallThreadItemType")
+    ]
 
 
 class DynamicToolCallThreadItem(BaseModel):
@@ -2888,8 +3985,22 @@ class DynamicToolCallThreadItem(BaseModel):
     success: bool | None = None
     tool: str
     type: Annotated[
-        Literal["dynamicToolCall"], Field(title="DynamicToolCallThreadItemType")
+        DynamicToolCallThreadItemType, Field(title="DynamicToolCallThreadItemType")
     ]
+
+
+class CollabAgentToolCallThreadItemType(RootModel[Literal["collabAgentToolCall"]]):
+    root: Annotated[
+        Literal["collabAgentToolCall"], Field(title="CollabAgentToolCallThreadItemType")
+    ]
+
+
+class WebSearchThreadItemType(RootModel[Literal["webSearch"]]):
+    root: Annotated[Literal["webSearch"], Field(title="WebSearchThreadItemType")]
+
+
+class ImageViewThreadItemType(RootModel[Literal["imageView"]]):
+    root: Annotated[Literal["imageView"], Field(title="ImageViewThreadItemType")]
 
 
 class ImageViewThreadItem(BaseModel):
@@ -2898,7 +4009,13 @@ class ImageViewThreadItem(BaseModel):
     )
     id: str
     path: str
-    type: Annotated[Literal["imageView"], Field(title="ImageViewThreadItemType")]
+    type: Annotated[ImageViewThreadItemType, Field(title="ImageViewThreadItemType")]
+
+
+class ImageGenerationThreadItemType(RootModel[Literal["imageGeneration"]]):
+    root: Annotated[
+        Literal["imageGeneration"], Field(title="ImageGenerationThreadItemType")
+    ]
 
 
 class ImageGenerationThreadItem(BaseModel):
@@ -2910,7 +4027,13 @@ class ImageGenerationThreadItem(BaseModel):
     revised_prompt: Annotated[str | None, Field(alias="revisedPrompt")] = None
     status: str
     type: Annotated[
-        Literal["imageGeneration"], Field(title="ImageGenerationThreadItemType")
+        ImageGenerationThreadItemType, Field(title="ImageGenerationThreadItemType")
+    ]
+
+
+class EnteredReviewModeThreadItemType(RootModel[Literal["enteredReviewMode"]]):
+    root: Annotated[
+        Literal["enteredReviewMode"], Field(title="EnteredReviewModeThreadItemType")
     ]
 
 
@@ -2921,7 +4044,13 @@ class EnteredReviewModeThreadItem(BaseModel):
     id: str
     review: str
     type: Annotated[
-        Literal["enteredReviewMode"], Field(title="EnteredReviewModeThreadItemType")
+        EnteredReviewModeThreadItemType, Field(title="EnteredReviewModeThreadItemType")
+    ]
+
+
+class ExitedReviewModeThreadItemType(RootModel[Literal["exitedReviewMode"]]):
+    root: Annotated[
+        Literal["exitedReviewMode"], Field(title="ExitedReviewModeThreadItemType")
     ]
 
 
@@ -2932,7 +4061,13 @@ class ExitedReviewModeThreadItem(BaseModel):
     id: str
     review: str
     type: Annotated[
-        Literal["exitedReviewMode"], Field(title="ExitedReviewModeThreadItemType")
+        ExitedReviewModeThreadItemType, Field(title="ExitedReviewModeThreadItemType")
+    ]
+
+
+class ContextCompactionThreadItemType(RootModel[Literal["contextCompaction"]]):
+    root: Annotated[
+        Literal["contextCompaction"], Field(title="ContextCompactionThreadItemType")
     ]
 
 
@@ -2942,7 +4077,7 @@ class ContextCompactionThreadItem(BaseModel):
     )
     id: str
     type: Annotated[
-        Literal["contextCompaction"], Field(title="ContextCompactionThreadItemType")
+        ContextCompactionThreadItemType, Field(title="ContextCompactionThreadItemType")
     ]
 
 
@@ -3144,18 +4279,17 @@ class ThreadSetNameParams(BaseModel):
 
 
 class ThreadSetNameResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class ThreadSortKey(Enum):
+class ThreadSortKey(StrEnum):
     created_at = "created_at"
     updated_at = "updated_at"
 
 
-class ThreadSourceKind(Enum):
+class ThreadSourceKind(StrEnum):
     cli = "cli"
     vscode = "vscode"
     exec = "exec"
@@ -3197,25 +4331,43 @@ class ThreadStartParams(BaseModel):
     service_tier: Annotated[ServiceTier | None, Field(alias="serviceTier")] = None
 
 
+class NotLoadedThreadStatusType(RootModel[Literal["notLoaded"]]):
+    root: Annotated[Literal["notLoaded"], Field(title="NotLoadedThreadStatusType")]
+
+
 class NotLoadedThreadStatus(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["notLoaded"], Field(title="NotLoadedThreadStatusType")]
+    type: Annotated[NotLoadedThreadStatusType, Field(title="NotLoadedThreadStatusType")]
+
+
+class IdleThreadStatusType(RootModel[Literal["idle"]]):
+    root: Annotated[Literal["idle"], Field(title="IdleThreadStatusType")]
 
 
 class IdleThreadStatus(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["idle"], Field(title="IdleThreadStatusType")]
+    type: Annotated[IdleThreadStatusType, Field(title="IdleThreadStatusType")]
+
+
+class SystemErrorThreadStatusType(RootModel[Literal["systemError"]]):
+    root: Annotated[Literal["systemError"], Field(title="SystemErrorThreadStatusType")]
 
 
 class SystemErrorThreadStatus(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["systemError"], Field(title="SystemErrorThreadStatusType")]
+    type: Annotated[
+        SystemErrorThreadStatusType, Field(title="SystemErrorThreadStatusType")
+    ]
+
+
+class ActiveThreadStatusType(RootModel[Literal["active"]]):
+    root: Annotated[Literal["active"], Field(title="ActiveThreadStatusType")]
 
 
 class ActiveThreadStatus(BaseModel):
@@ -3223,7 +4375,7 @@ class ActiveThreadStatus(BaseModel):
         populate_by_name=True,
     )
     active_flags: Annotated[list[ThreadActiveFlag], Field(alias="activeFlags")]
-    type: Annotated[Literal["active"], Field(title="ActiveThreadStatusType")]
+    type: Annotated[ActiveThreadStatusType, Field(title="ActiveThreadStatusType")]
 
 
 class ThreadStatus(
@@ -3234,9 +4386,6 @@ class ThreadStatus(
         | ActiveThreadStatus
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         NotLoadedThreadStatus
         | IdleThreadStatus
@@ -3274,7 +4423,7 @@ class ThreadUnsubscribeParams(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
-class ThreadUnsubscribeStatus(Enum):
+class ThreadUnsubscribeStatus(StrEnum):
     not_loaded = "notLoaded"
     not_subscribed = "notSubscribed"
     unsubscribed = "unsubscribed"
@@ -3298,7 +4447,7 @@ class Tool(BaseModel):
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
     annotations: Any | None = None
     description: str | None = None
-    icons: list | None = None
+    icons: list[Any] | None = None
     input_schema: Annotated[Any, Field(alias="inputSchema")]
     name: str
     output_schema: Annotated[Any | None, Field(alias="outputSchema")] = None
@@ -3334,19 +4483,18 @@ class TurnInterruptParams(BaseModel):
 
 
 class TurnInterruptResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
-class TurnPlanStepStatus(Enum):
+class TurnPlanStepStatus(StrEnum):
     pending = "pending"
     in_progress = "inProgress"
     completed = "completed"
 
 
-class TurnStatus(Enum):
+class TurnStatus(StrEnum):
     completed = "completed"
     interrupted = "interrupted"
     failed = "failed"
@@ -3360,6 +4508,10 @@ class TurnSteerResponse(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class TextUserInputType(RootModel[Literal["text"]]):
+    root: Annotated[Literal["text"], Field(title="TextUserInputType")]
+
+
 class TextUserInput(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3368,18 +4520,27 @@ class TextUserInput(BaseModel):
     text_elements: Annotated[
         list[TextElement] | None,
         Field(
-            description="UI-defined spans within `text` used to render or persist special elements."
+            default_factory=list,
+            description="UI-defined spans within `text` used to render or persist special elements.",
         ),
-    ] = []
-    type: Annotated[Literal["text"], Field(title="TextUserInputType")]
+    ]
+    type: Annotated[TextUserInputType, Field(title="TextUserInputType")]
+
+
+class ImageUserInputType(RootModel[Literal["image"]]):
+    root: Annotated[Literal["image"], Field(title="ImageUserInputType")]
 
 
 class ImageUserInput(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["image"], Field(title="ImageUserInputType")]
+    type: Annotated[ImageUserInputType, Field(title="ImageUserInputType")]
     url: str
+
+
+class LocalImageUserInputType(RootModel[Literal["localImage"]]):
+    root: Annotated[Literal["localImage"], Field(title="LocalImageUserInputType")]
 
 
 class LocalImageUserInput(BaseModel):
@@ -3387,7 +4548,11 @@ class LocalImageUserInput(BaseModel):
         populate_by_name=True,
     )
     path: str
-    type: Annotated[Literal["localImage"], Field(title="LocalImageUserInputType")]
+    type: Annotated[LocalImageUserInputType, Field(title="LocalImageUserInputType")]
+
+
+class SkillUserInputType(RootModel[Literal["skill"]]):
+    root: Annotated[Literal["skill"], Field(title="SkillUserInputType")]
 
 
 class SkillUserInput(BaseModel):
@@ -3396,7 +4561,11 @@ class SkillUserInput(BaseModel):
     )
     name: str
     path: str
-    type: Annotated[Literal["skill"], Field(title="SkillUserInputType")]
+    type: Annotated[SkillUserInputType, Field(title="SkillUserInputType")]
+
+
+class MentionUserInputType(RootModel[Literal["mention"]]):
+    root: Annotated[Literal["mention"], Field(title="MentionUserInputType")]
 
 
 class MentionUserInput(BaseModel):
@@ -3405,7 +4574,7 @@ class MentionUserInput(BaseModel):
     )
     name: str
     path: str
-    type: Annotated[Literal["mention"], Field(title="MentionUserInputType")]
+    type: Annotated[MentionUserInputType, Field(title="MentionUserInputType")]
 
 
 class UserInput(
@@ -3417,9 +4586,6 @@ class UserInput(
         | MentionUserInput
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         TextUserInput
         | ImageUserInput
@@ -3429,10 +4595,14 @@ class UserInput(
     )
 
 
-class Verbosity(Enum):
+class Verbosity(StrEnum):
     low = "low"
     medium = "medium"
     high = "high"
+
+
+class SearchWebSearchActionType(RootModel[Literal["search"]]):
+    root: Annotated[Literal["search"], Field(title="SearchWebSearchActionType")]
 
 
 class SearchWebSearchAction(BaseModel):
@@ -3441,15 +4611,25 @@ class SearchWebSearchAction(BaseModel):
     )
     queries: list[str] | None = None
     query: str | None = None
-    type: Annotated[Literal["search"], Field(title="SearchWebSearchActionType")]
+    type: Annotated[SearchWebSearchActionType, Field(title="SearchWebSearchActionType")]
+
+
+class OpenPageWebSearchActionType(RootModel[Literal["openPage"]]):
+    root: Annotated[Literal["openPage"], Field(title="OpenPageWebSearchActionType")]
 
 
 class OpenPageWebSearchAction(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["openPage"], Field(title="OpenPageWebSearchActionType")]
+    type: Annotated[
+        OpenPageWebSearchActionType, Field(title="OpenPageWebSearchActionType")
+    ]
     url: str | None = None
+
+
+class FindInPageWebSearchActionType(RootModel[Literal["findInPage"]]):
+    root: Annotated[Literal["findInPage"], Field(title="FindInPageWebSearchActionType")]
 
 
 class FindInPageWebSearchAction(BaseModel):
@@ -3457,15 +4637,21 @@ class FindInPageWebSearchAction(BaseModel):
         populate_by_name=True,
     )
     pattern: str | None = None
-    type: Annotated[Literal["findInPage"], Field(title="FindInPageWebSearchActionType")]
+    type: Annotated[
+        FindInPageWebSearchActionType, Field(title="FindInPageWebSearchActionType")
+    ]
     url: str | None = None
+
+
+class OtherWebSearchActionType(RootModel[Literal["other"]]):
+    root: Annotated[Literal["other"], Field(title="OtherWebSearchActionType")]
 
 
 class OtherWebSearchAction(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["other"], Field(title="OtherWebSearchActionType")]
+    type: Annotated[OtherWebSearchActionType, Field(title="OtherWebSearchActionType")]
 
 
 class WebSearchAction(
@@ -3476,9 +4662,6 @@ class WebSearchAction(
         | OtherWebSearchAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         SearchWebSearchAction
         | OpenPageWebSearchAction
@@ -3487,7 +4670,7 @@ class WebSearchAction(
     )
 
 
-class WebSearchContextSize(Enum):
+class WebSearchContextSize(StrEnum):
     low = "low"
     medium = "medium"
     high = "high"
@@ -3504,7 +4687,7 @@ class WebSearchLocation(BaseModel):
     timezone: str | None = None
 
 
-class WebSearchMode(Enum):
+class WebSearchMode(StrEnum):
     disabled = "disabled"
     cached = "cached"
     live = "live"
@@ -3520,7 +4703,7 @@ class WebSearchToolConfig(BaseModel):
     location: WebSearchLocation | None = None
 
 
-class WindowsSandboxSetupMode(Enum):
+class WindowsSandboxSetupMode(StrEnum):
     elevated = "elevated"
     unelevated = "unelevated"
 
@@ -3549,7 +4732,7 @@ class WindowsWorldWritableWarningNotification(BaseModel):
     sample_paths: Annotated[list[str], Field(alias="samplePaths")]
 
 
-class WriteStatus(Enum):
+class WriteStatus(StrEnum):
     ok = "ok"
     ok_overridden = "okOverridden"
 
@@ -3560,14 +4743,11 @@ class ChatgptAccount(BaseModel):
     )
     email: str
     plan_type: Annotated[PlanType, Field(alias="planType")]
-    type: Annotated[Literal["chatgpt"], Field(title="ChatgptAccountType")]
+    type: Annotated[ChatgptAccountType, Field(title="ChatgptAccountType")]
 
 
-class Account(RootModel[ApiKeyAccount | ChatgptAccount]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: ApiKeyAccount | ChatgptAccount
+class Account(RootModel[ApiKeyAccount | OauthAccount | ChatgptAccount]):
+    root: ApiKeyAccount | OauthAccount | ChatgptAccount
 
 
 class AccountUpdatedNotification(BaseModel):
@@ -3576,6 +4756,8 @@ class AccountUpdatedNotification(BaseModel):
     )
     auth_mode: Annotated[AuthMode | None, Field(alias="authMode")] = None
     plan_type: Annotated[PlanType | None, Field(alias="planType")] = None
+    provider_id: Annotated[str | None, Field(alias="providerId")] = None
+    provider_name: Annotated[str | None, Field(alias="providerName")] = None
 
 
 class AppConfig(BaseModel):
@@ -3631,7 +4813,7 @@ class InitializeRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["initialize"], Field(title="InitializeRequestMethod")]
+    method: Annotated[InitializeRequestMethod, Field(title="InitializeRequestMethod")]
     params: InitializeParams
 
 
@@ -3640,7 +4822,9 @@ class ThreadStartRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["thread/start"], Field(title="Thread/startRequestMethod")]
+    method: Annotated[
+        ThreadStartRequestMethod, Field(title="Thread/startRequestMethod")
+    ]
     params: ThreadStartParams
 
 
@@ -3650,7 +4834,7 @@ class ThreadResumeRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/resume"], Field(title="Thread/resumeRequestMethod")
+        ThreadResumeRequestMethod, Field(title="Thread/resumeRequestMethod")
     ]
     params: ThreadResumeParams
 
@@ -3660,7 +4844,7 @@ class ThreadForkRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["thread/fork"], Field(title="Thread/forkRequestMethod")]
+    method: Annotated[ThreadForkRequestMethod, Field(title="Thread/forkRequestMethod")]
     params: ThreadForkParams
 
 
@@ -3670,7 +4854,7 @@ class ThreadArchiveRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/archive"], Field(title="Thread/archiveRequestMethod")
+        ThreadArchiveRequestMethod, Field(title="Thread/archiveRequestMethod")
     ]
     params: ThreadArchiveParams
 
@@ -3681,7 +4865,7 @@ class ThreadUnsubscribeRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/unsubscribe"], Field(title="Thread/unsubscribeRequestMethod")
+        ThreadUnsubscribeRequestMethod, Field(title="Thread/unsubscribeRequestMethod")
     ]
     params: ThreadUnsubscribeParams
 
@@ -3692,7 +4876,7 @@ class ThreadNameSetRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/name/set"], Field(title="Thread/name/setRequestMethod")
+        ThreadNameSetRequestMethod, Field(title="Thread/name/setRequestMethod")
     ]
     params: ThreadSetNameParams
 
@@ -3703,7 +4887,7 @@ class ThreadMetadataUpdateRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/metadata/update"],
+        ThreadMetadataUpdateRequestMethod,
         Field(title="Thread/metadata/updateRequestMethod"),
     ]
     params: ThreadMetadataUpdateParams
@@ -3715,7 +4899,7 @@ class ThreadUnarchiveRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/unarchive"], Field(title="Thread/unarchiveRequestMethod")
+        ThreadUnarchiveRequestMethod, Field(title="Thread/unarchiveRequestMethod")
     ]
     params: ThreadUnarchiveParams
 
@@ -3726,7 +4910,7 @@ class ThreadCompactStartRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/compact/start"],
+        ThreadCompactStartRequestMethod,
         Field(title="Thread/compact/startRequestMethod"),
     ]
     params: ThreadCompactStartParams
@@ -3738,7 +4922,7 @@ class ThreadRollbackRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/rollback"], Field(title="Thread/rollbackRequestMethod")
+        ThreadRollbackRequestMethod, Field(title="Thread/rollbackRequestMethod")
     ]
     params: ThreadRollbackParams
 
@@ -3749,7 +4933,7 @@ class ThreadLoadedListRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["thread/loaded/list"], Field(title="Thread/loaded/listRequestMethod")
+        ThreadLoadedListRequestMethod, Field(title="Thread/loaded/listRequestMethod")
     ]
     params: ThreadLoadedListParams
 
@@ -3759,7 +4943,7 @@ class ThreadReadRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["thread/read"], Field(title="Thread/readRequestMethod")]
+    method: Annotated[ThreadReadRequestMethod, Field(title="Thread/readRequestMethod")]
     params: ThreadReadParams
 
 
@@ -3768,7 +4952,7 @@ class SkillsListRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["skills/list"], Field(title="Skills/listRequestMethod")]
+    method: Annotated[SkillsListRequestMethod, Field(title="Skills/listRequestMethod")]
     params: SkillsListParams
 
 
@@ -3777,7 +4961,7 @@ class PluginListRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["plugin/list"], Field(title="Plugin/listRequestMethod")]
+    method: Annotated[PluginListRequestMethod, Field(title="Plugin/listRequestMethod")]
     params: PluginListParams
 
 
@@ -3786,7 +4970,7 @@ class PluginReadRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["plugin/read"], Field(title="Plugin/readRequestMethod")]
+    method: Annotated[PluginReadRequestMethod, Field(title="Plugin/readRequestMethod")]
     params: PluginReadParams
 
 
@@ -3796,7 +4980,7 @@ class SkillsRemoteListRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["skills/remote/list"], Field(title="Skills/remote/listRequestMethod")
+        SkillsRemoteListRequestMethod, Field(title="Skills/remote/listRequestMethod")
     ]
     params: SkillsRemoteReadParams
 
@@ -3807,7 +4991,7 @@ class SkillsRemoteExportRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["skills/remote/export"],
+        SkillsRemoteExportRequestMethod,
         Field(title="Skills/remote/exportRequestMethod"),
     ]
     params: SkillsRemoteWriteParams
@@ -3818,7 +5002,7 @@ class AppListRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["app/list"], Field(title="App/listRequestMethod")]
+    method: Annotated[AppListRequestMethod, Field(title="App/listRequestMethod")]
     params: AppsListParams
 
 
@@ -3827,7 +5011,7 @@ class FsReadFileRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["fs/readFile"], Field(title="Fs/readFileRequestMethod")]
+    method: Annotated[FsReadFileRequestMethod, Field(title="Fs/readFileRequestMethod")]
     params: FsReadFileParams
 
 
@@ -3836,7 +5020,9 @@ class FsWriteFileRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["fs/writeFile"], Field(title="Fs/writeFileRequestMethod")]
+    method: Annotated[
+        FsWriteFileRequestMethod, Field(title="Fs/writeFileRequestMethod")
+    ]
     params: FsWriteFileParams
 
 
@@ -3846,7 +5032,7 @@ class FsCreateDirectoryRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["fs/createDirectory"], Field(title="Fs/createDirectoryRequestMethod")
+        FsCreateDirectoryRequestMethod, Field(title="Fs/createDirectoryRequestMethod")
     ]
     params: FsCreateDirectoryParams
 
@@ -3857,7 +5043,7 @@ class FsGetMetadataRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["fs/getMetadata"], Field(title="Fs/getMetadataRequestMethod")
+        FsGetMetadataRequestMethod, Field(title="Fs/getMetadataRequestMethod")
     ]
     params: FsGetMetadataParams
 
@@ -3868,7 +5054,7 @@ class FsReadDirectoryRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["fs/readDirectory"], Field(title="Fs/readDirectoryRequestMethod")
+        FsReadDirectoryRequestMethod, Field(title="Fs/readDirectoryRequestMethod")
     ]
     params: FsReadDirectoryParams
 
@@ -3878,7 +5064,7 @@ class FsRemoveRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["fs/remove"], Field(title="Fs/removeRequestMethod")]
+    method: Annotated[FsRemoveRequestMethod, Field(title="Fs/removeRequestMethod")]
     params: FsRemoveParams
 
 
@@ -3887,7 +5073,7 @@ class FsCopyRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["fs/copy"], Field(title="Fs/copyRequestMethod")]
+    method: Annotated[FsCopyRequestMethod, Field(title="Fs/copyRequestMethod")]
     params: FsCopyParams
 
 
@@ -3897,7 +5083,7 @@ class SkillsConfigWriteRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["skills/config/write"], Field(title="Skills/config/writeRequestMethod")
+        SkillsConfigWriteRequestMethod, Field(title="Skills/config/writeRequestMethod")
     ]
     params: SkillsConfigWriteParams
 
@@ -3908,7 +5094,7 @@ class PluginInstallRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["plugin/install"], Field(title="Plugin/installRequestMethod")
+        PluginInstallRequestMethod, Field(title="Plugin/installRequestMethod")
     ]
     params: PluginInstallParams
 
@@ -3919,7 +5105,7 @@ class PluginUninstallRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["plugin/uninstall"], Field(title="Plugin/uninstallRequestMethod")
+        PluginUninstallRequestMethod, Field(title="Plugin/uninstallRequestMethod")
     ]
     params: PluginUninstallParams
 
@@ -3930,7 +5116,7 @@ class TurnInterruptRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["turn/interrupt"], Field(title="Turn/interruptRequestMethod")
+        TurnInterruptRequestMethod, Field(title="Turn/interruptRequestMethod")
     ]
     params: TurnInterruptParams
 
@@ -3940,7 +5126,7 @@ class ModelListRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["model/list"], Field(title="Model/listRequestMethod")]
+    method: Annotated[ModelListRequestMethod, Field(title="Model/listRequestMethod")]
     params: ModelListParams
 
 
@@ -3950,7 +5136,7 @@ class ExperimentalFeatureListRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["experimentalFeature/list"],
+        ExperimentalFeatureListRequestMethod,
         Field(title="ExperimentalFeature/listRequestMethod"),
     ]
     params: ExperimentalFeatureListParams
@@ -3962,7 +5148,7 @@ class McpServerOauthLoginRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["mcpServer/oauth/login"],
+        McpServerOauthLoginRequestMethod,
         Field(title="McpServer/oauth/loginRequestMethod"),
     ]
     params: McpServerOauthLoginParams
@@ -3974,7 +5160,7 @@ class ConfigMcpServerReloadRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["config/mcpServer/reload"],
+        ConfigMcpServerReloadRequestMethod,
         Field(title="Config/mcpServer/reloadRequestMethod"),
     ]
     params: None = None
@@ -3986,7 +5172,7 @@ class McpServerStatusListRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["mcpServerStatus/list"],
+        McpServerStatusListRequestMethod,
         Field(title="McpServerStatus/listRequestMethod"),
     ]
     params: ListMcpServerStatusParams
@@ -3998,7 +5184,7 @@ class WindowsSandboxSetupStartRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["windowsSandbox/setupStart"],
+        WindowsSandboxSetupStartRequestMethod,
         Field(title="WindowsSandbox/setupStartRequestMethod"),
     ]
     params: WindowsSandboxSetupStartParams
@@ -4010,7 +5196,7 @@ class AccountLoginStartRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
+        AccountLoginStartRequestMethod, Field(title="Account/login/startRequestMethod")
     ]
     params: LoginAccountParams
 
@@ -4021,7 +5207,7 @@ class AccountLoginCancelRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["account/login/cancel"],
+        AccountLoginCancelRequestMethod,
         Field(title="Account/login/cancelRequestMethod"),
     ]
     params: CancelLoginAccountParams
@@ -4033,7 +5219,7 @@ class AccountLogoutRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["account/logout"], Field(title="Account/logoutRequestMethod")
+        AccountLogoutRequestMethod, Field(title="Account/logoutRequestMethod")
     ]
     params: None = None
 
@@ -4044,7 +5230,7 @@ class AccountRateLimitsReadRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["account/rateLimits/read"],
+        AccountRateLimitsReadRequestMethod,
         Field(title="Account/rateLimits/readRequestMethod"),
     ]
     params: None = None
@@ -4056,7 +5242,7 @@ class FeedbackUploadRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["feedback/upload"], Field(title="Feedback/uploadRequestMethod")
+        FeedbackUploadRequestMethod, Field(title="Feedback/uploadRequestMethod")
     ]
     params: FeedbackUploadParams
 
@@ -4067,7 +5253,7 @@ class CommandExecWriteRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["command/exec/write"], Field(title="Command/exec/writeRequestMethod")
+        CommandExecWriteRequestMethod, Field(title="Command/exec/writeRequestMethod")
     ]
     params: CommandExecWriteParams
 
@@ -4078,7 +5264,7 @@ class CommandExecTerminateRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["command/exec/terminate"],
+        CommandExecTerminateRequestMethod,
         Field(title="Command/exec/terminateRequestMethod"),
     ]
     params: CommandExecTerminateParams
@@ -4089,7 +5275,7 @@ class ConfigReadRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["config/read"], Field(title="Config/readRequestMethod")]
+    method: Annotated[ConfigReadRequestMethod, Field(title="Config/readRequestMethod")]
     params: ConfigReadParams
 
 
@@ -4099,7 +5285,7 @@ class ExternalAgentConfigDetectRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["externalAgentConfig/detect"],
+        ExternalAgentConfigDetectRequestMethod,
         Field(title="ExternalAgentConfig/detectRequestMethod"),
     ]
     params: ExternalAgentConfigDetectParams
@@ -4111,7 +5297,7 @@ class ConfigRequirementsReadRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["configRequirements/read"],
+        ConfigRequirementsReadRequestMethod,
         Field(title="ConfigRequirements/readRequestMethod"),
     ]
     params: None = None
@@ -4122,7 +5308,9 @@ class AccountReadRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["account/read"], Field(title="Account/readRequestMethod")]
+    method: Annotated[
+        AccountReadRequestMethod, Field(title="Account/readRequestMethod")
+    ]
     params: GetAccountParams
 
 
@@ -4132,7 +5320,7 @@ class FuzzyFileSearchRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["fuzzyFileSearch"], Field(title="FuzzyFileSearchRequestMethod")
+        FuzzyFileSearchRequestMethod, Field(title="FuzzyFileSearchRequestMethod")
     ]
     params: FuzzyFileSearchParams
 
@@ -4491,7 +5679,7 @@ class InputImageFunctionCallOutputContentItem(BaseModel):
     detail: ImageDetail | None = None
     image_url: str
     type: Annotated[
-        Literal["input_image"],
+        InputImageFunctionCallOutputContentItemType,
         Field(title="InputImageFunctionCallOutputContentItemType"),
     ]
 
@@ -4501,9 +5689,6 @@ class FunctionCallOutputContentItem(
         InputTextFunctionCallOutputContentItem | InputImageFunctionCallOutputContentItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         InputTextFunctionCallOutputContentItem
         | InputImageFunctionCallOutputContentItem,
@@ -4518,6 +5703,9 @@ class GetAccountResponse(BaseModel):
         populate_by_name=True,
     )
     account: Account | None = None
+    provider_id: Annotated[str | None, Field(alias="providerId")] = None
+    provider_name: Annotated[str | None, Field(alias="providerName")] = None
+    requires_auth: Annotated[bool | None, Field(alias="requiresAuth")] = None
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
 
 
@@ -4671,6 +5859,7 @@ class PluginMarketplaceEntry(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    display_name: Annotated[str | None, Field(alias="displayName")] = None
     name: str
     path: AbsolutePathBuf
     plugins: list[PluginSummary]
@@ -4703,7 +5892,7 @@ class WebSearchCallResponseItem(BaseModel):
     id: str | None = None
     status: str | None = None
     type: Annotated[
-        Literal["web_search_call"], Field(title="WebSearchCallResponseItemType")
+        WebSearchCallResponseItemType, Field(title="WebSearchCallResponseItemType")
     ]
 
 
@@ -4725,7 +5914,7 @@ class ErrorServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    method: Annotated[Literal["error"], Field(title="ErrorNotificationMethod")]
+    method: Annotated[ErrorNotificationMethod, Field(title="ErrorNotificationMethod")]
     params: ErrorNotification
 
 
@@ -4734,7 +5923,7 @@ class ThreadStatusChangedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/status/changed"],
+        ThreadStatusChangedNotificationMethod,
         Field(title="Thread/status/changedNotificationMethod"),
     ]
     params: ThreadStatusChangedNotification
@@ -4745,7 +5934,8 @@ class ThreadArchivedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/archived"], Field(title="Thread/archivedNotificationMethod")
+        ThreadArchivedNotificationMethod,
+        Field(title="Thread/archivedNotificationMethod"),
     ]
     params: ThreadArchivedNotification
 
@@ -4755,7 +5945,8 @@ class ThreadUnarchivedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/unarchived"], Field(title="Thread/unarchivedNotificationMethod")
+        ThreadUnarchivedNotificationMethod,
+        Field(title="Thread/unarchivedNotificationMethod"),
     ]
     params: ThreadUnarchivedNotification
 
@@ -4765,7 +5956,7 @@ class ThreadClosedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/closed"], Field(title="Thread/closedNotificationMethod")
+        ThreadClosedNotificationMethod, Field(title="Thread/closedNotificationMethod")
     ]
     params: ThreadClosedNotification
 
@@ -4775,9 +5966,19 @@ class SkillsChangedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["skills/changed"], Field(title="Skills/changedNotificationMethod")
+        SkillsChangedNotificationMethod, Field(title="Skills/changedNotificationMethod")
     ]
     params: SkillsChangedNotification
+
+
+class SkillUsedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    method: Annotated[
+        SkillUsedNotificationMethod, Field(title="Skill/usedNotificationMethod")
+    ]
+    params: SkillUsedNotification
 
 
 class ThreadNameUpdatedServerNotification(BaseModel):
@@ -4785,7 +5986,7 @@ class ThreadNameUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/name/updated"],
+        ThreadNameUpdatedNotificationMethod,
         Field(title="Thread/name/updatedNotificationMethod"),
     ]
     params: ThreadNameUpdatedNotification
@@ -4796,7 +5997,7 @@ class HookStartedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["hook/started"], Field(title="Hook/startedNotificationMethod")
+        HookStartedNotificationMethod, Field(title="Hook/startedNotificationMethod")
     ]
     params: HookStartedNotification
 
@@ -4806,7 +6007,8 @@ class TurnDiffUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["turn/diff/updated"], Field(title="Turn/diff/updatedNotificationMethod")
+        TurnDiffUpdatedNotificationMethod,
+        Field(title="Turn/diff/updatedNotificationMethod"),
     ]
     params: TurnDiffUpdatedNotification
 
@@ -4816,7 +6018,7 @@ class ItemAutoApprovalReviewStartedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/autoApprovalReview/started"],
+        ItemAutoApprovalReviewStartedNotificationMethod,
         Field(title="Item/autoApprovalReview/startedNotificationMethod"),
     ]
     params: ItemGuardianApprovalReviewStartedNotification
@@ -4827,7 +6029,7 @@ class ItemAutoApprovalReviewCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/autoApprovalReview/completed"],
+        ItemAutoApprovalReviewCompletedNotificationMethod,
         Field(title="Item/autoApprovalReview/completedNotificationMethod"),
     ]
     params: ItemGuardianApprovalReviewCompletedNotification
@@ -4838,7 +6040,7 @@ class CommandExecOutputDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["command/exec/outputDelta"],
+        CommandExecOutputDeltaNotificationMethod,
         Field(title="Command/exec/outputDeltaNotificationMethod"),
     ]
     params: CommandExecOutputDeltaNotification
@@ -4849,7 +6051,7 @@ class ItemCommandExecutionTerminalInteractionServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/commandExecution/terminalInteraction"],
+        ItemCommandExecutionTerminalInteractionNotificationMethod,
         Field(title="Item/commandExecution/terminalInteractionNotificationMethod"),
     ]
     params: TerminalInteractionNotification
@@ -4860,7 +6062,7 @@ class ServerRequestResolvedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["serverRequest/resolved"],
+        ServerRequestResolvedNotificationMethod,
         Field(title="ServerRequest/resolvedNotificationMethod"),
     ]
     params: ServerRequestResolvedNotification
@@ -4871,7 +6073,8 @@ class AccountUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["account/updated"], Field(title="Account/updatedNotificationMethod")
+        AccountUpdatedNotificationMethod,
+        Field(title="Account/updatedNotificationMethod"),
     ]
     params: AccountUpdatedNotification
 
@@ -4881,7 +6084,7 @@ class ConfigWarningServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["configWarning"], Field(title="ConfigWarningNotificationMethod")
+        ConfigWarningNotificationMethod, Field(title="ConfigWarningNotificationMethod")
     ]
     params: ConfigWarningNotification
 
@@ -4891,7 +6094,7 @@ class ThreadRealtimeStartedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/realtime/started"],
+        ThreadRealtimeStartedNotificationMethod,
         Field(title="Thread/realtime/startedNotificationMethod"),
     ]
     params: ThreadRealtimeStartedNotification
@@ -4902,7 +6105,7 @@ class ThreadRealtimeItemAddedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/realtime/itemAdded"],
+        ThreadRealtimeItemAddedNotificationMethod,
         Field(title="Thread/realtime/itemAddedNotificationMethod"),
     ]
     params: ThreadRealtimeItemAddedNotification
@@ -4913,7 +6116,7 @@ class ThreadRealtimeOutputAudioDeltaServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/realtime/outputAudio/delta"],
+        ThreadRealtimeOutputAudioDeltaNotificationMethod,
         Field(title="Thread/realtime/outputAudio/deltaNotificationMethod"),
     ]
     params: ThreadRealtimeOutputAudioDeltaNotification
@@ -4924,7 +6127,7 @@ class ThreadRealtimeErrorServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/realtime/error"],
+        ThreadRealtimeErrorNotificationMethod,
         Field(title="Thread/realtime/errorNotificationMethod"),
     ]
     params: ThreadRealtimeErrorNotification
@@ -4935,7 +6138,7 @@ class ThreadRealtimeClosedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/realtime/closed"],
+        ThreadRealtimeClosedNotificationMethod,
         Field(title="Thread/realtime/closedNotificationMethod"),
     ]
     params: ThreadRealtimeClosedNotification
@@ -4946,7 +6149,7 @@ class WindowsWorldWritableWarningServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["windows/worldWritableWarning"],
+        WindowsWorldWritableWarningNotificationMethod,
         Field(title="Windows/worldWritableWarningNotificationMethod"),
     ]
     params: WindowsWorldWritableWarningNotification
@@ -5016,10 +6219,22 @@ class ThreadSpawnSubAgentSource(BaseModel):
 class SubAgentSource(
     RootModel[SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource]
 ):
+    root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
+
+
+class ThreadActivePlanRow(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
+    acceptance: str | None = None
+    depends_on: Annotated[list[str], Field(alias="dependsOn")]
+    details: str
+    id: str
+    inputs: list[str]
+    outputs: list[str]
+    path: str
+    status: TurnPlanStepStatus
+    step: str
 
 
 class UserMessageThreadItem(BaseModel):
@@ -5028,7 +6243,7 @@ class UserMessageThreadItem(BaseModel):
     )
     content: list[UserInput]
     id: str
-    type: Annotated[Literal["userMessage"], Field(title="UserMessageThreadItemType")]
+    type: Annotated[UserMessageThreadItemType, Field(title="UserMessageThreadItemType")]
 
 
 class FileChangeThreadItem(BaseModel):
@@ -5038,7 +6253,7 @@ class FileChangeThreadItem(BaseModel):
     changes: list[FileUpdateChange]
     id: str
     status: PatchApplyStatus
-    type: Annotated[Literal["fileChange"], Field(title="FileChangeThreadItemType")]
+    type: Annotated[FileChangeThreadItemType, Field(title="FileChangeThreadItemType")]
 
 
 class CollabAgentToolCallThreadItem(BaseModel):
@@ -5094,7 +6309,8 @@ class CollabAgentToolCallThreadItem(BaseModel):
         CollabAgentTool, Field(description="Name of the collab tool that was invoked.")
     ]
     type: Annotated[
-        Literal["collabAgentToolCall"], Field(title="CollabAgentToolCallThreadItemType")
+        CollabAgentToolCallThreadItemType,
+        Field(title="CollabAgentToolCallThreadItemType"),
     ]
 
 
@@ -5105,7 +6321,7 @@ class WebSearchThreadItem(BaseModel):
     action: WebSearchAction | None = None
     id: str
     query: str
-    type: Annotated[Literal["webSearch"], Field(title="WebSearchThreadItemType")]
+    type: Annotated[WebSearchThreadItemType, Field(title="WebSearchThreadItemType")]
 
 
 class ThreadItem(
@@ -5127,9 +6343,6 @@ class ThreadItem(
         | ContextCompactionThreadItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         UserMessageThreadItem
         | AgentMessageThreadItem
@@ -5270,6 +6483,13 @@ class TurnPlanStep(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    acceptance: str | None = None
+    depends_on: Annotated[list[str] | None, Field(alias="dependsOn")] = None
+    details: str | None = None
+    id: str | None = None
+    inputs: list[str] | None = None
+    outputs: list[str] | None = None
+    path: str | None = None
     status: TurnPlanStepStatus
     step: str
 
@@ -5456,7 +6676,7 @@ class ThreadListRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["thread/list"], Field(title="Thread/listRequestMethod")]
+    method: Annotated[ThreadListRequestMethod, Field(title="Thread/listRequestMethod")]
     params: ThreadListParams
 
 
@@ -5465,7 +6685,7 @@ class TurnStartRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["turn/start"], Field(title="Turn/startRequestMethod")]
+    method: Annotated[TurnStartRequestMethod, Field(title="Turn/startRequestMethod")]
     params: TurnStartParams
 
 
@@ -5474,7 +6694,7 @@ class TurnSteerRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["turn/steer"], Field(title="Turn/steerRequestMethod")]
+    method: Annotated[TurnSteerRequestMethod, Field(title="Turn/steerRequestMethod")]
     params: TurnSteerParams
 
 
@@ -5483,7 +6703,9 @@ class ReviewStartRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["review/start"], Field(title="Review/startRequestMethod")]
+    method: Annotated[
+        ReviewStartRequestMethod, Field(title="Review/startRequestMethod")
+    ]
     params: ReviewStartParams
 
 
@@ -5492,7 +6714,9 @@ class CommandExecRequest(BaseModel):
         populate_by_name=True,
     )
     id: RequestId
-    method: Annotated[Literal["command/exec"], Field(title="Command/execRequestMethod")]
+    method: Annotated[
+        CommandExecRequestMethod, Field(title="Command/execRequestMethod")
+    ]
     params: CommandExecParams
 
 
@@ -5502,7 +6726,7 @@ class CommandExecResizeRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["command/exec/resize"], Field(title="Command/exec/resizeRequestMethod")
+        CommandExecResizeRequestMethod, Field(title="Command/exec/resizeRequestMethod")
     ]
     params: CommandExecResizeParams
 
@@ -5513,7 +6737,7 @@ class ConfigValueWriteRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[
-        Literal["config/value/write"], Field(title="Config/value/writeRequestMethod")
+        ConfigValueWriteRequestMethod, Field(title="Config/value/writeRequestMethod")
     ]
     params: ConfigValueWriteParams
 
@@ -5575,9 +6799,6 @@ class ExternalAgentConfigImportParams(BaseModel):
 
 
 class FunctionCallOutputBody(RootModel[str | list[FunctionCallOutputContentItem]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str | list[FunctionCallOutputContentItem]
 
 
@@ -5688,7 +6909,7 @@ class FunctionCallOutputResponseItem(BaseModel):
     call_id: str
     output: FunctionCallOutputPayload
     type: Annotated[
-        Literal["function_call_output"],
+        FunctionCallOutputResponseItemType,
         Field(title="FunctionCallOutputResponseItemType"),
     ]
 
@@ -5700,7 +6921,7 @@ class CustomToolCallOutputResponseItem(BaseModel):
     call_id: str
     output: FunctionCallOutputPayload
     type: Annotated[
-        Literal["custom_tool_call_output"],
+        CustomToolCallOutputResponseItemType,
         Field(title="CustomToolCallOutputResponseItemType"),
     ]
 
@@ -5723,9 +6944,6 @@ class ResponseItem(
         | OtherResponseItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         MessageResponseItem
         | ReasoningResponseItem
@@ -5763,7 +6981,7 @@ class ThreadTokenUsageUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/tokenUsage/updated"],
+        ThreadTokenUsageUpdatedNotificationMethod,
         Field(title="Thread/tokenUsage/updatedNotificationMethod"),
     ]
     params: ThreadTokenUsageUpdatedNotification
@@ -5774,7 +6992,7 @@ class TurnStartedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["turn/started"], Field(title="Turn/startedNotificationMethod")
+        TurnStartedNotificationMethod, Field(title="Turn/startedNotificationMethod")
     ]
     params: TurnStartedNotification
 
@@ -5784,7 +7002,7 @@ class TurnCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["turn/completed"], Field(title="Turn/completedNotificationMethod")
+        TurnCompletedNotificationMethod, Field(title="Turn/completedNotificationMethod")
     ]
     params: TurnCompletedNotification
 
@@ -5794,7 +7012,7 @@ class HookCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["hook/completed"], Field(title="Hook/completedNotificationMethod")
+        HookCompletedNotificationMethod, Field(title="Hook/completedNotificationMethod")
     ]
     params: HookCompletedNotification
 
@@ -5804,7 +7022,8 @@ class TurnPlanUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["turn/plan/updated"], Field(title="Turn/plan/updatedNotificationMethod")
+        TurnPlanUpdatedNotificationMethod,
+        Field(title="Turn/plan/updatedNotificationMethod"),
     ]
     params: TurnPlanUpdatedNotification
 
@@ -5814,7 +7033,7 @@ class ItemStartedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/started"], Field(title="Item/startedNotificationMethod")
+        ItemStartedNotificationMethod, Field(title="Item/startedNotificationMethod")
     ]
     params: ItemStartedNotification
 
@@ -5824,7 +7043,7 @@ class ItemCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["item/completed"], Field(title="Item/completedNotificationMethod")
+        ItemCompletedNotificationMethod, Field(title="Item/completedNotificationMethod")
     ]
     params: ItemCompletedNotification
 
@@ -5834,7 +7053,7 @@ class AccountRateLimitsUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["account/rateLimits/updated"],
+        AccountRateLimitsUpdatedNotificationMethod,
         Field(title="Account/rateLimits/updatedNotificationMethod"),
     ]
     params: AccountRateLimitsUpdatedNotification
@@ -5845,7 +7064,8 @@ class AppListUpdatedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["app/list/updated"], Field(title="App/list/updatedNotificationMethod")
+        AppListUpdatedNotificationMethod,
+        Field(title="App/list/updatedNotificationMethod"),
     ]
     params: AppListUpdatedNotification
 
@@ -5855,7 +7075,7 @@ class WindowsSandboxSetupCompletedServerNotification(BaseModel):
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["windowsSandbox/setupCompleted"],
+        WindowsSandboxSetupCompletedNotificationMethod,
         Field(title="WindowsSandbox/setupCompletedNotificationMethod"),
     ]
     params: WindowsSandboxSetupCompletedNotification
@@ -5870,16 +7090,226 @@ class SubAgentSessionSource(BaseModel):
 
 
 class SessionSource(RootModel[SessionSourceValue | SubAgentSessionSource]):
+    root: SessionSourceValue | SubAgentSessionSource
+
+
+class ThreadActivePlan(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: SessionSourceValue | SubAgentSessionSource
+    raw_markdown: Annotated[str, Field(alias="rawMarkdown")]
+    rows: list[ThreadActivePlanRow]
+    snapshot_id: Annotated[str, Field(alias="snapshotId")]
+    source_item_id: Annotated[str, Field(alias="sourceItemId")]
+    source_turn_id: Annotated[str, Field(alias="sourceTurnId")]
+
+
+class ExternalAgentConfigImportRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        ExternalAgentConfigImportRequestMethod,
+        Field(title="ExternalAgentConfig/importRequestMethod"),
+    ]
+    params: ExternalAgentConfigImportParams
+
+
+class ConfigBatchWriteRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        ConfigBatchWriteRequestMethod, Field(title="Config/batchWriteRequestMethod")
+    ]
+    params: ConfigBatchWriteParams
+
+
+class ClientRequest(
+    RootModel[
+        InitializeRequest
+        | ThreadStartRequest
+        | ThreadResumeRequest
+        | ThreadForkRequest
+        | ThreadArchiveRequest
+        | ThreadUnsubscribeRequest
+        | ThreadNameSetRequest
+        | ThreadMetadataUpdateRequest
+        | ThreadUnarchiveRequest
+        | ThreadCompactStartRequest
+        | ThreadRollbackRequest
+        | ThreadListRequest
+        | ThreadLoadedListRequest
+        | ThreadReadRequest
+        | SkillsListRequest
+        | PluginListRequest
+        | PluginReadRequest
+        | SkillsRemoteListRequest
+        | SkillsRemoteExportRequest
+        | AppListRequest
+        | FsReadFileRequest
+        | FsWriteFileRequest
+        | FsCreateDirectoryRequest
+        | FsGetMetadataRequest
+        | FsReadDirectoryRequest
+        | FsRemoveRequest
+        | FsCopyRequest
+        | SkillsConfigWriteRequest
+        | PluginInstallRequest
+        | PluginUninstallRequest
+        | TurnStartRequest
+        | TurnSteerRequest
+        | TurnInterruptRequest
+        | ReviewStartRequest
+        | ModelListRequest
+        | ExperimentalFeatureListRequest
+        | McpServerOauthLoginRequest
+        | ConfigMcpServerReloadRequest
+        | McpServerStatusListRequest
+        | WindowsSandboxSetupStartRequest
+        | AccountLoginStartRequest
+        | AccountLoginCancelRequest
+        | AccountLogoutRequest
+        | AccountRateLimitsReadRequest
+        | FeedbackUploadRequest
+        | CommandExecRequest
+        | CommandExecWriteRequest
+        | CommandExecTerminateRequest
+        | CommandExecResizeRequest
+        | ConfigReadRequest
+        | ExternalAgentConfigDetectRequest
+        | ExternalAgentConfigImportRequest
+        | ConfigValueWriteRequest
+        | ConfigBatchWriteRequest
+        | ConfigRequirementsReadRequest
+        | AccountReadRequest
+        | FuzzyFileSearchRequest
+    ]
+):
+    root: Annotated[
+        InitializeRequest
+        | ThreadStartRequest
+        | ThreadResumeRequest
+        | ThreadForkRequest
+        | ThreadArchiveRequest
+        | ThreadUnsubscribeRequest
+        | ThreadNameSetRequest
+        | ThreadMetadataUpdateRequest
+        | ThreadUnarchiveRequest
+        | ThreadCompactStartRequest
+        | ThreadRollbackRequest
+        | ThreadListRequest
+        | ThreadLoadedListRequest
+        | ThreadReadRequest
+        | SkillsListRequest
+        | PluginListRequest
+        | PluginReadRequest
+        | SkillsRemoteListRequest
+        | SkillsRemoteExportRequest
+        | AppListRequest
+        | FsReadFileRequest
+        | FsWriteFileRequest
+        | FsCreateDirectoryRequest
+        | FsGetMetadataRequest
+        | FsReadDirectoryRequest
+        | FsRemoveRequest
+        | FsCopyRequest
+        | SkillsConfigWriteRequest
+        | PluginInstallRequest
+        | PluginUninstallRequest
+        | TurnStartRequest
+        | TurnSteerRequest
+        | TurnInterruptRequest
+        | ReviewStartRequest
+        | ModelListRequest
+        | ExperimentalFeatureListRequest
+        | McpServerOauthLoginRequest
+        | ConfigMcpServerReloadRequest
+        | McpServerStatusListRequest
+        | WindowsSandboxSetupStartRequest
+        | AccountLoginStartRequest
+        | AccountLoginCancelRequest
+        | AccountLogoutRequest
+        | AccountRateLimitsReadRequest
+        | FeedbackUploadRequest
+        | CommandExecRequest
+        | CommandExecWriteRequest
+        | CommandExecTerminateRequest
+        | CommandExecResizeRequest
+        | ConfigReadRequest
+        | ExternalAgentConfigDetectRequest
+        | ExternalAgentConfigImportRequest
+        | ConfigValueWriteRequest
+        | ConfigBatchWriteRequest
+        | ConfigRequirementsReadRequest
+        | AccountReadRequest
+        | FuzzyFileSearchRequest,
+        Field(
+            description="Request from the client to the server.", title="ClientRequest"
+        ),
+    ]
+
+
+class Config(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+    analytics: AnalyticsConfig | None = None
+    approval_policy: AskForApproval | None = None
+    approvals_reviewer: Annotated[
+        ApprovalsReviewer | None,
+        Field(
+            description="[UNSTABLE] Optional default for where approval requests are routed for review."
+        ),
+    ] = None
+    compact_prompt: str | None = None
+    developer_instructions: str | None = None
+    forced_chatgpt_workspace_id: str | None = None
+    forced_login_method: ForcedLoginMethod | None = None
+    instructions: str | None = None
+    model: str | None = None
+    model_auto_compact_token_limit: int | None = None
+    model_context_window: int | None = None
+    model_provider: str | None = None
+    model_reasoning_effort: ReasoningEffort | None = None
+    model_reasoning_summary: ReasoningSummary | None = None
+    model_verbosity: Verbosity | None = None
+    profile: str | None = None
+    profiles: Annotated[dict[str, ProfileV2] | None, Field(default_factory=dict)]
+    review_model: str | None = None
+    sandbox_mode: SandboxMode | None = None
+    sandbox_workspace_write: SandboxWorkspaceWrite | None = None
+    service_tier: ServiceTier | None = None
+    tools: ToolsV2 | None = None
+    web_search: WebSearchMode | None = None
+
+
+class ConfigReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    config: Config
+    layers: list[ConfigLayer] | None = None
+    origins: dict[str, ConfigLayerMetadata]
+
+
+class RawResponseItemCompletedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    item: ResponseItem
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
 
 
 class Thread(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    active_plan: Annotated[ThreadActivePlan | None, Field(alias="activePlan")] = None
     agent_nickname: Annotated[
         str | None,
         Field(
@@ -6089,216 +7519,12 @@ class ThreadUnarchiveResponse(BaseModel):
     thread: Thread
 
 
-class ExternalAgentConfigImportRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/import"],
-        Field(title="ExternalAgentConfig/importRequestMethod"),
-    ]
-    params: ExternalAgentConfigImportParams
-
-
-class ConfigBatchWriteRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["config/batchWrite"], Field(title="Config/batchWriteRequestMethod")
-    ]
-    params: ConfigBatchWriteParams
-
-
-class ClientRequest(
-    RootModel[
-        InitializeRequest
-        | ThreadStartRequest
-        | ThreadResumeRequest
-        | ThreadForkRequest
-        | ThreadArchiveRequest
-        | ThreadUnsubscribeRequest
-        | ThreadNameSetRequest
-        | ThreadMetadataUpdateRequest
-        | ThreadUnarchiveRequest
-        | ThreadCompactStartRequest
-        | ThreadRollbackRequest
-        | ThreadListRequest
-        | ThreadLoadedListRequest
-        | ThreadReadRequest
-        | SkillsListRequest
-        | PluginListRequest
-        | PluginReadRequest
-        | SkillsRemoteListRequest
-        | SkillsRemoteExportRequest
-        | AppListRequest
-        | FsReadFileRequest
-        | FsWriteFileRequest
-        | FsCreateDirectoryRequest
-        | FsGetMetadataRequest
-        | FsReadDirectoryRequest
-        | FsRemoveRequest
-        | FsCopyRequest
-        | SkillsConfigWriteRequest
-        | PluginInstallRequest
-        | PluginUninstallRequest
-        | TurnStartRequest
-        | TurnSteerRequest
-        | TurnInterruptRequest
-        | ReviewStartRequest
-        | ModelListRequest
-        | ExperimentalFeatureListRequest
-        | McpServerOauthLoginRequest
-        | ConfigMcpServerReloadRequest
-        | McpServerStatusListRequest
-        | WindowsSandboxSetupStartRequest
-        | AccountLoginStartRequest
-        | AccountLoginCancelRequest
-        | AccountLogoutRequest
-        | AccountRateLimitsReadRequest
-        | FeedbackUploadRequest
-        | CommandExecRequest
-        | CommandExecWriteRequest
-        | CommandExecTerminateRequest
-        | CommandExecResizeRequest
-        | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ConfigValueWriteRequest
-        | ConfigBatchWriteRequest
-        | ConfigRequirementsReadRequest
-        | AccountReadRequest
-        | FuzzyFileSearchRequest
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        InitializeRequest
-        | ThreadStartRequest
-        | ThreadResumeRequest
-        | ThreadForkRequest
-        | ThreadArchiveRequest
-        | ThreadUnsubscribeRequest
-        | ThreadNameSetRequest
-        | ThreadMetadataUpdateRequest
-        | ThreadUnarchiveRequest
-        | ThreadCompactStartRequest
-        | ThreadRollbackRequest
-        | ThreadListRequest
-        | ThreadLoadedListRequest
-        | ThreadReadRequest
-        | SkillsListRequest
-        | PluginListRequest
-        | PluginReadRequest
-        | SkillsRemoteListRequest
-        | SkillsRemoteExportRequest
-        | AppListRequest
-        | FsReadFileRequest
-        | FsWriteFileRequest
-        | FsCreateDirectoryRequest
-        | FsGetMetadataRequest
-        | FsReadDirectoryRequest
-        | FsRemoveRequest
-        | FsCopyRequest
-        | SkillsConfigWriteRequest
-        | PluginInstallRequest
-        | PluginUninstallRequest
-        | TurnStartRequest
-        | TurnSteerRequest
-        | TurnInterruptRequest
-        | ReviewStartRequest
-        | ModelListRequest
-        | ExperimentalFeatureListRequest
-        | McpServerOauthLoginRequest
-        | ConfigMcpServerReloadRequest
-        | McpServerStatusListRequest
-        | WindowsSandboxSetupStartRequest
-        | AccountLoginStartRequest
-        | AccountLoginCancelRequest
-        | AccountLogoutRequest
-        | AccountRateLimitsReadRequest
-        | FeedbackUploadRequest
-        | CommandExecRequest
-        | CommandExecWriteRequest
-        | CommandExecTerminateRequest
-        | CommandExecResizeRequest
-        | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ConfigValueWriteRequest
-        | ConfigBatchWriteRequest
-        | ConfigRequirementsReadRequest
-        | AccountReadRequest
-        | FuzzyFileSearchRequest,
-        Field(
-            description="Request from the client to the server.", title="ClientRequest"
-        ),
-    ]
-
-
-class Config(BaseModel):
-    model_config = ConfigDict(
-        extra="allow",
-        populate_by_name=True,
-    )
-    analytics: AnalyticsConfig | None = None
-    approval_policy: AskForApproval | None = None
-    approvals_reviewer: Annotated[
-        ApprovalsReviewer | None,
-        Field(
-            description="[UNSTABLE] Optional default for where approval requests are routed for review."
-        ),
-    ] = None
-    compact_prompt: str | None = None
-    developer_instructions: str | None = None
-    forced_chatgpt_workspace_id: str | None = None
-    forced_login_method: ForcedLoginMethod | None = None
-    instructions: str | None = None
-    model: str | None = None
-    model_auto_compact_token_limit: int | None = None
-    model_context_window: int | None = None
-    model_provider: str | None = None
-    model_reasoning_effort: ReasoningEffort | None = None
-    model_reasoning_summary: ReasoningSummary | None = None
-    model_verbosity: Verbosity | None = None
-    profile: str | None = None
-    profiles: dict[str, ProfileV2] | None = {}
-    review_model: str | None = None
-    sandbox_mode: SandboxMode | None = None
-    sandbox_workspace_write: SandboxWorkspaceWrite | None = None
-    service_tier: ServiceTier | None = None
-    tools: ToolsV2 | None = None
-    web_search: WebSearchMode | None = None
-
-
-class ConfigReadResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    config: Config
-    layers: list[ConfigLayer] | None = None
-    origins: dict[str, ConfigLayerMetadata]
-
-
-class RawResponseItemCompletedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    item: ResponseItem
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
-
-
 class ThreadStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     method: Annotated[
-        Literal["thread/started"], Field(title="Thread/startedNotificationMethod")
+        ThreadStartedNotificationMethod, Field(title="Thread/startedNotificationMethod")
     ]
     params: ThreadStartedNotification
 
@@ -6312,6 +7538,7 @@ class ServerNotification(
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
         | SkillsChangedServerNotification
+        | SkillUsedServerNotification
         | ThreadNameUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
@@ -6355,9 +7582,6 @@ class ServerNotification(
         | AccountLoginCompletedServerNotification
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ErrorServerNotification
         | ThreadStartedServerNotification
@@ -6366,6 +7590,7 @@ class ServerNotification(
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
         | SkillsChangedServerNotification
+        | SkillUsedServerNotification
         | ThreadNameUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification

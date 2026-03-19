@@ -3575,6 +3575,10 @@ pub struct ThreadActivePlanRow {
     pub status: TurnPlanStepStatus,
     pub path: String,
     pub details: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub depends_on: Vec<String>,
+    pub acceptance: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -4764,6 +4768,10 @@ pub struct TurnPlanStep {
     pub status: TurnPlanStepStatus,
     pub path: Option<String>,
     pub details: Option<String>,
+    pub inputs: Option<Vec<String>>,
+    pub outputs: Option<Vec<String>>,
+    pub depends_on: Option<Vec<String>>,
+    pub acceptance: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -4783,6 +4791,10 @@ impl From<CorePlanItemArg> for TurnPlanStep {
             status: value.status.into(),
             path: value.path,
             details: value.details,
+            inputs: value.inputs,
+            outputs: value.outputs,
+            depends_on: value.depends_on,
+            acceptance: value.acceptance,
         }
     }
 }

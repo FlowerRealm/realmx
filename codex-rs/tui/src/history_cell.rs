@@ -4054,6 +4054,10 @@ mod tests {
                     status: StepStatus::Completed,
                     path: None,
                     details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
                 },
                 PlanItemArg {
                     id: None,
@@ -4061,6 +4065,10 @@ mod tests {
                     status: StepStatus::InProgress,
                     path: None,
                     details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
                 },
                 PlanItemArg {
                     id: None,
@@ -4068,6 +4076,10 @@ mod tests {
                     status: StepStatus::Pending,
                     path: None,
                     details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
                 },
             ],
         };
@@ -4090,6 +4102,10 @@ mod tests {
                     status: StepStatus::InProgress,
                     path: None,
                     details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
                 },
                 PlanItemArg {
                     id: None,
@@ -4097,6 +4113,10 @@ mod tests {
                     status: StepStatus::Pending,
                     path: None,
                     details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
                 },
             ],
         };
@@ -4122,6 +4142,10 @@ mod tests {
                 status: StepStatus::InProgress,
                 path: None,
                 details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             }],
         };
 

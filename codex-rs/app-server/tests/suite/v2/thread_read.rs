@@ -193,6 +193,10 @@ async fn thread_read_returns_active_plan_from_state_db() -> Result<()> {
                 step: "Parse CSV".to_string(),
                 path: "codex-rs/core/src/plan_csv.rs".to_string(),
                 details: "extract active rows".to_string(),
+                inputs: vec!["proposed plan markdown".to_string()],
+                outputs: vec!["thread plan rows".to_string()],
+                depends_on: Vec::new(),
+                acceptance: Some("active plan rows reload".to_string()),
             }],
         )
         .await?;
@@ -221,6 +225,18 @@ async fn thread_read_returns_active_plan_from_state_db() -> Result<()> {
     assert_eq!(active_plan.rows[0].id, "plan-01");
     assert_eq!(active_plan.rows[0].path, "codex-rs/core/src/plan_csv.rs");
     assert_eq!(active_plan.rows[0].status, TurnPlanStepStatus::InProgress);
+    assert_eq!(
+        active_plan.rows[0].inputs,
+        vec!["proposed plan markdown".to_string()]
+    );
+    assert_eq!(
+        active_plan.rows[0].outputs,
+        vec!["thread plan rows".to_string()]
+    );
+    assert_eq!(
+        active_plan.rows[0].acceptance.as_deref(),
+        Some("active plan rows reload")
+    );
 
     let thread_json = read_result
         .get("thread")
@@ -233,6 +249,25 @@ async fn thread_read_returns_active_plan_from_state_db() -> Result<()> {
     assert_eq!(
         active_plan_json.get("snapshotId").and_then(Value::as_str),
         Some("snapshot-1")
+    );
+    let rows_json = active_plan_json
+        .get("rows")
+        .and_then(Value::as_array)
+        .expect("thread.activePlan.rows must be serialized");
+    let first_row = rows_json
+        .first()
+        .and_then(Value::as_object)
+        .expect("first activePlan row must be an object");
+    assert_eq!(
+        first_row
+            .get("inputs")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        first_row.get("acceptance").and_then(Value::as_str),
+        Some("active plan rows reload")
     );
 
     Ok(())

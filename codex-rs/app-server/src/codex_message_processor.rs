@@ -4203,6 +4203,10 @@ impl CodexMessageProcessor {
                     },
                     path: item.path,
                     details: item.details,
+                    inputs: item.inputs,
+                    outputs: item.outputs,
+                    depends_on: item.depends_on,
+                    acceptance: item.acceptance,
                 })
                 .collect(),
         })

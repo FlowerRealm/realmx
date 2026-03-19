@@ -48,6 +48,10 @@ pub struct ThreadPlanItem {
     pub step: String,
     pub path: String,
     pub details: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub depends_on: Vec<String>,
+    pub acceptance: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -76,6 +80,10 @@ pub struct ThreadPlanItemCreateParams {
     pub step: String,
     pub path: String,
     pub details: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub depends_on: Vec<String>,
+    pub acceptance: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -98,6 +106,10 @@ pub(crate) struct ThreadPlanItemRow {
     pub(crate) step: String,
     pub(crate) path: String,
     pub(crate) details: String,
+    pub(crate) inputs: String,
+    pub(crate) outputs: String,
+    pub(crate) depends_on: String,
+    pub(crate) acceptance: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
     pub(crate) completed_at: Option<i64>,
@@ -134,6 +146,10 @@ impl TryFrom<ThreadPlanItemRow> for ThreadPlanItem {
             step: value.step,
             path: value.path,
             details: value.details,
+            inputs: parse_string_list(value.inputs.as_str())?,
+            outputs: parse_string_list(value.outputs.as_str())?,
+            depends_on: parse_string_list(value.depends_on.as_str())?,
+            acceptance: value.acceptance,
             created_at: epoch_seconds_to_datetime(value.created_at)?,
             updated_at: epoch_seconds_to_datetime(value.updated_at)?,
             completed_at: value
@@ -147,4 +163,11 @@ impl TryFrom<ThreadPlanItemRow> for ThreadPlanItem {
 fn epoch_seconds_to_datetime(secs: i64) -> Result<DateTime<Utc>> {
     DateTime::<Utc>::from_timestamp(secs, 0)
         .ok_or_else(|| anyhow::anyhow!("invalid unix timestamp: {secs}"))
+}
+
+fn parse_string_list(raw: &str) -> Result<Vec<String>> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(raw).map_err(|err| anyhow::anyhow!("invalid thread plan list json: {err}"))
 }

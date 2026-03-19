@@ -119,12 +119,14 @@ For implementation plans that should later feed todos/checklists, include exactl
 
 The CSV must:
 
-* use this exact header order: `id,status,step,path,details`
+* use this exact header order: `id,status,step,path,details,inputs,outputs,depends_on,acceptance`
 * contain one row per file-level implementation step
 * use stable `id` values that can be reused when the same row is updated later
 * use `pending`, `in_progress`, or `completed` for `status`
 * always include a non-empty repo-relative `path`
 * keep `details` concise and implementation-oriented
+* use `inputs`, `outputs`, and `depends_on` as `|`-delimited lists within a single cell
+* use `acceptance` for the row-specific completion check
 * include at most one `in_progress` row
 
 When a task spans multiple files, split it into multiple rows rather than stuffing multiple paths into one row. Prefer the smallest set of rows that keeps file ownership clear.
@@ -132,9 +134,9 @@ When a task spans multiple files, split it into multiple rows rather than stuffi
 Example:
 
 ```csv
-id,status,step,path,details
-plan-01,in_progress,Parse proposed-plan CSV,codex-rs/core/src/plan_csv.rs,extract fenced csv and validate headers
-plan-02,pending,Persist active plan rows,codex-rs/state/src/runtime/thread_plans.rs,replace active snapshot and item rows
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Parse proposed-plan CSV,codex-rs/core/src/plan_csv.rs,extract fenced csv and validate headers,proposed plan markdown,validated plan rows,,rows parse with stable ids
+plan-02,pending,Persist active plan rows,codex-rs/state/src/runtime/thread_plans.rs,replace active snapshot and item rows,validated plan rows,active plan rows,plan-01,rows reload from state
 ```
 
 When possible, prefer a compact structure with 3-5 short sections, usually: Summary, Key Changes or Implementation Changes, Test Plan, and Assumptions. Do not include a separate Scope section unless scope boundaries are genuinely important to avoid mistakes.
