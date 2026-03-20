@@ -116,7 +116,7 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
         .enabled(Feature::PlanModePreparatoryMutations)
     {
         return Err(FunctionCallError::RespondToModel(
-            "Plan and Auto Plan modes only allow non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+            "Plan mode only allows non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
                 .to_string(),
         ));
     }
@@ -129,7 +129,7 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
         std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
     if canonical_workdir.starts_with(&target_repo_root) {
         return Err(FunctionCallError::RespondToModel(
-            "Plan and Auto Plan preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+            "Plan mode preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
                 .to_string(),
         ));
     }
@@ -406,7 +406,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "Plan and Auto Plan preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+            "Plan mode preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
         );
     }
 
@@ -420,7 +420,7 @@ mod tests {
 
         reject_plan_mode_target_repo_mutation(
             &session,
-            ModeKind::AutoPlan,
+            ModeKind::Plan,
             repo.path(),
             outside.path(),
             true,
@@ -444,7 +444,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "Plan and Auto Plan modes only allow non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+            "Plan mode only allows non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
         );
     }
 }

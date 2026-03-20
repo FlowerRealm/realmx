@@ -1951,7 +1951,6 @@ class MessagePhase(StrEnum):
 
 class ModeKind(StrEnum):
     plan = "plan"
-    auto_plan = "auto_plan"
     default = "default"
 
 

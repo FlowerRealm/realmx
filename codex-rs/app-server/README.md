@@ -163,7 +163,7 @@ Example with notification opt-out:
 - `model/list` — list available models (set `includeHidden: true` to include entries with `hidden: true`), with reasoning effort options, optional legacy `upgrade` model ids, optional `upgradeInfo` metadata (`model`, `upgradeCopy`, `modelLink`, `migrationMarkdown`), and optional `availabilityNux` metadata.
 - `experimentalFeature/list` — list feature flags with stage metadata (`beta`, `underDevelopment`, `stable`, etc.), enabled/default-enabled state, and cursor pagination. For non-beta flags, `displayName`/`description`/`announcement` are `null`.
 - `collaborationMode/list` — list available collaboration mode presets (experimental, no pagination). This response omits built-in developer instructions; clients should either pass `settings.developer_instructions: null` when setting a mode to use Codex's built-in instructions, or provide their own instructions explicitly.
-  - With `features.plan_mode_preparatory_mutations` enabled, the built-in Plan and Auto Plan instructions allow preparatory setup actions such as `git clone` or `git fetch`, but only in temporary or scratch directories outside the current target repo. They still forbid edits or rewrite-style commands inside the target repo worktree.
+  - With `features.plan_mode_preparatory_mutations` enabled, the built-in Plan instructions allow preparatory setup actions such as `git clone` or `git fetch`, but only in temporary or scratch directories outside the current target repo. They still forbid edits or rewrite-style commands inside the target repo worktree.
 - `skills/list` — list skills for one or more `cwd` values (optional `forceReload`).
 - `plugin/list` — list discovered plugin marketplaces and plugin state, including effective marketplace install/auth policy metadata. `interface.category` uses the marketplace category when present; otherwise it falls back to the plugin manifest category. Pass `forceRemoteSync: true` to refresh curated plugin state before listing (**under development; do not call from production clients yet**).
 - `plugin/read` — read one plugin by `marketplacePath` plus `pluginName`, returning marketplace info, a list-style `summary`, manifest descriptions/interface metadata, and bundled skills/apps/MCP server names (**under development; do not call from production clients yet**).
@@ -826,7 +826,7 @@ Today both notifications carry an empty `items` array even when item events were
 
 - `userMessage` — `{id, content}` where `content` is a list of user inputs (`text`, `image`, or `localImage`).
 - `agentMessage` — `{id, text}` containing the accumulated agent reply.
-- `plan` — `{id, text}` emitted for Plan/Auto Plan turns; plan text can stream via `item/plan/delta` (experimental).
+- `plan` — `{id, text}` emitted for Plan turns; plan text can stream via `item/plan/delta` (experimental).
 - `reasoning` — `{id, summary, content}` where `summary` holds streamed reasoning summaries (applicable for most OpenAI models) and `content` holds raw reasoning blocks (applicable for e.g. open source models).
 - `commandExecution` — `{id, command, cwd, status, commandActions, aggregatedOutput?, exitCode?, durationMs?}` for sandboxed commands; `status` is `inProgress`, `completed`, `failed`, or `declined`.
 - `fileChange` — `{id, changes, status}` describing proposed edits; `changes` list `{path, kind, diff}` and `status` is `inProgress`, `completed`, `failed`, or `declined`.
