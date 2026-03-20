@@ -20,6 +20,8 @@ You must **not** do work that changes repo-tracked state:
 - Running formatters or codegen that rewrite tracked files
 - Applying patches or migrations
 
+{{PLAN_PREPARATORY_MUTATIONS_GUIDANCE}}
+
 ## Output requirements
 
 Emit exactly one `<proposed_plan>` block (and no additional plan blocks). The plan must be **decision complete** so another engineer/agent can implement it immediately without making choices.

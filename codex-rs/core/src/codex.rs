@@ -3482,6 +3482,13 @@ impl Session {
         self.features.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) fn enable_feature_for_test(&mut self, feature: Feature) {
+        self.features
+            .enable(feature)
+            .unwrap_or_else(|err| panic!("test session should allow enabling feature: {err}"));
+    }
+
     pub(crate) async fn collaboration_mode(&self) -> CollaborationMode {
         let state = self.state.lock().await;
         state.session_configuration.collaboration_mode.clone()

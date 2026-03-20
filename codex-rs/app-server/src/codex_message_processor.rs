@@ -6254,6 +6254,7 @@ impl CodexMessageProcessor {
 
         let collaboration_modes_config = CollaborationModesConfig {
             default_mode_request_user_input: thread.enabled(Feature::DefaultModeRequestUserInput),
+            plan_mode_preparatory_mutations: thread.enabled(Feature::PlanModePreparatoryMutations),
         };
         let collaboration_mode = params.collaboration_mode.map(|mode| {
             self.normalize_turn_start_collaboration_mode(mode, collaboration_modes_config)

@@ -16,6 +16,7 @@ use crate::tools::handlers::implicit_granted_permissions;
 use crate::tools::handlers::normalize_and_validate_additional_permissions;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
+use crate::tools::handlers::reject_plan_mode_target_repo_mutation;
 use crate::tools::handlers::resolve_workdir_base_path;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
@@ -209,6 +210,13 @@ impl ToolHandler for UnifiedExecHandler {
 
                 let workdir = workdir.map(|dir| context.turn.resolve_path(Some(dir)));
                 let cwd = workdir.clone().unwrap_or(cwd);
+                reject_plan_mode_target_repo_mutation(
+                    session.as_ref(),
+                    turn.collaboration_mode.mode,
+                    turn.cwd.as_path(),
+                    &cwd,
+                    !is_known_safe_command(&command),
+                )?;
                 let normalized_additional_permissions = match implicit_granted_permissions(
                     sandbox_permissions,
                     requested_additional_permissions.as_ref(),

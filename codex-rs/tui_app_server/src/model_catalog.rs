@@ -11,6 +11,8 @@ const COLLABORATION_MODE_PLAN: &str =
 const COLLABORATION_MODE_DEFAULT: &str =
     include_str!("../../core/templates/collaboration_mode/default.md");
 const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
+const PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER: &str =
+    "{{PLAN_PREPARATORY_MUTATIONS_GUIDANCE}}";
 const REQUEST_USER_INPUT_AVAILABILITY_PLACEHOLDER: &str = "{{REQUEST_USER_INPUT_AVAILABILITY}}";
 const ASKING_QUESTIONS_GUIDANCE_PLACEHOLDER: &str = "{{ASKING_QUESTIONS_GUIDANCE}}";
 
@@ -43,16 +45,21 @@ impl ModelCatalog {
 fn builtin_collaboration_mode_presets(
     collaboration_modes_config: CollaborationModesConfig,
 ) -> Vec<CollaborationModeMask> {
-    vec![plan_preset(), default_preset(collaboration_modes_config)]
+    vec![
+        plan_preset(collaboration_modes_config),
+        default_preset(collaboration_modes_config),
+    ]
 }
 
-fn plan_preset() -> CollaborationModeMask {
+fn plan_preset(collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
     CollaborationModeMask {
         name: ModeKind::Plan.display_name().to_string(),
         mode: Some(ModeKind::Plan),
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
-        developer_instructions: Some(Some(COLLABORATION_MODE_PLAN.to_string())),
+        developer_instructions: Some(Some(plan_mode_instructions(
+            collaboration_modes_config.plan_mode_preparatory_mutations,
+        ))),
     }
 }
 
@@ -87,6 +94,13 @@ fn default_mode_instructions(collaboration_modes_config: CollaborationModesConfi
         )
 }
 
+fn plan_mode_instructions(plan_mode_preparatory_mutations: bool) -> String {
+    COLLABORATION_MODE_PLAN.replace(
+        PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER,
+        &plan_preparatory_mutations_guidance(plan_mode_preparatory_mutations),
+    )
+}
+
 fn format_mode_names(modes: &[ModeKind]) -> String {
     let mode_names: Vec<&str> = modes.iter().map(|mode| mode.display_name()).collect();
     match mode_names.as_slice() {
@@ -118,5 +132,13 @@ fn asking_questions_guidance_message(default_mode_request_user_input: bool) -> S
         "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, prefer using the `request_user_input` tool rather than writing a multiple choice question as a textual assistant message. Never write a multiple choice question as a textual assistant message.".to_string()
     } else {
         "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.".to_string()
+    }
+}
+
+fn plan_preparatory_mutations_guidance(plan_mode_preparatory_mutations: bool) -> String {
+    if plan_mode_preparatory_mutations {
+        "When `features.plan_mode_preparatory_mutations` is enabled, you may perform **preparatory mutations** that improve the plan without implementing it. These are side-effectful setup actions whose purpose is to gather truth or create a temporary analysis environment outside the target repo. Allowed examples: `git clone` or `git fetch` into a temporary directory or other scratch location outside the current target repo; downloading read-only reference material into a temporary directory; installing dependencies or generating temporary artifacts in a scratch workspace that exists only to inspect, build, or analyze. These actions must stay outside the current target repo and must not modify or create implementation files inside the target repo.\n\nEven when preparatory mutations are enabled, you must still not edit tracked files in the current target repo, run codegen/formatters/migrations that rewrite files in the current target repo, or carry out implementation work under the guise of planning. If a side-effectful setup action would write inside the current target repo, do not do it in Plan mode; use a temporary or scratch directory instead.".to_string()
+    } else {
+        "Do not perform **mutating** actions in Plan mode. That includes any side-effectful setup step such as `git clone`, `git fetch`, downloading files, installing dependencies into a working directory, or creating scratch worktrees, unless the action is completely outside repo-tracked state and explicitly allowed elsewhere. When in doubt, stay in non-mutating exploration only.".to_string()
     }
 }

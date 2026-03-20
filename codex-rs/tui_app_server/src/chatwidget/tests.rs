@@ -1789,6 +1789,9 @@ fn test_model_catalog(config: &Config) -> Arc<ModelCatalog> {
         default_mode_request_user_input: config
             .features
             .enabled(Feature::DefaultModeRequestUserInput),
+        plan_mode_preparatory_mutations: config
+            .features
+            .enabled(Feature::PlanModePreparatoryMutations),
     };
     Arc::new(ModelCatalog::new(
         codex_core::test_support::all_model_presets().clone(),

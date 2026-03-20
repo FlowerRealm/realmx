@@ -3,18 +3,24 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn preset_names_use_mode_display_names() {
-    assert_eq!(plan_preset().name, ModeKind::Plan.display_name());
-    assert_eq!(auto_plan_preset().name, ModeKind::AutoPlan.display_name());
+    assert_eq!(
+        plan_preset(CollaborationModesConfig::default()).name,
+        ModeKind::Plan.display_name()
+    );
+    assert_eq!(
+        auto_plan_preset(CollaborationModesConfig::default()).name,
+        ModeKind::AutoPlan.display_name()
+    );
     assert_eq!(
         default_preset(CollaborationModesConfig::default()).name,
         ModeKind::Default.display_name()
     );
     assert_eq!(
-        plan_preset().reasoning_effort,
+        plan_preset(CollaborationModesConfig::default()).reasoning_effort,
         Some(Some(ReasoningEffort::Medium))
     );
     assert_eq!(
-        auto_plan_preset().reasoning_effort,
+        auto_plan_preset(CollaborationModesConfig::default()).reasoning_effort,
         Some(Some(ReasoningEffort::Medium))
     );
 }
@@ -23,6 +29,7 @@ fn preset_names_use_mode_display_names() {
 fn default_mode_instructions_replace_mode_names_placeholder() {
     let default_instructions = default_preset(CollaborationModesConfig {
         default_mode_request_user_input: true,
+        plan_mode_preparatory_mutations: false,
     })
     .developer_instructions
     .expect("default preset should include instructions")
@@ -53,4 +60,38 @@ fn default_mode_instructions_use_plain_text_questions_when_feature_disabled() {
     assert!(
         default_instructions.contains("ask the user directly with a concise plain-text question")
     );
+}
+
+#[test]
+fn plan_mode_instructions_disallow_preparatory_mutations_by_default() {
+    let instructions = plan_preset(CollaborationModesConfig::default())
+        .developer_instructions
+        .expect("plan preset should include instructions")
+        .expect("plan instructions should be set");
+
+    assert!(instructions.contains("Do not perform **mutating** actions in Plan mode."));
+    assert!(instructions.contains("`git clone`"));
+}
+
+#[test]
+fn plan_mode_instructions_allow_preparatory_mutations_when_enabled() {
+    let instructions = plan_preset(CollaborationModesConfig {
+        default_mode_request_user_input: false,
+        plan_mode_preparatory_mutations: true,
+    })
+    .developer_instructions
+    .expect("plan preset should include instructions")
+    .expect("plan instructions should be set");
+
+    assert!(instructions.contains("`features.plan_mode_preparatory_mutations`"));
+    assert!(instructions.contains("must stay outside the current target repo"));
+}
+
+#[test]
+fn auto_plan_instructions_allow_preparatory_mutations_when_enabled() {
+    let instructions = plan_mode_instructions(COLLABORATION_MODE_AUTO_PLAN, true);
+
+    assert!(instructions.contains("`features.plan_mode_preparatory_mutations`"));
+    assert!(instructions.contains("`git clone` or `git fetch`"));
+    assert!(instructions.contains("must stay outside the current target repo"));
 }

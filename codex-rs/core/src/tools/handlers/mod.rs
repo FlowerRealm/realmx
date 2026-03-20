@@ -27,7 +27,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::codex::Session;
+use crate::features::Feature;
 use crate::function_tool::FunctionCallError;
+use crate::git_info::resolve_root_git_project_for_trust;
 use crate::sandboxing::SandboxPermissions;
 use crate::sandboxing::merge_permission_profiles;
 use crate::sandboxing::normalize_additional_permissions;
@@ -35,6 +37,7 @@ pub(crate) use crate::tools::code_mode::CodeModeExecuteHandler;
 pub(crate) use crate::tools::code_mode::CodeModeWaitHandler;
 pub use apply_patch::ApplyPatchHandler;
 pub use artifacts::ArtifactsHandler;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 pub use dynamic::DynamicToolHandler;
@@ -95,6 +98,43 @@ fn resolve_workdir_base_path(
             || default_cwd.to_path_buf(),
             |workdir| crate::util::resolve_path(default_cwd, &workdir),
         ))
+}
+
+pub(crate) fn reject_plan_mode_target_repo_mutation(
+    session: &Session,
+    mode: ModeKind,
+    target_repo_cwd: &Path,
+    workdir: &Path,
+    is_mutating: bool,
+) -> Result<(), FunctionCallError> {
+    if !mode.is_plan_output_mode() || !is_mutating {
+        return Ok(());
+    }
+
+    if !session
+        .features()
+        .enabled(Feature::PlanModePreparatoryMutations)
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "Plan and Auto Plan modes only allow non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+                .to_string(),
+        ));
+    }
+
+    let Some(target_repo_root) = resolve_root_git_project_for_trust(target_repo_cwd) else {
+        return Ok(());
+    };
+
+    let canonical_workdir =
+        std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    if canonical_workdir.starts_with(&target_repo_root) {
+        return Err(FunctionCallError::RespondToModel(
+            "Plan and Auto Plan preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+                .to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Validates feature/policy constraints for `with_additional_permissions` and
@@ -233,7 +273,11 @@ mod tests {
     use super::EffectiveAdditionalPermissions;
     use super::implicit_granted_permissions;
     use super::normalize_and_validate_additional_permissions;
+    use super::reject_plan_mode_target_repo_mutation;
+    use crate::codex::make_session_and_context;
+    use crate::features::Feature;
     use crate::sandboxing::SandboxPermissions;
+    use codex_protocol::config_types::ModeKind;
     use codex_protocol::models::FileSystemPermissions;
     use codex_protocol::models::NetworkPermissions;
     use codex_protocol::models::PermissionProfile;
@@ -340,5 +384,67 @@ mod tests {
         );
 
         assert_eq!(implicit_permissions, None);
+    }
+
+    #[tokio::test]
+    async fn plan_mode_rejects_mutations_inside_target_repo() {
+        let (mut session, _turn_context) = make_session_and_context().await;
+        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        let repo = tempdir().expect("tempdir");
+        std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
+        let nested = repo.path().join("nested");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+
+        let err = reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::Plan,
+            repo.path(),
+            &nested,
+            true,
+        )
+        .expect_err("mutating in target repo should be rejected");
+
+        assert_eq!(
+            err.to_string(),
+            "Plan and Auto Plan preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_mode_allows_mutations_outside_target_repo_when_feature_enabled() {
+        let (mut session, _turn_context) = make_session_and_context().await;
+        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        let repo = tempdir().expect("tempdir");
+        std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
+        let outside = tempdir().expect("tempdir");
+
+        reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::AutoPlan,
+            repo.path(),
+            outside.path(),
+            true,
+        )
+        .expect("outside repo scratch dir should be allowed");
+    }
+
+    #[tokio::test]
+    async fn plan_mode_rejects_mutations_when_feature_disabled() {
+        let (session, _turn_context) = make_session_and_context().await;
+        let outside = tempdir().expect("tempdir");
+
+        let err = reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::Plan,
+            outside.path(),
+            outside.path(),
+            true,
+        )
+        .expect_err("feature-disabled plan mutation should be rejected");
+
+        assert_eq!(
+            err.to_string(),
+            "Plan and Auto Plan modes only allow non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+        );
     }
 }

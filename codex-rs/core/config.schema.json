@@ -425,6 +425,9 @@
             "personality": {
               "type": "boolean"
             },
+            "plan_mode_preparatory_mutations": {
+              "type": "boolean"
+            },
             "plugins": {
               "type": "boolean"
             },
@@ -2027,6 +2030,9 @@
           "type": "boolean"
         },
         "personality": {
+          "type": "boolean"
+        },
+        "plan_mode_preparatory_mutations": {
           "type": "boolean"
         },
         "plugins": {

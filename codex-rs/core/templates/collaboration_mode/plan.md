@@ -18,6 +18,8 @@ Separately, `update_plan` is a checklist/progress/TODOs tool; it does not enter 
 
 You may explore and execute **non-mutating** actions that improve the plan. You must not perform **mutating** actions.
 
+{{PLAN_PREPARATORY_MUTATIONS_GUIDANCE}}
+
 ### Allowed (non-mutating, plan-improving)
 
 Actions that gather truth, reduce ambiguity, or validate feasibility without changing repo-tracked state. Examples:

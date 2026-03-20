@@ -1,8 +1,12 @@
 use super::*;
+use crate::codex::make_session_and_context;
+use crate::features::Feature;
 use crate::shell::default_user_shell;
 use crate::tools::handlers::parse_arguments_with_base_path;
+use crate::tools::handlers::reject_plan_mode_target_repo_mutation;
 use crate::tools::handlers::resolve_workdir_base_path;
 use crate::tools::spec::ZshForkConfig;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -181,4 +185,26 @@ fn exec_command_args_resolve_relative_additional_permissions_against_workdir() -
         })
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn plan_mode_mutating_exec_requires_scratch_dir() {
+    let (mut session, _turn_context) = make_session_and_context().await;
+    session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+    let repo = tempdir().expect("tempdir");
+    fs::create_dir_all(repo.path().join(".git")).expect("git dir");
+
+    let err = reject_plan_mode_target_repo_mutation(
+        &session,
+        ModeKind::Plan,
+        repo.path(),
+        repo.path(),
+        true,
+    )
+    .expect_err("repo-local mutation should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("must run outside the current target repo")
+    );
 }

@@ -24,6 +24,7 @@ use crate::tools::handlers::apply_patch::intercept_apply_patch;
 use crate::tools::handlers::implicit_granted_permissions;
 use crate::tools::handlers::normalize_and_validate_additional_permissions;
 use crate::tools::handlers::parse_arguments_with_base_path;
+use crate::tools::handlers::reject_plan_mode_target_repo_mutation;
 use crate::tools::handlers::resolve_workdir_base_path;
 use crate::tools::orchestrator::ToolOrchestrator;
 use crate::tools::registry::ToolHandler;
@@ -332,6 +333,13 @@ impl ShellHandler {
         } = args;
 
         let mut exec_params = exec_params;
+        reject_plan_mode_target_repo_mutation(
+            session.as_ref(),
+            turn.collaboration_mode.mode,
+            turn.cwd.as_path(),
+            &exec_params.cwd,
+            !is_known_safe_command(&exec_params.command),
+        )?;
         let dependency_env = session.dependency_env().await;
         if !dependency_env.is_empty() {
             exec_params.env.extend(dependency_env.clone());

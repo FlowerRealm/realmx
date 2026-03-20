@@ -104,6 +104,18 @@ fn request_permissions_tool_is_under_development() {
 }
 
 #[test]
+fn plan_mode_preparatory_mutations_is_under_development() {
+    assert_eq!(
+        Feature::PlanModePreparatoryMutations.stage(),
+        Stage::UnderDevelopment
+    );
+    assert_eq!(
+        Feature::PlanModePreparatoryMutations.default_enabled(),
+        false
+    );
+}
+
+#[test]
 fn tool_suggest_is_under_development() {
     assert_eq!(Feature::ToolSuggest.stage(), Stage::UnderDevelopment);
     assert_eq!(Feature::ToolSuggest.default_enabled(), false);

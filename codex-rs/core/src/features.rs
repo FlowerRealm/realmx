@@ -163,6 +163,8 @@ pub enum Feature {
     Steer,
     /// Allow request_user_input in Default collaboration mode.
     DefaultModeRequestUserInput,
+    /// Allow Plan/Auto Plan modes to perform preparatory mutations outside the target repo.
+    PlanModePreparatoryMutations,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
@@ -774,6 +776,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::DefaultModeRequestUserInput,
         key: "default_mode_request_user_input",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::PlanModePreparatoryMutations,
+        key: "plan_mode_preparatory_mutations",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

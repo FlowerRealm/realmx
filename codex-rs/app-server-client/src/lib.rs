@@ -216,6 +216,10 @@ impl InProcessClientStartArgs {
                     .config
                     .features
                     .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
+                plan_mode_preparatory_mutations: self
+                    .config
+                    .features
+                    .enabled(codex_core::features::Feature::PlanModePreparatoryMutations),
             },
         ));
 
@@ -1108,6 +1112,9 @@ mod tests {
                     result: serde_json::to_value(GetAccountResponse {
                         account: None,
                         requires_openai_auth: false,
+                        requires_auth: None,
+                        provider_id: None,
+                        provider_name: None,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1162,6 +1169,9 @@ mod tests {
                     result: serde_json::to_value(GetAccountResponse {
                         account: None,
                         requires_openai_auth: false,
+                        requires_auth: None,
+                        provider_id: None,
+                        provider_name: None,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1215,6 +1225,9 @@ mod tests {
             GetAccountResponse {
                 account: None,
                 requires_openai_auth: false,
+                requires_auth: None,
+                provider_id: None,
+                provider_name: None,
             }
         );
 
@@ -1233,6 +1246,8 @@ mod tests {
                             AccountUpdatedNotification {
                                 auth_mode: None,
                                 plan_type: None,
+                                provider_id: None,
+                                provider_name: None,
                             },
                         ))
                         .expect("notification should serialize"),
@@ -1485,6 +1500,9 @@ mod tests {
                 default_mode_request_user_input: config
                     .features
                     .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
+                plan_mode_preparatory_mutations: config
+                    .features
+                    .enabled(codex_core::features::Feature::PlanModePreparatoryMutations),
             },
         ));
         event_tx
