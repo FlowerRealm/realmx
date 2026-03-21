@@ -1,7 +1,6 @@
 use crate::auth::CodexAuth;
 use crate::error::CodexErr;
 use crate::error::Result;
-use crate::model_provider_info::ModelProviderAuthStrategy;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::provider_login_capabilities::provider_login_capabilities;
 use crate::provider_login_capabilities::provider_oauth_url;
@@ -25,7 +24,7 @@ pub enum ProviderCredentialMode {
     OAuth,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedProviderCredential {
     pub auth_mode: Option<ProviderCredentialMode>,
     pub token: Option<String>,
@@ -40,6 +39,17 @@ fn credential_mode_from_openai_auth(auth: &CodexAuth) -> ProviderCredentialMode 
         }
         codex_app_server_protocol::AuthMode::Chatgpt
         | codex_app_server_protocol::AuthMode::ChatgptAuthTokens => ProviderCredentialMode::Chatgpt,
+    }
+}
+
+fn openai_auth_credential(auth: Option<CodexAuth>) -> Result<ResolvedProviderCredential> {
+    match auth {
+        Some(auth) => Ok(ResolvedProviderCredential {
+            auth_mode: Some(credential_mode_from_openai_auth(&auth)),
+            token: Some(auth.get_token()?),
+            account_id: auth.get_account_id(),
+        }),
+        None => Ok(ResolvedProviderCredential::default()),
     }
 }
 
@@ -121,9 +131,7 @@ pub fn detect_provider_credential_mode(
 ) -> Result<Option<ProviderCredentialMode>> {
     let capabilities = provider_login_capabilities(provider_id, provider);
 
-    if provider.resolved_auth_strategy() == ModelProviderAuthStrategy::OpenAi
-        && capabilities.uses_openai_auth()
-    {
+    if capabilities.uses_openai_auth() {
         return Ok(auth.map(credential_mode_from_openai_auth));
     }
 
@@ -192,15 +200,8 @@ pub async fn resolve_provider_credential(
 ) -> Result<ResolvedProviderCredential> {
     let capabilities = provider_login_capabilities(provider_id, provider);
 
-    if provider.resolved_auth_strategy() == ModelProviderAuthStrategy::OpenAi
-        && capabilities.uses_openai_auth()
-        && let Some(auth) = auth
-    {
-        return Ok(ResolvedProviderCredential {
-            auth_mode: Some(credential_mode_from_openai_auth(&auth)),
-            token: Some(auth.get_token()?),
-            account_id: auth.get_account_id(),
-        });
+    if capabilities.uses_openai_auth() {
+        return openai_auth_credential(auth);
     }
 
     if let Some(api_key) = read_provider_api_key(codex_home, provider_id)? {
@@ -261,4 +262,91 @@ pub async fn resolve_provider_credential(
     }
 
     Ok(ResolvedProviderCredential::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::CodexAuth;
+    use crate::model_provider_info::ModelProviderAuthStrategy;
+    use crate::model_provider_info::WireApi;
+    use codex_rmcp_client::OAuthCredentialsStoreMode;
+    use pretty_assertions::assert_eq;
+    use tempfile::tempdir;
+
+    fn custom_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: "FlowerRealm".to_string(),
+            base_url: Some("https://flowerrealm.top/v1".to_string()),
+            auth_strategy: ModelProviderAuthStrategy::None,
+            oauth: None,
+            api_key: None,
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: true,
+            supports_websockets: false,
+        }
+    }
+
+    #[test]
+    fn detect_provider_credential_mode_uses_openai_api_key_auth() {
+        let codex_home = tempdir().expect("temp dir");
+        let provider = custom_provider();
+        let mode = detect_provider_credential_mode(
+            codex_home.path(),
+            "FlowerRealm",
+            &provider,
+            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            OAuthCredentialsStoreMode::default(),
+        )
+        .expect("credential mode");
+
+        assert_eq!(mode, Some(ProviderCredentialMode::ApiKey));
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_credential_uses_openai_auth_token_for_custom_provider() {
+        let codex_home = tempdir().expect("temp dir");
+        let provider = custom_provider();
+
+        let resolved = resolve_provider_credential(
+            codex_home.path(),
+            "FlowerRealm",
+            &provider,
+            Some(CodexAuth::from_api_key("sk-auth-json")),
+            OAuthCredentialsStoreMode::default(),
+        )
+        .await
+        .expect("resolve credential");
+
+        assert_eq!(resolved.auth_mode, Some(ProviderCredentialMode::ApiKey));
+        assert_eq!(resolved.token.as_deref(), Some("sk-auth-json"));
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_credential_does_not_fall_back_for_openai_auth_provider() {
+        let codex_home = tempdir().expect("temp dir");
+        let mut provider = custom_provider();
+        provider.api_key = Some("provider-inline".to_string());
+
+        let resolved = resolve_provider_credential(
+            codex_home.path(),
+            "FlowerRealm",
+            &provider,
+            None,
+            OAuthCredentialsStoreMode::default(),
+        )
+        .await
+        .expect("resolve credential");
+
+        assert_eq!(resolved, ResolvedProviderCredential::default());
+    }
 }

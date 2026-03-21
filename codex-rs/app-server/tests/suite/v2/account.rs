@@ -1229,7 +1229,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
 }
 
 #[tokio::test]
-async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
+async fn custom_openai_auth_provider_allows_api_key_login() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -1272,7 +1272,7 @@ async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
         received,
         GetAccountResponse {
             account: Some(Account::ApiKey {}),
-            requires_openai_auth: false,
+            requires_openai_auth: true,
             requires_auth: Some(true),
             provider_id: Some("mock_provider".to_string()),
             provider_name: Some("Mock provider for test".to_string()),
@@ -1282,7 +1282,9 @@ async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
 }
 
 #[tokio::test]
-async fn legacy_custom_provider_chatgpt_login_is_rejected() -> Result<()> {
+// Serialize tests that launch the login server since it binds to a fixed port.
+#[serial(login_port)]
+async fn custom_openai_auth_provider_allows_chatgpt_login() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -1299,16 +1301,18 @@ async fn legacy_custom_provider_chatgpt_login_is_rejected() -> Result<()> {
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let request_id = mcp.send_login_account_chatgpt_request().await?;
-    let err: JSONRPCError = timeout(
+    let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
-    assert_eq!(
-        err.error.message,
-        "provider `mock_provider` does not support ChatGPT login"
-    );
+    let login: LoginAccountResponse = to_response(resp)?;
+    let LoginAccountResponse::Chatgpt { login_id, auth_url } = login else {
+        bail!("unexpected login response: {login:?}");
+    };
+    assert!(!login_id.is_empty());
+    assert!(!auth_url.is_empty());
     Ok(())
 }
 

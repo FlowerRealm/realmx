@@ -55,6 +55,7 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::openai_models::default_input_modalities;
 use codex_protocol::parse_command::ParsedCommand;
@@ -122,6 +123,7 @@ use codex_protocol::user_input::TextElement;
 use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::builtin_approval_presets;
+use core_test_support::responses::mount_models_once;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -140,6 +142,7 @@ use tempfile::tempdir;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::unbounded_channel;
 use toml::Value as TomlValue;
+use wiremock::MockServer;
 
 async fn test_config() -> Config {
     // Use base defaults to avoid depending on host state.
@@ -1960,6 +1963,7 @@ async fn make_chatwidget_manual_with_animation_mode(
         connectors_partial_snapshot: None,
         connectors_prefetch_in_flight: false,
         connectors_force_refetch_pending: false,
+        model_picker_load_in_flight: false,
         interrupts: InterruptManager::new(),
         reasoning_buffer: String::new(),
         full_reasoning_buffer: String::new(),
@@ -7788,10 +7792,147 @@ async fn multi_agent_enable_prompt_updates_feature_and_emits_notice() {
 async fn model_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5-codex")).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.open_model_popup();
+    let presets = chat
+        .models_manager
+        .try_list_models()
+        .expect("model presets should be available for snapshot");
+    chat.open_model_popup_with_presets(presets);
 
     let popup = render_bottom_popup(&chat, 80);
     assert_snapshot!("model_selection_popup", popup);
+}
+
+#[tokio::test]
+async fn model_selection_popup_shows_loading_state_before_remote_models_arrive() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5-codex")).await;
+    chat.thread_id = Some(ThreadId::new());
+
+    chat.open_model_popup();
+
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(popup.contains("Loading models..."));
+    assert!(popup.contains("Fetching /v1/models for the current provider."));
+}
+
+#[tokio::test]
+async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
+    let server = MockServer::start().await;
+    let remote_slug = "remote-provider-model";
+    let _models_mock = mount_models_once(
+        &server,
+        ModelsResponse {
+            models: vec![
+                serde_json::from_value(serde_json::json!({
+                    "slug": "codex-auto-fast",
+                    "display_name": "Auto Fast",
+                    "description": "Fast auto mode",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "minimal_client_version": [0, 1, 0],
+                    "supported_in_api": true,
+                    "priority": 0,
+                    "upgrade": null,
+                    "base_instructions": "base instructions",
+                    "supports_reasoning_summaries": false,
+                    "support_verbosity": false,
+                    "default_verbosity": null,
+                    "apply_patch_tool_type": null,
+                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                    "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
+                    "context_window": 272_000,
+                    "experimental_supported_tools": [],
+                }))
+                .expect("valid model"),
+                serde_json::from_value(serde_json::json!({
+                    "slug": "gpt-5.4",
+                    "display_name": "GPT 5.4",
+                    "description": "Frontier model",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "minimal_client_version": [0, 1, 0],
+                    "supported_in_api": true,
+                    "priority": 1,
+                    "upgrade": null,
+                    "base_instructions": "base instructions",
+                    "supports_reasoning_summaries": false,
+                    "support_verbosity": false,
+                    "default_verbosity": null,
+                    "apply_patch_tool_type": null,
+                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                    "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
+                    "context_window": 272_000,
+                    "experimental_supported_tools": [],
+                }))
+                .expect("valid model"),
+                serde_json::from_value(serde_json::json!({
+                    "slug": remote_slug,
+                    "display_name": "Remote Provider Model",
+                    "description": "Remote provider model",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "minimal_client_version": [0, 1, 0],
+                    "supported_in_api": true,
+                    "priority": 2,
+                    "upgrade": null,
+                    "base_instructions": "base instructions",
+                    "supports_reasoning_summaries": false,
+                    "support_verbosity": false,
+                    "default_verbosity": null,
+                    "apply_patch_tool_type": null,
+                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                    "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
+                    "context_window": 272_000,
+                    "experimental_supported_tools": [],
+                }))
+                .expect("valid model"),
+            ],
+        },
+    )
+    .await;
+
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5-codex")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config.model_provider.requires_openai_auth = false;
+    chat.config.model_provider.base_url = Some(server.uri());
+    let thread_manager = Arc::new(
+        codex_core::test_support::thread_manager_with_models_provider(
+            CodexAuth::from_api_key("test"),
+            chat.config.model_provider.clone(),
+        ),
+    );
+    chat.set_models_manager(thread_manager.get_models_manager());
+
+    chat.open_model_popup();
+
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(popup.contains("Loading models..."));
+
+    let result = loop {
+        tokio::task::yield_now().await;
+        match rx.try_recv() {
+            Ok(AppEvent::ModelPickerLoaded { result }) => break result,
+            Ok(_) => continue,
+            Err(TryRecvError::Empty) => continue,
+            Err(TryRecvError::Disconnected) => panic!("model picker channel closed"),
+        }
+    };
+
+    chat.on_model_picker_loaded(result);
+
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains(remote_slug));
+    assert!(popup.contains("gpt-5.4[1m]"));
+    assert!(!popup.contains("Loading models..."));
 }
 
 #[tokio::test]
@@ -7801,6 +7942,21 @@ async fn fast_status_indicator_is_shown_for_gpt_5_4_one_million_alias() {
     set_chatgpt_auth(&mut chat);
 
     assert!(chat.should_show_fast_status(chat.current_model(), chat.current_service_tier(),));
+}
+
+#[tokio::test]
+async fn gpt_5_4_one_million_alias_uses_one_million_context_window_metadata() {
+    let (chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4[1m]")).await;
+
+    assert_eq!(chat.current_model(), "gpt-5.4[1m]");
+    assert_eq!(chat.config.model_context_window, None);
+    assert_eq!(
+        chat.models_manager
+            .get_model_info("gpt-5.4[1m]", &chat.config)
+            .await
+            .context_window,
+        Some(1_050_000)
+    );
 }
 
 #[tokio::test]
@@ -8330,7 +8486,11 @@ async fn feedback_good_result_consent_popup_includes_connectivity_diagnostics_fi
 async fn reasoning_popup_escape_returns_to_model_popup() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.open_model_popup();
+    let presets = chat
+        .models_manager
+        .try_list_models()
+        .expect("model presets should be available");
+    chat.open_model_popup_with_presets(presets);
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);

@@ -20,6 +20,7 @@ const LOCAL_FRIENDLY_TEMPLATE: &str =
     "You optimize for team morale and being a supportive teammate as much as code quality.";
 const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
+const REMOTE_DISCOVERED_DESCRIPTION: &str = "Remote model discovered from /v1/models.";
 
 pub(crate) fn with_config_overrides(mut model: ModelInfo, config: &Config) -> ModelInfo {
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
@@ -57,18 +58,20 @@ pub(crate) fn with_config_overrides(mut model: ModelInfo, config: &Config) -> Mo
     model
 }
 
-/// Build a minimal fallback model descriptor for missing/unknown slugs.
-pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
-    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+fn fallback_model_info(
+    slug: &str,
+    visibility: ModelVisibility,
+    description: Option<String>,
+) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         api_model_slug: None,
         display_name: slug.to_string(),
-        description: None,
+        description,
         default_reasoning_level: None,
         supported_reasoning_levels: Vec::new(),
         shell_type: ConfigShellToolType::Default,
-        visibility: ModelVisibility::None,
+        visibility,
         supported_in_api: true,
         priority: 99,
         availability_nux: None,
@@ -93,6 +96,24 @@ pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
         used_fallback_model_metadata: true, // this is the fallback model metadata
         supports_search_tool: false,
     }
+}
+
+/// Build a minimal fallback model descriptor for missing/unknown slugs.
+pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
+    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    fallback_model_info(slug, ModelVisibility::None, None)
+}
+
+/// Build a minimal, picker-visible descriptor for a model discovered remotely.
+pub(crate) fn remote_model_info_from_slug(slug: &str) -> ModelInfo {
+    warn!(
+        "Unknown remote model {slug} discovered from /v1/models. This will use fallback model metadata."
+    );
+    fallback_model_info(
+        slug,
+        ModelVisibility::List,
+        Some(REMOTE_DISCOVERED_DESCRIPTION.to_string()),
+    )
 }
 
 fn local_personality_messages_for_slug(slug: &str) -> Option<ModelMessages> {

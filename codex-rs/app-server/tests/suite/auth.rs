@@ -191,7 +191,7 @@ async fn get_auth_status_with_api_key_for_custom_provider() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_custom_provider_openai_flag_normalizes_to_api_key_auth() -> Result<()> {
+async fn custom_openai_auth_provider_reports_openai_auth_status() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml_custom_provider(codex_home.path(), None, true)?;
 
@@ -215,7 +215,7 @@ async fn legacy_custom_provider_openai_flag_normalizes_to_api_key_auth() -> Resu
     let status: GetAuthStatusResponse = to_response(resp)?;
     assert_eq!(status.auth_method, Some(AuthMode::ApiKey));
     assert_eq!(status.auth_token, Some("sk-test-key".to_string()));
-    assert_eq!(status.requires_openai_auth, Some(false));
+    assert_eq!(status.requires_openai_auth, Some(true));
     assert_eq!(status.requires_auth, Some(true));
     assert_eq!(status.provider_id.as_deref(), Some("mock_provider"));
     assert_eq!(

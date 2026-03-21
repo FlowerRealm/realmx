@@ -46,16 +46,22 @@ fn normalized_provider_auth_strategy(
         return provider.resolved_auth_strategy();
     }
 
+    if matches!(
+        provider.resolved_auth_strategy(),
+        ModelProviderAuthStrategy::OpenAi
+    ) || provider.requires_openai_auth
+    {
+        return ModelProviderAuthStrategy::OpenAi;
+    }
+
     if provider.inline_api_key().is_some()
         || provider.env_key.is_some()
         || matches!(
             provider.resolved_auth_strategy(),
             ModelProviderAuthStrategy::ApiKey
-                | ModelProviderAuthStrategy::OpenAi
                 | ModelProviderAuthStrategy::OAuth
                 | ModelProviderAuthStrategy::OAuthOrApiKey
         )
-        || provider.requires_openai_auth
         || provider.oauth.is_some()
     {
         return ModelProviderAuthStrategy::ApiKey;
@@ -185,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_provider_normalizes_openai_auth_strategy_to_api_key_login() {
+    fn custom_provider_preserves_openai_auth_strategy() {
         let mut provider = provider();
         provider.auth_strategy = ModelProviderAuthStrategy::OpenAi;
 
@@ -195,15 +201,15 @@ mod tests {
             capabilities,
             ProviderLoginCapabilities {
                 api_key: true,
-                chatgpt: false,
-                device_code: false,
+                chatgpt: true,
+                device_code: true,
                 oauth: false,
             }
         );
     }
 
     #[test]
-    fn custom_provider_normalizes_requires_openai_auth_to_api_key_login() {
+    fn custom_provider_preserves_requires_openai_auth() {
         let mut provider = provider();
         provider.requires_openai_auth = true;
 
@@ -213,8 +219,8 @@ mod tests {
             capabilities,
             ProviderLoginCapabilities {
                 api_key: true,
-                chatgpt: false,
-                device_code: false,
+                chatgpt: true,
+                device_code: true,
                 oauth: false,
             }
         );

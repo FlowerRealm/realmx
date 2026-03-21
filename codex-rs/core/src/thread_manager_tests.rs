@@ -1,6 +1,9 @@
 use super::*;
 use crate::codex::make_session_and_context;
 use crate::config::test_config;
+use crate::model_provider_info::ModelProviderAuthStrategy;
+use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::WireApi;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::RefreshStrategy;
 use assert_matches::assert_matches;
@@ -13,6 +16,28 @@ use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::MockServer;
+
+fn provider_for(base_url: String) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "mock".into(),
+        base_url: Some(base_url),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
+        api_key: None,
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: Some(0),
+        stream_idle_timeout_ms: Some(5_000),
+        requires_openai_auth: false,
+        supports_websockets: false,
+    }
+}
 
 fn user_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
@@ -184,4 +209,68 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
 
     let _ = manager.list_models(RefreshStrategy::Online).await;
     assert_eq!(models_mock.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn new_uses_current_model_provider_for_model_refresh() {
+    let server = MockServer::start().await;
+    let dynamic_slug = "provider-specific-remote-model";
+    let models_mock = mount_models_once(
+        &server,
+        ModelsResponse {
+            models: vec![serde_json::from_value(serde_json::json!({
+                "slug": dynamic_slug,
+                "display_name": "Provider Specific",
+                "description": "Provider Specific desc",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [{"effort": "low", "description": "low"}, {"effort": "medium", "description": "medium"}],
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "minimal_client_version": [0, 1, 0],
+                "supported_in_api": true,
+                "priority": 1,
+                "upgrade": null,
+                "base_instructions": "base instructions",
+                "supports_reasoning_summaries": false,
+                "support_verbosity": false,
+                "default_verbosity": null,
+                "apply_patch_tool_type": null,
+                "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                "supports_parallel_tool_calls": false,
+                "supports_image_detail_original": false,
+                "context_window": 272_000,
+                "experimental_supported_tools": [],
+            }))
+            .expect("valid model")],
+        },
+    )
+    .await;
+
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config();
+    config.codex_home = temp_dir.path().join("codex-home");
+    config.cwd = config.codex_home.clone();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    config.model_catalog = None;
+    config.model_provider_id = "custom-provider".to_string();
+    config.model_provider = provider_for(server.uri());
+    config.model_providers.insert(
+        config.model_provider_id.clone(),
+        config.model_provider.clone(),
+    );
+
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
+    let manager = ThreadManager::new(
+        &config,
+        auth_manager,
+        SessionSource::Exec,
+        CollaborationModesConfig::default(),
+    );
+
+    let models = manager.list_models(RefreshStrategy::Online).await;
+    assert_eq!(models_mock.requests().len(), 1);
+    assert!(
+        models.iter().any(|preset| preset.model == dynamic_slug),
+        "thread manager should refresh models from the configured provider"
+    );
 }

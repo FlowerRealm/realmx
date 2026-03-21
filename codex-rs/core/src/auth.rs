@@ -39,8 +39,7 @@ use thiserror::Error;
 /// Account type for the current user.
 ///
 /// This is used internally to determine the base URL for generating responses,
-/// and to gate ChatGPT-only behaviors like rate limits and available models (as
-/// opposed to API key-based auth).
+/// and to gate ChatGPT-only behaviors like rate limits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthMode {
     ApiKey,

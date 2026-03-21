@@ -160,10 +160,7 @@ impl ProviderDraft {
         provider.name = self.name.trim().to_string();
         provider.base_url =
             Some(self.base_url.trim().to_string()).filter(|value| !value.is_empty());
-        provider.auth_strategy = ModelProviderAuthStrategy::ApiKey;
-        provider.oauth = None;
         provider.api_key = None;
-        provider.requires_openai_auth = false;
         provider
     }
 
@@ -723,7 +720,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editing_provider_canonicalizes_custom_auth_to_api_key() {
+    async fn editing_provider_preserves_custom_auth_fields() {
         let provider = ModelProviderInfo {
             name: "Original".to_string(),
             base_url: Some("https://example.com/v1".to_string()),
@@ -778,8 +775,8 @@ mod tests {
                 assert_eq!(id, "custom-provider");
                 assert_eq!(saved.name, "Renamed provider");
                 assert_eq!(saved.base_url, provider.base_url);
-                assert_eq!(saved.auth_strategy, ModelProviderAuthStrategy::ApiKey);
-                assert_eq!(saved.oauth, None);
+                assert_eq!(saved.auth_strategy, provider.auth_strategy);
+                assert_eq!(saved.oauth, provider.oauth);
                 assert_eq!(saved.api_key, None);
                 assert_eq!(saved.env_key, provider.env_key);
                 assert_eq!(saved.env_key_instructions, provider.env_key_instructions);
@@ -796,7 +793,7 @@ mod tests {
                     saved.stream_idle_timeout_ms,
                     provider.stream_idle_timeout_ms
                 );
-                assert!(!saved.requires_openai_auth);
+                assert_eq!(saved.requires_openai_auth, provider.requires_openai_auth);
                 assert_eq!(saved.supports_websockets, provider.supports_websockets);
             }
             event => panic!("unexpected event: {event:?}"),

@@ -5,6 +5,7 @@ use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use std::convert::Infallible;
+use std::sync::RwLock;
 
 const COLLABORATION_MODE_PLAN: &str =
     include_str!("../../core/templates/collaboration_mode/plan.md");
@@ -14,9 +15,9 @@ const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
 const REQUEST_USER_INPUT_AVAILABILITY_PLACEHOLDER: &str = "{{REQUEST_USER_INPUT_AVAILABILITY}}";
 const ASKING_QUESTIONS_GUIDANCE_PLACEHOLDER: &str = "{{ASKING_QUESTIONS_GUIDANCE}}";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ModelCatalog {
-    models: Vec<ModelPreset>,
+    models: RwLock<Vec<ModelPreset>>,
     collaboration_modes_config: CollaborationModesConfig,
 }
 
@@ -26,13 +27,21 @@ impl ModelCatalog {
         collaboration_modes_config: CollaborationModesConfig,
     ) -> Self {
         Self {
-            models,
+            models: RwLock::new(models),
             collaboration_modes_config,
         }
     }
 
     pub(crate) fn try_list_models(&self) -> Result<Vec<ModelPreset>, Infallible> {
-        Ok(self.models.clone())
+        Ok(self
+            .models
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone())
+    }
+
+    pub(crate) fn replace_models(&self, models: Vec<ModelPreset>) {
+        *self.models.write().unwrap_or_else(std::sync::PoisonError::into_inner) = models;
     }
 
     pub(crate) fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
@@ -118,5 +127,47 @@ fn asking_questions_guidance_message(default_mode_request_user_input: bool) -> S
         "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, prefer using the `request_user_input` tool rather than writing a multiple choice question as a textual assistant message. Never write a multiple choice question as a textual assistant message.".to_string()
     } else {
         "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_protocol::openai_models::default_input_modalities;
+
+    fn preset(model: &str) -> ModelPreset {
+        ModelPreset {
+            id: model.to_string(),
+            model: model.to_string(),
+            display_name: model.to_string(),
+            description: model.to_string(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: Vec::new(),
+            supports_personality: false,
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            availability_nux: None,
+            supported_in_api: true,
+            input_modalities: default_input_modalities(),
+        }
+    }
+
+    #[test]
+    fn replace_models_updates_catalog_contents() {
+        let catalog = ModelCatalog::new(
+            vec![preset("old-model")],
+            CollaborationModesConfig {
+                default_mode_request_user_input: false,
+            },
+        );
+
+        catalog.replace_models(vec![preset("new-model")]);
+
+        let models = catalog
+            .try_list_models()
+            .expect("catalog read should succeed");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model, "new-model");
     }
 }

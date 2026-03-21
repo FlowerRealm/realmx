@@ -13,7 +13,9 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::NetworkRequirements;
 use codex_app_server_protocol::SandboxMode;
 use codex_core::AnalyticsEventsClient;
+use codex_core::ModelProviderInfo;
 use codex_core::ThreadManager;
+use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigService;
 use codex_core::config::ConfigServiceError;
 use codex_core::config_loader::CloudRequirementsLoader;
@@ -36,6 +38,7 @@ use tracing::warn;
 #[async_trait]
 pub(crate) trait UserConfigReloader: Send + Sync {
     async fn reload_user_config(&self);
+    async fn replace_models_provider(&self, provider_id: String, provider: ModelProviderInfo);
 }
 
 #[async_trait]
@@ -50,6 +53,10 @@ impl UserConfigReloader for ThreadManager {
                 warn!("failed to request user config reload: {err}");
             }
         }
+    }
+
+    async fn replace_models_provider(&self, provider_id: String, provider: ModelProviderInfo) {
+        self.replace_models_provider(provider_id, provider).await;
     }
 }
 
@@ -96,6 +103,29 @@ impl ConfigApi {
         )
     }
 
+    async fn sync_runtime_model_provider(&self) -> Result<(), ConfigServiceError> {
+        let cloud_requirements = self
+            .cloud_requirements
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        let config = ConfigBuilder::default()
+            .codex_home(self.codex_home.clone())
+            .cli_overrides(self.cli_overrides.clone())
+            .loader_overrides(self.loader_overrides.clone())
+            .cloud_requirements(cloud_requirements)
+            .build()
+            .await
+            .map_err(|err| ConfigServiceError::Io {
+                context: "failed to reload runtime configuration",
+                source: err,
+            })?;
+        self.user_config_reloader
+            .replace_models_provider(config.model_provider_id, config.model_provider)
+            .await;
+        Ok(())
+    }
+
     pub(crate) async fn read(
         &self,
         params: ConfigReadParams,
@@ -127,6 +157,9 @@ impl ConfigApi {
             .write_value(params)
             .await
             .map_err(map_error)?;
+        self.sync_runtime_model_provider()
+            .await
+            .map_err(map_error)?;
         self.emit_plugin_toggle_events(pending_changes);
         Ok(response)
     }
@@ -145,6 +178,9 @@ impl ConfigApi {
         let response = self
             .config_service()
             .batch_write(params)
+            .await
+            .map_err(map_error)?;
+        self.sync_runtime_model_provider()
             .await
             .map_err(map_error)?;
         self.emit_plugin_toggle_events(pending_changes);
@@ -268,6 +304,7 @@ mod tests {
     use codex_protocol::protocol::AskForApproval as CoreAskForApproval;
     use pretty_assertions::assert_eq;
     use serde_json::json;
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use tempfile::TempDir;
@@ -275,12 +312,20 @@ mod tests {
     #[derive(Default)]
     struct RecordingUserConfigReloader {
         call_count: AtomicUsize,
+        provider_replacements: Mutex<Vec<(String, ModelProviderInfo)>>,
     }
 
     #[async_trait]
     impl UserConfigReloader for RecordingUserConfigReloader {
         async fn reload_user_config(&self) {
             self.call_count.fetch_add(1, Ordering::Relaxed);
+        }
+
+        async fn replace_models_provider(&self, provider_id: String, provider: ModelProviderInfo) {
+            self.provider_replacements
+                .lock()
+                .expect("provider replacements lock")
+                .push((provider_id, provider));
         }
     }
 
@@ -447,5 +492,77 @@ mod tests {
             "model = \"gpt-5\"\n"
         );
         assert_eq!(reloader.call_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn batch_write_syncs_runtime_model_provider() {
+        let codex_home = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            r#"
+model_provider = "openai"
+"#,
+        )
+        .expect("write config");
+        let reloader = Arc::new(RecordingUserConfigReloader::default());
+        let analytics_config = Arc::new(
+            codex_core::config::ConfigBuilder::default()
+                .codex_home(codex_home.path().to_path_buf())
+                .build()
+                .await
+                .expect("load analytics config"),
+        );
+        let config_api = ConfigApi::new(
+            codex_home.path().to_path_buf(),
+            Vec::new(),
+            LoaderOverrides::default(),
+            Arc::new(RwLock::new(CloudRequirementsLoader::default())),
+            reloader.clone(),
+            AnalyticsEventsClient::new(
+                analytics_config,
+                codex_core::test_support::auth_manager_from_auth(
+                    codex_core::CodexAuth::from_api_key("test"),
+                ),
+            ),
+        );
+
+        config_api
+            .batch_write(ConfigBatchWriteParams {
+                edits: vec![
+                    codex_app_server_protocol::ConfigEdit {
+                        key_path: "model_provider".to_string(),
+                        value: json!("custom"),
+                        merge_strategy: codex_app_server_protocol::MergeStrategy::Replace,
+                    },
+                    codex_app_server_protocol::ConfigEdit {
+                        key_path: "model_providers.custom".to_string(),
+                        value: json!({
+                            "name": "Custom Provider",
+                            "base_url": "https://example.test/v1",
+                            "wire_api": "responses",
+                            "request_max_retries": 0,
+                            "stream_max_retries": 0
+                        }),
+                        merge_strategy: codex_app_server_protocol::MergeStrategy::Replace,
+                    },
+                ],
+                file_path: None,
+                expected_version: None,
+                reload_user_config: false,
+            })
+            .await
+            .expect("batch write should succeed");
+
+        let replacements = reloader
+            .provider_replacements
+            .lock()
+            .expect("provider replacements lock");
+        let (provider_id, provider) = replacements.last().expect("provider replacement");
+        assert_eq!(provider_id, "custom");
+        assert_eq!(provider.name, "Custom Provider");
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://example.test/v1")
+        );
     }
 }

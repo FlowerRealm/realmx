@@ -52,7 +52,7 @@ fn preset_to_info(preset: &ModelPreset, priority: i32) -> ModelInfo {
     }
 }
 
-/// Write a models_cache.json file to the codex home directory.
+/// Write a provider-specific models cache file to the codex home directory.
 /// This prevents ModelsManager from making network requests to refresh models.
 /// The cache will be treated as fresh (within TTL) and used instead of fetching from the network.
 /// Uses bundled-catalog-derived presets, converted to ModelInfo format.
@@ -74,7 +74,7 @@ pub fn write_models_cache(codex_home: &Path) -> std::io::Result<()> {
         })
         .collect();
 
-    write_models_cache_with_models(codex_home, models)
+    write_models_cache_with_models_for_provider(codex_home, "openai", models)
 }
 
 /// Write a models_cache.json file with specific models.
@@ -83,7 +83,15 @@ pub fn write_models_cache_with_models(
     codex_home: &Path,
     models: Vec<ModelInfo>,
 ) -> std::io::Result<()> {
-    let cache_path = codex_home.join("models_cache.json");
+    write_models_cache_with_models_for_provider(codex_home, "openai", models)
+}
+
+pub fn write_models_cache_with_models_for_provider(
+    codex_home: &Path,
+    provider_id: &str,
+    models: Vec<ModelInfo>,
+) -> std::io::Result<()> {
+    let cache_path = codex_home.join(format!("models_cache-{provider_id}.json"));
     // DateTime<Utc> serializes to RFC3339 format by default with serde
     let fetched_at: DateTime<Utc> = Utc::now();
     let client_version = codex_core::models_manager::client_version_to_whole();
