@@ -1,6 +1,7 @@
 #![cfg(not(target_os = "windows"))]
 
 use std::fs;
+use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use codex_core::features::Feature;
@@ -10,6 +11,9 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::UserInput;
+use codex_state::ThreadPlanItemCreateParams;
+use codex_state::ThreadPlanItemStatus;
+use codex_state::ThreadPlanSnapshotCreateParams;
 use core_test_support::assert_regex_match;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
@@ -27,6 +31,7 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use serde_json::Value;
 use serde_json::json;
+use tempfile::TempDir;
 fn call_output(req: &ResponsesRequest, call_id: &str) -> (String, Option<bool>) {
     let raw = req.function_call_output(call_id);
     assert_eq!(
@@ -173,6 +178,117 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
             assert_eq!(update.plan.len(), 2);
             assert_eq!(update.plan[0].step, "Inspect workspace");
             assert_matches!(update.plan[0].status, StepStatus::InProgress);
+            assert_eq!(update.plan[1].step, "Report results");
+            assert_matches!(update.plan[1].status, StepStatus::Pending);
+            false
+        }
+        EventMsg::TurnComplete(_) => true,
+        _ => false,
+    })
+    .await;
+
+    assert!(saw_plan_update, "expected PlanUpdate event");
+
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = call_output(&req, call_id);
+    assert_eq!(output_text, "Plan updated");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_plan_tool_keeps_non_id_rows_when_active_plan_exists() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+
+    let mut builder = test_codex().with_home(home);
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let db = codex.state_db().expect("state db");
+    db.replace_active_thread_plan(
+        &ThreadPlanSnapshotCreateParams {
+            id: "snapshot-1".to_string(),
+            thread_id: session_configured.session_id.to_string(),
+            source_turn_id: "turn-1".to_string(),
+            source_item_id: "item-1".to_string(),
+            raw_markdown: "plan".to_string(),
+        },
+        &[ThreadPlanItemCreateParams {
+            row_id: "plan-1".to_string(),
+            row_index: 0,
+            status: ThreadPlanItemStatus::Pending,
+            step: "Inspect workspace".to_string(),
+            path: "codex-rs/core/src/tools/handlers/plan.rs".to_string(),
+            details: "sync state".to_string(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            depends_on: Vec::new(),
+            acceptance: None,
+        }],
+    )
+    .await?;
+
+    let call_id = "plan-tool-mixed-rows";
+    let plan_args = json!({
+        "explanation": "Mixed update",
+        "plan": [
+            {"id": "plan-1", "step": "Inspect workspace", "status": "completed"},
+            {"step": "Report results", "status": "pending"},
+        ],
+    })
+    .to_string();
+
+    let first_response = sse(vec![
+        ev_response_created("resp-1"),
+        ev_function_call(call_id, "update_plan", &plan_args),
+        ev_completed("resp-1"),
+    ]);
+    responses::mount_sse_once(&server, first_response).await;
+
+    let second_response = sse(vec![
+        ev_assistant_message("msg-1", "plan acknowledged"),
+        ev_completed("resp-2"),
+    ]);
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
+
+    let session_model = session_configured.model.clone();
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "please update the active plan".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_model,
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        })
+        .await?;
+
+    let mut saw_plan_update = false;
+    wait_for_event(&codex, |event| match event {
+        EventMsg::PlanUpdate(update) => {
+            saw_plan_update = true;
+            assert_eq!(update.explanation.as_deref(), Some("Mixed update"));
+            assert_eq!(update.plan.len(), 2);
+            assert_eq!(update.plan[0].id.as_deref(), Some("plan-1"));
+            assert_eq!(update.plan[0].step, "Inspect workspace");
+            assert_matches!(update.plan[0].status, StepStatus::Completed);
+            assert_eq!(update.plan[1].id, None);
             assert_eq!(update.plan[1].step, "Report results");
             assert_matches!(update.plan[1].status, StepStatus::Pending);
             false

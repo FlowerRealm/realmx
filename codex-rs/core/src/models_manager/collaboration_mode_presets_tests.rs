@@ -8,11 +8,19 @@ fn preset_names_use_mode_display_names() {
         ModeKind::Plan.display_name()
     );
     assert_eq!(
+        auto_plan_preset(CollaborationModesConfig::default()).name,
+        ModeKind::AutoPlan.display_name()
+    );
+    assert_eq!(
         default_preset(CollaborationModesConfig::default()).name,
         ModeKind::Default.display_name()
     );
     assert_eq!(
         plan_preset(CollaborationModesConfig::default()).reasoning_effort,
+        Some(Some(ReasoningEffort::Medium))
+    );
+    assert_eq!(
+        auto_plan_preset(CollaborationModesConfig::default()).reasoning_effort,
         Some(Some(ReasoningEffort::Medium))
     );
 }
@@ -99,4 +107,18 @@ fn plan_mode_instructions_allow_preparatory_mutations_when_enabled() {
             .contains("Use `web search` only after you already have the repository locally")
     );
     assert!(instructions.contains("not as the primary source for repository code"));
+}
+
+#[test]
+fn builtin_presets_keep_auto_plan_for_backward_compatibility() {
+    let presets = builtin_collaboration_mode_presets(CollaborationModesConfig::default());
+    let modes: Vec<Option<ModeKind>> = presets.into_iter().map(|preset| preset.mode).collect();
+    assert_eq!(
+        modes,
+        vec![
+            Some(ModeKind::Plan),
+            Some(ModeKind::AutoPlan),
+            Some(ModeKind::Default),
+        ]
+    );
 }

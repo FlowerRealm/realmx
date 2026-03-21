@@ -4,6 +4,8 @@ use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::openai_models::ReasoningEffort;
 
 const COLLABORATION_MODE_PLAN: &str = include_str!("../../templates/collaboration_mode/plan.md");
+const COLLABORATION_MODE_AUTO_PLAN: &str =
+    include_str!("../../templates/collaboration_mode/auto_plan.md");
 const COLLABORATION_MODE_DEFAULT: &str =
     include_str!("../../templates/collaboration_mode/default.md");
 const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
@@ -30,6 +32,7 @@ pub fn builtin_collaboration_mode_presets(
 ) -> Vec<CollaborationModeMask> {
     vec![
         plan_preset(collaboration_modes_config),
+        auto_plan_preset(collaboration_modes_config),
         default_preset(collaboration_modes_config),
     ]
 }
@@ -42,6 +45,19 @@ fn plan_preset(collaboration_modes_config: CollaborationModesConfig) -> Collabor
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
         developer_instructions: Some(Some(plan_mode_instructions(
             COLLABORATION_MODE_PLAN,
+            collaboration_modes_config.plan_mode_preparatory_mutations,
+        ))),
+    }
+}
+
+fn auto_plan_preset(collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
+    CollaborationModeMask {
+        name: ModeKind::AutoPlan.display_name().to_string(),
+        mode: Some(ModeKind::AutoPlan),
+        model: None,
+        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        developer_instructions: Some(Some(plan_mode_instructions(
+            COLLABORATION_MODE_AUTO_PLAN,
             collaboration_modes_config.plan_mode_preparatory_mutations,
         ))),
     }

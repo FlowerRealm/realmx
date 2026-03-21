@@ -179,6 +179,9 @@ async fn try_update_active_thread_plan(
     session: &Session,
     args: &UpdatePlanArgs,
 ) -> Result<Option<UpdatePlanArgs>, FunctionCallError> {
+    if args.plan.is_empty() || args.plan.iter().any(|item| item.id.is_none()) {
+        return Ok(None);
+    }
     let Some(state_db) = session.state_db() else {
         return Ok(None);
     };
