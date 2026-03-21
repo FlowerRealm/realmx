@@ -4649,8 +4649,14 @@ impl CodexMessageProcessor {
             limit,
             cursor,
             include_hidden,
+            force_refresh,
         } = params;
-        let models = supported_models(thread_manager, include_hidden.unwrap_or(false)).await;
+        let models = supported_models(
+            thread_manager,
+            include_hidden.unwrap_or(false),
+            force_refresh,
+        )
+        .await;
         let total = models.len();
 
         if total == 0 {

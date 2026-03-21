@@ -21,7 +21,6 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
-use serde::Deserialize;
 
 use crate::settings::data::SettingsScope;
 use crate::settings::data::SettingsScreen;
@@ -150,6 +149,16 @@ pub(crate) enum AppEvent {
     ConnectorsLoaded {
         result: Result<ConnectorsSnapshot, String>,
         is_final: bool,
+    },
+
+    /// Result of loading model picker entries for the active provider.
+    ModelPickerLoaded {
+        result: Result<Vec<ModelPreset>, String>,
+    },
+
+    /// Result of refreshing startup models for the active provider.
+    StartupModelsRefreshed {
+        result: Result<Vec<ModelPreset>, String>,
     },
 
     /// Result of computing a `/diff` command.

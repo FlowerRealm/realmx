@@ -72,6 +72,8 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelUpgrade;
+#[cfg(test)]
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
@@ -87,6 +89,8 @@ use codex_protocol::protocol::TokenUsage;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
+#[cfg(test)]
+use core_test_support::responses::mount_models_once;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -115,6 +119,8 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
+#[cfg(test)]
+use wiremock::MockServer;
 
 mod agent_navigation;
 mod app_server_adapter;
@@ -842,7 +848,15 @@ impl App {
     async fn refresh_config_after_provider_change(&mut self) -> Result<()> {
         let mut config = self.rebuild_config_for_cwd(self.config.cwd.clone()).await?;
         self.apply_runtime_policy_overrides(&mut config);
+        self.server
+            .replace_models_provider(
+                config.model_provider_id.clone(),
+                config.model_provider.clone(),
+            )
+            .await;
         self.sync_running_session_provider(&config).await?;
+        self.chat_widget
+            .set_models_manager(self.server.get_models_manager());
         self.chat_widget.set_config(config.clone());
         self.config = config;
         self.active_profile = self.config.active_profile.clone();
@@ -2434,6 +2448,22 @@ impl App {
             }
         }
 
+        {
+            let thread_manager = thread_manager.clone();
+            let app_event_tx = app.app_event_tx.clone();
+            tokio::spawn(async move {
+                let result = thread_manager
+                    .refresh_models_for_startup()
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
+                        )
+                    });
+                app_event_tx.send(AppEvent::StartupModelsRefreshed { result });
+            });
+        }
+
         let tui_events = tui.event_stream();
         tokio::pin!(tui_events);
 
@@ -2950,6 +2980,13 @@ impl App {
             }
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
+            }
+            AppEvent::ModelPickerLoaded { result } => {
+                self.chat_widget.on_model_picker_loaded(result);
+            }
+            AppEvent::StartupModelsRefreshed { result } => {
+                self.chat_widget.on_startup_models_refreshed(result);
+                self.refresh_status_line();
             }
             AppEvent::UpdateReasoningEffort(effort) => {
                 self.on_update_reasoning_effort(effort);
@@ -7407,7 +7444,41 @@ guardian_approval = true
     }
 
     #[tokio::test]
-    async fn refresh_config_after_provider_change_syncs_live_thread_provider() -> Result<()> {
+    async fn refresh_config_after_provider_change_syncs_live_thread_provider_and_models()
+    -> Result<()> {
+        let server = MockServer::start().await;
+        let dynamic_slug = "provider-change-remote-model";
+        let models_mock = mount_models_once(
+            &server,
+            ModelsResponse {
+                models: vec![serde_json::from_value(serde_json::json!({
+                    "slug": dynamic_slug,
+                    "display_name": "Remote Provider Model",
+                    "description": "Remote Provider Model desc",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [{"effort": "low", "description": "low"}, {"effort": "medium", "description": "medium"}],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "minimal_client_version": [0, 1, 0],
+                    "supported_in_api": true,
+                    "priority": 1,
+                    "upgrade": null,
+                    "base_instructions": "base instructions",
+                    "supports_reasoning_summaries": false,
+                    "support_verbosity": false,
+                    "default_verbosity": null,
+                    "apply_patch_tool_type": null,
+                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                    "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
+                    "context_window": 272_000,
+                    "experimental_supported_tools": [],
+                }))
+                .expect("valid model")],
+            },
+        )
+        .await;
+
         let mut app = make_test_app().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
@@ -7436,7 +7507,7 @@ guardian_approval = true
 
         let mut custom_provider = app.config.model_provider.clone();
         custom_provider.name = "Custom Provider".to_string();
-        custom_provider.base_url = Some("https://provider.example/v1".to_string());
+        custom_provider.base_url = Some(server.uri());
 
         ConfigEditsBuilder::new(&app.config.codex_home)
             .set_model_provider("custom-provider", &custom_provider)
@@ -7456,6 +7527,18 @@ guardian_approval = true
             thread.config_snapshot().await.model_provider_id,
             "custom-provider"
         );
+        let available_models = app
+            .server
+            .get_models_manager()
+            .list_models(RefreshStrategy::OnlineIfUncached)
+            .await;
+        assert!(
+            available_models
+                .iter()
+                .any(|preset| preset.model == dynamic_slug),
+            "provider change should swap the active models manager to the new provider"
+        );
+        assert_eq!(models_mock.requests().len(), 1);
         Ok(())
     }
 

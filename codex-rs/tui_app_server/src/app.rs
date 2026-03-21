@@ -830,8 +830,32 @@ impl App {
             .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.clone())
             .await?;
         self.apply_runtime_policy_overrides(&mut config);
+        self.chat_widget.set_config(config.clone());
         self.config = config;
         Ok(())
+    }
+
+    async fn refresh_model_catalog_from_app_server(
+        &mut self,
+        app_server: &mut AppServerSession,
+    ) -> Result<()> {
+        let available_models = app_server.list_models(/* include_hidden */ true).await?;
+        self.model_catalog.replace_models(available_models);
+        self.chat_widget.refresh_model_catalog();
+        Ok(())
+    }
+
+    async fn refresh_config_and_models_after_config_write(
+        &mut self,
+        app_server: &mut AppServerSession,
+        action: &str,
+    ) {
+        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+            tracing::warn!(error = %err, action, "failed to refresh config after config write");
+        }
+        if let Err(err) = self.refresh_model_catalog_from_app_server(app_server).await {
+            tracing::warn!(error = %err, action, "failed to refresh model catalog after config write");
+        }
     }
 
     async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
@@ -2482,6 +2506,22 @@ impl App {
             .await?;
         }
 
+        {
+            let startup_refresh_client = app_server.background_request_client();
+            let app_event_tx = app.app_event_tx.clone();
+            tokio::spawn(async move {
+                let result = startup_refresh_client
+                    .list_models(/* include_hidden */ true, /* force_refresh */ true)
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
+                        )
+                    });
+                app_event_tx.send(AppEvent::StartupModelsRefreshed { result });
+            });
+        }
+
         // On startup, if Agent mode (workspace-write) or ReadOnly is active, warn about world-writable dirs on Windows.
         #[cfg(target_os = "windows")]
         {
@@ -3011,6 +3051,16 @@ impl App {
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }
+            AppEvent::StartupModelsRefreshed { result } => match result {
+                Ok(models) => {
+                    self.model_catalog.replace_models(models);
+                    self.chat_widget.on_startup_models_refreshed(Ok(()));
+                    self.refresh_status_line();
+                }
+                Err(err) => {
+                    self.chat_widget.on_startup_models_refreshed(Err(err));
+                }
+            },
             AppEvent::UpdateReasoningEffort(effort) => {
                 self.on_update_reasoning_effort(effort);
                 self.refresh_status_line();
@@ -3390,14 +3440,20 @@ impl App {
                 }
             }
             AppEvent::PersistModelSelection { model, effort } => {
-                let profile = self.active_profile.as_deref();
+                let profile = self.active_profile.clone();
+                let profile_ref = profile.as_deref();
                 match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_profile(profile)
+                    .with_profile(profile_ref)
                     .set_model(Some(model.as_str()), effort)
                     .apply()
                     .await
                 {
                     Ok(()) => {
+                        self.refresh_config_and_models_after_config_write(
+                            app_server,
+                            "persisting model selection",
+                        )
+                        .await;
                         let effort_label = effort
                             .map(|selected_effort| selected_effort.to_string())
                             .unwrap_or_else(|| "default".to_string());
@@ -3407,7 +3463,7 @@ impl App {
                             message.push(' ');
                             message.push_str(label);
                         }
-                        if let Some(profile) = profile {
+                        if let Some(profile) = profile_ref {
                             message.push_str(" for ");
                             message.push_str(profile);
                             message.push_str(" profile");
@@ -3419,7 +3475,7 @@ impl App {
                             error = %err,
                             "failed to persist model selection"
                         );
-                        if let Some(profile) = profile {
+                        if let Some(profile) = profile_ref {
                             self.chat_widget.add_error_message(format!(
                                 "Failed to save model for profile `{profile}`: {err}"
                             ));
@@ -3802,12 +3858,11 @@ impl App {
                 {
                     Ok(()) => {
                         self.chat_widget.update_skill_enabled(path.clone(), enabled);
-                        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
-                            tracing::warn!(
-                                error = %err,
-                                "failed to refresh config after skill toggle"
-                            );
-                        }
+                        self.refresh_config_and_models_after_config_write(
+                            app_server,
+                            "updating skill config",
+                        )
+                        .await;
                     }
                     Err(err) => {
                         let path_display = path.display();
@@ -3854,9 +3909,11 @@ impl App {
                 {
                     Ok(()) => {
                         self.chat_widget.update_connector_enabled(&id, enabled);
-                        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
-                            tracing::warn!(error = %err, "failed to refresh config after app toggle");
-                        }
+                        self.refresh_config_and_models_after_config_write(
+                            app_server,
+                            "updating app config",
+                        )
+                        .await;
                         self.chat_widget.submit_op(AppCommand::reload_user_config());
                     }
                     Err(err) => {
@@ -4447,6 +4504,8 @@ mod tests {
     use codex_protocol::config_types::ModeKind;
     use codex_protocol::config_types::Settings;
     use codex_protocol::openai_models::ModelAvailabilityNux;
+    use codex_protocol::openai_models::ReasoningEffortPreset;
+    use codex_protocol::openai_models::default_input_modalities;
     use codex_protocol::protocol::AgentMessageDeltaEvent;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::Event;
@@ -7168,6 +7227,76 @@ guardian_approval = true
         app.refresh_in_memory_config_from_disk().await?;
 
         assert_eq!(app.config.cwd, app.chat_widget.config_ref().cwd);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refresh_in_memory_config_from_disk_updates_chat_widget_config() -> Result<()> {
+        let mut app = make_test_app().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_model("gpt-5.4");
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            r#"
+model = "provider-refresh-model"
+approval_policy = "never"
+sandbox_mode = "read-only"
+"#,
+        )?;
+
+        app.refresh_in_memory_config_from_disk().await?;
+
+        assert_eq!(app.config.model.as_deref(), Some("provider-refresh-model"));
+        assert_eq!(
+            app.chat_widget.config_ref().model.as_deref(),
+            Some("provider-refresh-model")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refresh_model_catalog_from_app_server_replaces_catalog_models() -> Result<()> {
+        let mut app = make_test_app().await;
+        let mut app_server =
+            crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
+                .await
+                .expect("embedded app-server");
+
+        app.model_catalog.replace_models(vec![ModelPreset {
+            id: "stale-model".to_string(),
+            model: "stale-model".to_string(),
+            display_name: "stale-model".to_string(),
+            description: "stale".to_string(),
+            default_reasoning_effort: ReasoningEffortConfig::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortConfig::Medium,
+                description: "medium".to_string(),
+            }],
+            supports_personality: false,
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            availability_nux: None,
+            supported_in_api: true,
+            input_modalities: default_input_modalities(),
+        }]);
+
+        app.refresh_model_catalog_from_app_server(&mut app_server)
+            .await?;
+
+        let models = app
+            .model_catalog
+            .try_list_models()
+            .expect("model catalog should be readable");
+        assert!(
+            models.iter().any(|preset| preset.model == "gpt-5.4[1m]"),
+            "refreshed catalog should include app-server-backed models"
+        );
+        assert!(
+            !models.iter().any(|preset| preset.model == "stale-model"),
+            "refreshed catalog should replace stale in-memory models"
+        );
         Ok(())
     }
 

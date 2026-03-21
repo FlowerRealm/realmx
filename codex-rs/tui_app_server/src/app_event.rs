@@ -141,6 +141,11 @@ pub(crate) enum AppEvent {
         is_final: bool,
     },
 
+    /// Result of refreshing startup models for the active provider.
+    StartupModelsRefreshed {
+        result: Result<Vec<ModelPreset>, String>,
+    },
+
     /// Result of computing a `/diff` command.
     DiffResult(String),
 

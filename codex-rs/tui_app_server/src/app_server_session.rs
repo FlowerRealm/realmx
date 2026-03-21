@@ -86,6 +86,9 @@ use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
 
 use crate::bottom_pane::FeedbackAudience;
 use crate::status::StatusAccountDisplay;
@@ -105,7 +108,7 @@ pub(crate) struct AppServerBootstrap {
 
 pub(crate) struct AppServerSession {
     client: AppServerClient,
-    next_request_id: i64,
+    next_request_id: Arc<AtomicI64>,
 }
 
 #[derive(Clone, Copy)]
@@ -131,12 +134,19 @@ impl AppServerSession {
     pub(crate) fn new(client: AppServerClient) -> Self {
         Self {
             client,
-            next_request_id: 1,
+            next_request_id: Arc::new(AtomicI64::new(1)),
         }
     }
 
     pub(crate) fn is_remote(&self) -> bool {
         matches!(self.client, AppServerClient::Remote(_))
+    }
+
+    pub(crate) fn background_request_client(&self) -> BackgroundAppServerRequestClient {
+        BackgroundAppServerRequestClient {
+            request_handle: self.request_handle(),
+            next_request_id: Arc::clone(&self.next_request_id),
+        }
     }
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
@@ -160,6 +170,7 @@ impl AppServerSession {
                     cursor: None,
                     limit: None,
                     include_hidden: Some(true),
+                    force_refresh: Some(false),
                 },
             })
             .await
@@ -339,6 +350,37 @@ impl AppServerSession {
             .request_typed(ClientRequest::ThreadList { request_id, params })
             .await
             .wrap_err("thread/list failed during TUI session lookup")
+    }
+
+    pub(crate) async fn list_models(&mut self, include_hidden: bool) -> Result<Vec<ModelPreset>> {
+        self.list_models_with_refresh(include_hidden, /* force_refresh */ false)
+            .await
+    }
+
+    pub(crate) async fn list_models_with_refresh(
+        &mut self,
+        include_hidden: bool,
+        force_refresh: bool,
+    ) -> Result<Vec<ModelPreset>> {
+        let request_id = self.next_request_id();
+        let response: ModelListResponse = self
+            .client
+            .request_typed(ClientRequest::ModelList {
+                request_id,
+                params: ModelListParams {
+                    cursor: None,
+                    limit: None,
+                    include_hidden: Some(include_hidden),
+                    force_refresh: Some(force_refresh),
+                },
+            })
+            .await
+            .wrap_err("model/list failed in app-server TUI")?;
+        Ok(response
+            .data
+            .into_iter()
+            .map(model_preset_from_api_model)
+            .collect())
     }
 
     pub(crate) async fn thread_read(
@@ -658,10 +700,42 @@ impl AppServerSession {
         self.client.request_handle()
     }
 
-    fn next_request_id(&mut self) -> RequestId {
-        let request_id = self.next_request_id;
-        self.next_request_id += 1;
-        RequestId::Integer(request_id)
+    fn next_request_id(&self) -> RequestId {
+        RequestId::Integer(self.next_request_id.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+pub(crate) struct BackgroundAppServerRequestClient {
+    request_handle: AppServerRequestHandle,
+    next_request_id: Arc<AtomicI64>,
+}
+
+impl BackgroundAppServerRequestClient {
+    pub(crate) async fn list_models(
+        &self,
+        include_hidden: bool,
+        force_refresh: bool,
+    ) -> Result<Vec<ModelPreset>> {
+        let response: ModelListResponse = self
+            .request_handle
+            .request_typed(ClientRequest::ModelList {
+                request_id: RequestId::Integer(
+                    self.next_request_id.fetch_add(1, Ordering::Relaxed),
+                ),
+                params: ModelListParams {
+                    cursor: None,
+                    limit: None,
+                    include_hidden: Some(include_hidden),
+                    force_refresh: Some(force_refresh),
+                },
+            })
+            .await
+            .wrap_err("model/list failed in app-server TUI")?;
+        Ok(response
+            .data
+            .into_iter()
+            .map(model_preset_from_api_model)
+            .collect())
     }
 }
 

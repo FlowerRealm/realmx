@@ -7789,6 +7789,31 @@ impl ChatWidget {
         self.model_catalog.clone()
     }
 
+    pub(crate) fn set_config(&mut self, config: Config) {
+        self.config = config;
+        self.sync_fast_command_enabled();
+        self.sync_personality_command_enabled();
+        self.refresh_model_display();
+        self.prefetch_rate_limits();
+    }
+
+    pub(crate) fn refresh_model_catalog(&mut self) {
+        self.refresh_model_display();
+    }
+
+    pub(crate) fn on_startup_models_refreshed(&mut self, result: Result<(), String>) {
+        match result {
+            Ok(_) => {
+                self.refresh_model_display();
+            }
+            Err(err) => {
+                self.add_error_message(err);
+            }
+        }
+
+        self.request_redraw();
+    }
+
     pub(crate) fn current_plan_type(&self) -> Option<PlanType> {
         self.plan_type
     }

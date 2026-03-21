@@ -68,8 +68,6 @@ use codex_core::config::types::ApprovalsReviewer;
 use codex_core::config::types::Notifications;
 use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::ConfigLayerStackOrdering;
-use codex_core::default_client::build_reqwest_client;
-use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_core::find_thread_name_by_id;
 use codex_core::git_info::current_branch_name;
@@ -79,6 +77,7 @@ use codex_core::mcp::McpManager;
 use codex_core::models_manager::manager::GPT_5_4_MODEL;
 use codex_core::models_manager::manager::GPT_5_4_ONE_MILLION_MODEL;
 use codex_core::models_manager::manager::ModelsManager;
+use codex_core::models_manager::manager::RefreshStrategy;
 use codex_core::plugins::PluginsManager;
 use codex_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use codex_core::skills::model::SkillMetadata;
@@ -196,6 +195,7 @@ const PLAN_MODE_REASONING_SCOPE_TITLE: &str = "Apply reasoning change";
 const PLAN_MODE_REASONING_SCOPE_PLAN_ONLY: &str = "Apply to Plan mode override";
 const PLAN_MODE_REASONING_SCOPE_ALL_MODES: &str = "Apply to global default and Plan mode override";
 const CONNECTORS_SELECTION_VIEW_ID: &str = "connectors-selection";
+const MODEL_SELECTION_VIEW_ID: &str = "model-selection";
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -708,6 +708,7 @@ pub(crate) struct ChatWidget {
     connectors_partial_snapshot: Option<ConnectorsSnapshot>,
     connectors_prefetch_in_flight: bool,
     connectors_force_refetch_pending: bool,
+    model_picker_load_in_flight: bool,
     // Queue of interruptive UI events deferred during an active write cycle
     interrupts: InterruptManager,
     // Accumulates the current reasoning block text to extract a header
@@ -3717,6 +3718,7 @@ impl ChatWidget {
             connectors_partial_snapshot: None,
             connectors_prefetch_in_flight: false,
             connectors_force_refetch_pending: false,
+            model_picker_load_in_flight: false,
             interrupts: InterruptManager::new(),
             reasoning_buffer: String::new(),
             full_reasoning_buffer: String::new(),
@@ -3905,6 +3907,7 @@ impl ChatWidget {
             connectors_partial_snapshot: None,
             connectors_prefetch_in_flight: false,
             connectors_force_refetch_pending: false,
+            model_picker_load_in_flight: false,
             interrupts: InterruptManager::new(),
             reasoning_buffer: String::new(),
             full_reasoning_buffer: String::new(),
@@ -4085,6 +4088,7 @@ impl ChatWidget {
             connectors_partial_snapshot: None,
             connectors_prefetch_in_flight: false,
             connectors_force_refetch_pending: false,
+            model_picker_load_in_flight: false,
             interrupts: InterruptManager::new(),
             reasoning_buffer: String::new(),
             full_reasoning_buffer: String::new(),
@@ -6522,18 +6526,57 @@ impl ChatWidget {
             );
             return;
         }
+        self.open_model_loading_popup();
+        self.prefetch_model_picker();
+        self.request_redraw();
+    }
 
-        let presets: Vec<ModelPreset> = match self.models_manager.try_list_models() {
-            Ok(models) => models,
-            Err(_) => {
-                self.add_info_message(
-                    "Models are being updated; please try /model again in a moment.".to_string(),
-                    /*hint*/ None,
-                );
-                return;
-            }
-        };
-        self.open_model_popup_with_presets(presets);
+    fn prefetch_model_picker(&mut self) {
+        if self.model_picker_load_in_flight {
+            return;
+        }
+
+        self.model_picker_load_in_flight = true;
+        let models_manager = Arc::clone(&self.models_manager);
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = models_manager
+                .list_models_result(RefreshStrategy::OnlineIfUncached)
+                .await
+                .map_err(|err| format!("Failed to load models from the active provider: {err}"));
+            app_event_tx.send(AppEvent::ModelPickerLoaded { result });
+        });
+    }
+
+    fn open_model_loading_popup(&mut self) {
+        if !self.bottom_pane.replace_selection_view_if_active(
+            MODEL_SELECTION_VIEW_ID,
+            self.model_loading_popup_params(),
+        ) {
+            self.bottom_pane
+                .show_selection_view(self.model_loading_popup_params());
+        }
+    }
+
+    fn model_loading_popup_params(&self) -> SelectionViewParams {
+        let mut header = ColumnRenderable::new();
+        header.push(Line::from("Select Model".bold()));
+        header.push(Line::from(
+            "Loading models from the active provider...".dim(),
+        ));
+
+        SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
+            header: Box::new(header),
+            footer_hint: Some(standard_popup_hint_line()),
+            items: vec![SelectionItem {
+                name: "Loading models...".to_string(),
+                description: Some("Fetching /v1/models for the current provider.".to_string()),
+                dismiss_on_select: false,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
     }
 
     pub(crate) fn open_personality_popup(&mut self) {
@@ -6766,7 +6809,7 @@ impl ChatWidget {
         Some(trimmed.to_string())
     }
 
-    pub(crate) fn open_model_popup_with_presets(&mut self, presets: Vec<ModelPreset>) {
+    fn model_popup_params(&self, presets: Vec<ModelPreset>) -> SelectionViewParams {
         let presets: Vec<ModelPreset> = presets
             .into_iter()
             .filter(|preset| preset.show_in_picker)
@@ -6784,8 +6827,7 @@ impl ChatWidget {
             .partition(|preset| Self::is_auto_model(&preset.model));
 
         if auto_presets.is_empty() {
-            self.open_all_models_popup(other_presets);
-            return;
+            return self.all_models_popup_params(other_presets);
         }
 
         auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
@@ -6843,34 +6885,20 @@ impl ChatWidget {
             "Select Model",
             "Pick a quick auto mode or browse all models.",
         );
-        self.bottom_pane.show_selection_view(SelectionViewParams {
+        SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
             footer_hint: Some(standard_popup_hint_line()),
             items,
             header,
             ..Default::default()
-        });
-    }
-
-    fn is_auto_model(model: &str) -> bool {
-        model.starts_with("codex-auto-")
-    }
-
-    fn auto_model_order(model: &str) -> usize {
-        match model {
-            "codex-auto-fast" => 0,
-            "codex-auto-balanced" => 1,
-            "codex-auto-thorough" => 2,
-            _ => 3,
         }
     }
 
-    pub(crate) fn open_all_models_popup(&mut self, presets: Vec<ModelPreset>) {
+    fn all_models_popup_params(&self, presets: Vec<ModelPreset>) -> SelectionViewParams {
         if presets.is_empty() {
-            self.add_info_message(
-                "No additional models are available right now.".to_string(),
-                /*hint*/ None,
+            return self.model_error_popup_params(
+                "No models are available from the active provider right now.".to_string(),
             );
-            return;
         }
 
         let mut items: Vec<SelectionItem> = Vec::new();
@@ -6901,12 +6929,58 @@ impl ChatWidget {
             "Select Model and Effort",
             "Access legacy models by running codex -m <model_name> or in your config.toml",
         );
-        self.bottom_pane.show_selection_view(SelectionViewParams {
+        SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
             footer_hint: Some("Press enter to select reasoning effort, or esc to dismiss.".into()),
             items,
             header,
             ..Default::default()
-        });
+        }
+    }
+
+    fn model_error_popup_params(&self, error: String) -> SelectionViewParams {
+        let mut header = ColumnRenderable::new();
+        header.push(Line::from("Select Model".bold()));
+        header.push(Line::from(
+            "Failed to load models from the active provider.".dim(),
+        ));
+
+        SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
+            header: Box::new(header),
+            footer_hint: Some(standard_popup_hint_line()),
+            items: vec![SelectionItem {
+                name: "Unable to load models".to_string(),
+                description: Some(error),
+                dismiss_on_select: false,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_model_popup_with_presets(&mut self, presets: Vec<ModelPreset>) {
+        self.bottom_pane
+            .show_selection_view(self.model_popup_params(presets));
+    }
+
+    fn is_auto_model(model: &str) -> bool {
+        model.starts_with("codex-auto-")
+    }
+
+    fn auto_model_order(model: &str) -> usize {
+        match model {
+            "codex-auto-fast" => 0,
+            "codex-auto-balanced" => 1,
+            "codex-auto-thorough" => 2,
+            _ => 3,
+        }
+    }
+
+    pub(crate) fn open_all_models_popup(&mut self, presets: Vec<ModelPreset>) {
+        self.bottom_pane
+            .show_selection_view(self.all_models_popup_params(presets));
     }
 
     pub(crate) fn open_collaboration_modes_popup(&mut self) {
@@ -8274,6 +8348,10 @@ impl ChatWidget {
         self.refresh_status_line();
     }
 
+    pub(crate) fn set_models_manager(&mut self, models_manager: Arc<ModelsManager>) {
+        self.models_manager = models_manager;
+    }
+
     pub(crate) fn current_model(&self) -> &str {
         if !self.collaboration_modes_enabled() {
             return self.current_collaboration_mode.model();
@@ -9176,6 +9254,44 @@ impl ChatWidget {
         if trigger_pending_force_refetch {
             self.prefetch_connectors_with_options(/*force_refetch*/ true);
         }
+    }
+
+    pub(crate) fn on_model_picker_loaded(&mut self, result: Result<Vec<ModelPreset>, String>) {
+        self.model_picker_load_in_flight = false;
+
+        match result {
+            Ok(models) => {
+                let _ = self.bottom_pane.replace_selection_view_if_active(
+                    MODEL_SELECTION_VIEW_ID,
+                    self.model_popup_params(models),
+                );
+            }
+            Err(err) => {
+                if self.bottom_pane.replace_selection_view_if_active(
+                    MODEL_SELECTION_VIEW_ID,
+                    self.model_error_popup_params(err.clone()),
+                ) {
+                    self.request_redraw();
+                    return;
+                }
+                self.add_error_message(err);
+            }
+        }
+
+        self.request_redraw();
+    }
+
+    pub(crate) fn on_startup_models_refreshed(&mut self, result: Result<Vec<ModelPreset>, String>) {
+        match result {
+            Ok(_) => {
+                self.refresh_model_display();
+            }
+            Err(err) => {
+                self.add_error_message(err);
+            }
+        }
+
+        self.request_redraw();
     }
 
     pub(crate) fn update_connector_enabled(&mut self, connector_id: &str, enabled: bool) {

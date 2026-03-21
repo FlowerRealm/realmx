@@ -11,9 +11,15 @@ use codex_protocol::openai_models::ReasoningEffortPreset;
 pub async fn supported_models(
     thread_manager: Arc<ThreadManager>,
     include_hidden: bool,
+    force_refresh: Option<bool>,
 ) -> Vec<Model> {
+    let refresh_strategy = match force_refresh {
+        Some(true) => RefreshStrategy::Online,
+        Some(false) => RefreshStrategy::Offline,
+        None => RefreshStrategy::OnlineIfUncached,
+    };
     thread_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
+        .list_models(refresh_strategy)
         .await
         .into_iter()
         .filter(|preset| include_hidden || preset.show_in_picker)
