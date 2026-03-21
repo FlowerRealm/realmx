@@ -91,4 +91,12 @@ fn plan_mode_instructions_allow_preparatory_mutations_when_enabled() {
 
     assert!(instructions.contains("`features.plan_mode_preparatory_mutations`"));
     assert!(instructions.contains("must stay outside the current target repo"));
+    assert!(instructions.contains("prefer direct `git` access over `web search`"));
+    assert!(instructions.contains("`git clone --depth 1 --single-branch --branch <branch>`"));
+    assert!(instructions.contains("resolve the remote default branch first"));
+    assert!(
+        instructions
+            .contains("Use `web search` only after you already have the repository locally")
+    );
+    assert!(instructions.contains("not as the primary source for repository code"));
 }
