@@ -8806,6 +8806,7 @@
         "description": "Initial collaboration mode to use when the TUI starts.",
         "enum": [
           "plan",
+          "auto_plan",
           "default"
         ],
         "type": "string"

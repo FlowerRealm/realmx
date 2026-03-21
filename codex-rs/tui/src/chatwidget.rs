@@ -1849,8 +1849,22 @@ impl ChatWidget {
 
         match self.active_mode_kind() {
             ModeKind::Plan => self.open_plan_implementation_prompt(),
+            ModeKind::AutoPlan => self.submit_plan_implementation_with_default_mode(),
             ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => {}
         }
+    }
+
+    fn submit_plan_implementation_with_default_mode(&mut self) {
+        let Some(mask) = collaboration_modes::default_mode_mask(self.models_manager.as_ref())
+        else {
+            self.add_error_message("Default mode unavailable".to_string());
+            return;
+        };
+        let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
+        self.app_event_tx.send(AppEvent::SubmitUserMessageWithMode {
+            text: user_text,
+            collaboration_mode: mask,
+        });
     }
 
     fn open_plan_implementation_prompt(&mut self) {
@@ -8422,6 +8436,7 @@ impl ChatWidget {
         }
         match self.active_mode_kind() {
             ModeKind::Plan => Some(CollaborationModeIndicator::Plan),
+            ModeKind::AutoPlan => Some(CollaborationModeIndicator::AutoPlan),
             ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => None,
         }
     }

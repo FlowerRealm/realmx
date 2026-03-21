@@ -4,6 +4,7 @@ use pretty_assertions::assert_eq;
 #[test]
 fn request_user_input_mode_availability_defaults_to_plan_only() {
     assert!(ModeKind::Plan.allows_request_user_input());
+    assert!(!ModeKind::AutoPlan.allows_request_user_input());
     assert!(!ModeKind::Default.allows_request_user_input());
     assert!(!ModeKind::Execute.allows_request_user_input());
     assert!(!ModeKind::PairProgramming.allows_request_user_input());
@@ -14,6 +15,10 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
     assert_eq!(
         request_user_input_unavailable_message(ModeKind::Plan, false),
         None
+    );
+    assert_eq!(
+        request_user_input_unavailable_message(ModeKind::AutoPlan, false),
+        Some("request_user_input is unavailable in Auto Plan mode".to_string())
     );
     assert_eq!(
         request_user_input_unavailable_message(ModeKind::Default, false),

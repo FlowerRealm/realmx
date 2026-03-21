@@ -313,6 +313,8 @@ pub enum AltScreenMode {
 #[serde(rename_all = "snake_case")]
 pub enum ModeKind {
     Plan,
+    #[doc(hidden)]
+    AutoPlan,
     #[default]
     #[serde(
         alias = "code",
@@ -339,6 +341,7 @@ impl ModeKind {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Plan => "Plan",
+            Self::AutoPlan => "Auto Plan",
             Self::Default => "Default",
             Self::PairProgramming => "Pair Programming",
             Self::Execute => "Execute",
@@ -350,7 +353,7 @@ impl ModeKind {
     }
 
     pub const fn is_plan_output_mode(self) -> bool {
-        matches!(self, Self::Plan)
+        matches!(self, Self::Plan | Self::AutoPlan)
     }
 
     pub const fn allows_request_user_input(self) -> bool {
@@ -491,6 +494,12 @@ mod tests {
     }
 
     #[test]
+    fn mode_kind_deserializes_auto_plan_for_backward_compatibility() {
+        let mode: ModeKind = serde_json::from_str("\"auto_plan\"").expect("deserialize mode");
+        assert_eq!(ModeKind::AutoPlan, mode);
+    }
+
+    #[test]
     fn tui_visible_collaboration_modes_match_mode_kind_visibility() {
         let expected = [ModeKind::Default, ModeKind::Plan];
         assert_eq!(expected, TUI_VISIBLE_COLLABORATION_MODES);
@@ -499,6 +508,7 @@ mod tests {
             assert!(mode.is_tui_visible());
         }
 
+        assert!(!ModeKind::AutoPlan.is_tui_visible());
         assert!(!ModeKind::PairProgramming.is_tui_visible());
         assert!(!ModeKind::Execute.is_tui_visible());
     }
