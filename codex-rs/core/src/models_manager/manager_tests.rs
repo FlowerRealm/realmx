@@ -12,6 +12,7 @@ use codex_protocol::openai_models::ModelsResponse;
 use core_test_support::responses::mount_models_once;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::Mock;
 use wiremock::MockServer;
@@ -902,6 +903,80 @@ async fn replace_provider_uses_provider_specific_cache_and_remote_models() {
         "replacement should not keep stale first provider cache entries"
     );
     assert_eq!(first_mock.requests().len(), 1);
+    assert_eq!(second_mock.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn stale_provider_refresh_result_is_dropped_after_provider_switch() {
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    let first_slug = "stale-provider-model";
+    let second_slug = "fresh-provider-model";
+
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(150))
+                .set_body_json(ModelsResponse {
+                    models: vec![remote_model(first_slug, "Stale Provider", 1)],
+                }),
+        )
+        .up_to_n_times(1)
+        .mount(&first_server)
+        .await;
+    let second_mock = mount_models_once(
+        &second_server,
+        ModelsResponse {
+            models: vec![remote_model(second_slug, "Fresh Provider", 1)],
+        },
+    )
+    .await;
+
+    let codex_home = tempdir().expect("temp dir");
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let manager = Arc::new(ModelsManager::new_with_provider(
+        codex_home.path().to_path_buf(),
+        auth_manager,
+        None,
+        CollaborationModesConfig::default(),
+        "provider-one".to_string(),
+        provider_for(first_server.uri()),
+        OAuthCredentialsStoreMode::default(),
+    ));
+
+    let stale_refresh = {
+        let manager = Arc::clone(&manager);
+        tokio::spawn(async move { manager.list_models_result(RefreshStrategy::Online).await })
+    };
+    tokio::time::sleep(Duration::from_millis(25)).await;
+
+    manager
+        .replace_provider(
+            "provider-two".to_string(),
+            provider_for(second_server.uri()),
+        )
+        .await;
+    manager
+        .refresh_available_models(RefreshStrategy::Online)
+        .await
+        .expect("fresh provider refresh should succeed");
+    stale_refresh
+        .await
+        .expect("stale refresh join")
+        .expect("stale refresh should return without applying");
+
+    let models = manager
+        .try_list_models()
+        .expect("list models after stale refresh");
+    assert!(
+        models.iter().any(|preset| preset.model == second_slug),
+        "current provider models should remain available"
+    );
+    assert!(
+        !models.iter().any(|preset| preset.model == first_slug),
+        "stale provider result must not overwrite the current provider models"
+    );
     assert_eq!(second_mock.requests().len(), 1);
 }
 

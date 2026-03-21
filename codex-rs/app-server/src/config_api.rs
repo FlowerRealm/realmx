@@ -33,6 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 use toml::Value as TomlValue;
+use tracing::error;
 use tracing::warn;
 
 #[async_trait]
@@ -157,9 +158,9 @@ impl ConfigApi {
             .write_value(params)
             .await
             .map_err(map_error)?;
-        self.sync_runtime_model_provider()
-            .await
-            .map_err(map_error)?;
+        if let Err(err) = self.sync_runtime_model_provider().await {
+            error!("failed to sync runtime model provider after config write: {err}");
+        }
         self.emit_plugin_toggle_events(pending_changes);
         Ok(response)
     }
@@ -180,9 +181,9 @@ impl ConfigApi {
             .batch_write(params)
             .await
             .map_err(map_error)?;
-        self.sync_runtime_model_provider()
-            .await
-            .map_err(map_error)?;
+        if let Err(err) = self.sync_runtime_model_provider().await {
+            error!("failed to sync runtime model provider after config write: {err}");
+        }
         self.emit_plugin_toggle_events(pending_changes);
         if reload_user_config {
             self.user_config_reloader.reload_user_config().await;
@@ -563,6 +564,65 @@ model_provider = "openai"
         assert_eq!(
             provider.base_url.as_deref(),
             Some("https://example.test/v1")
+        );
+    }
+
+    #[tokio::test]
+    async fn write_value_succeeds_even_if_runtime_provider_sync_cannot_resolve_partial_provider() {
+        let codex_home = TempDir::new().expect("create temp dir");
+        let user_config_path = codex_home.path().join("config.toml");
+        std::fs::write(
+            &user_config_path,
+            r#"
+model_provider = "openai"
+"#,
+        )
+        .expect("write config");
+        let reloader = Arc::new(RecordingUserConfigReloader::default());
+        let analytics_config = Arc::new(
+            codex_core::config::ConfigBuilder::default()
+                .codex_home(codex_home.path().to_path_buf())
+                .build()
+                .await
+                .expect("load analytics config"),
+        );
+        let config_api = ConfigApi::new(
+            codex_home.path().to_path_buf(),
+            Vec::new(),
+            LoaderOverrides::default(),
+            Arc::new(RwLock::new(CloudRequirementsLoader::default())),
+            reloader.clone(),
+            AnalyticsEventsClient::new(
+                analytics_config,
+                codex_core::test_support::auth_manager_from_auth(
+                    codex_core::CodexAuth::from_api_key("test"),
+                ),
+            ),
+        );
+
+        let response = config_api
+            .write_value(ConfigValueWriteParams {
+                key_path: "model_provider".to_string(),
+                value: json!("custom"),
+                merge_strategy: codex_app_server_protocol::MergeStrategy::Replace,
+                file_path: None,
+                expected_version: None,
+            })
+            .await
+            .expect("write_value should preserve the persisted config result");
+
+        assert_eq!(response.status, codex_app_server_protocol::WriteStatus::Ok);
+        assert_eq!(
+            std::fs::read_to_string(user_config_path).expect("read config"),
+            "model_provider = \"custom\"\n"
+        );
+        assert!(
+            reloader
+                .provider_replacements
+                .lock()
+                .expect("provider replacements lock")
+                .is_empty(),
+            "runtime provider replacement should be skipped until the provider config is complete"
         );
     }
 }

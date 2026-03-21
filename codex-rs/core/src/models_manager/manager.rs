@@ -34,6 +34,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::TryLockError;
@@ -175,6 +177,7 @@ pub struct ModelsManager {
     cache_manager: RwLock<ModelsCacheManager>,
     provider_id: RwLock<String>,
     provider: RwLock<ModelProviderInfo>,
+    provider_generation: AtomicU64,
     oauth_store_mode: OAuthCredentialsStoreMode,
 }
 
@@ -234,6 +237,7 @@ impl ModelsManager {
             cache_manager: RwLock::new(cache_manager),
             provider_id: RwLock::new(provider_id),
             provider: RwLock::new(provider),
+            provider_generation: AtomicU64::new(0),
             oauth_store_mode,
         }
     }
@@ -254,6 +258,7 @@ impl ModelsManager {
         *self.provider.write().await = provider;
         *self.cache_manager.write().await =
             ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
+        self.provider_generation.fetch_add(1, Ordering::SeqCst);
         *self.etag.write().await = None;
 
         let bundled = Self::load_bundled_models_from_file()
@@ -493,6 +498,7 @@ impl ModelsManager {
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
         let auth = self.auth_manager.auth().await;
         let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
+        let provider_generation = self.provider_generation.load(Ordering::SeqCst);
         let provider_id = self.provider_id.read().await.clone();
         let provider = self.provider.read().await.clone();
         let api_provider = provider.to_api_provider(auth_mode)?;
@@ -522,6 +528,14 @@ impl ModelsManager {
         .map_err(|_| CodexErr::Timeout)?
         .map_err(map_api_error)?;
         let models = Self::resolve_remote_models_payload(remote_models);
+
+        if !self.provider_generation_matches(provider_generation) {
+            info!(
+                provider_id,
+                "models refresh: dropping stale provider refresh result after provider change"
+            );
+            return Ok(());
+        }
 
         self.apply_remote_models(models.clone()).await;
         *self.etag.write().await = etag.clone();
@@ -577,6 +591,7 @@ impl ModelsManager {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.load_cache.duration_ms", &[]);
         let client_version = crate::models_manager::client_version_to_whole();
+        let provider_generation = self.provider_generation.load(Ordering::SeqCst);
         info!(client_version, "models cache: evaluating cache eligibility");
         let cache = match self
             .cache_manager
@@ -592,6 +607,10 @@ impl ModelsManager {
             }
         };
         let models = cache.models.clone();
+        if !self.provider_generation_matches(provider_generation) {
+            info!("models cache: dropping stale cache load after provider change");
+            return false;
+        }
         *self.etag.write().await = cache.etag.clone();
         self.apply_remote_models(models.clone()).await;
         info!(
@@ -600,6 +619,10 @@ impl ModelsManager {
             "models cache: cache entry applied"
         );
         true
+    }
+
+    fn provider_generation_matches(&self, expected_generation: u64) -> bool {
+        self.provider_generation.load(Ordering::SeqCst) == expected_generation
     }
 
     /// Build picker-ready presets from the active catalog snapshot.
