@@ -6526,7 +6526,20 @@ impl ChatWidget {
             );
             return;
         }
-        self.open_model_loading_popup();
+
+        let presets = self.models_manager.try_list_models().ok();
+        if let Some(presets) = presets.filter(|presets| !presets.is_empty()) {
+            if !self.bottom_pane.replace_selection_view_if_active(
+                MODEL_SELECTION_VIEW_ID,
+                self.model_popup_params(presets.clone()),
+            ) {
+                self.bottom_pane
+                    .show_selection_view(self.model_popup_params(presets));
+            }
+        } else {
+            self.open_model_loading_popup();
+        }
+
         self.prefetch_model_picker();
         self.request_redraw();
     }

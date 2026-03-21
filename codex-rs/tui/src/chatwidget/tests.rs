@@ -7803,15 +7803,16 @@ async fn model_selection_popup_snapshot() {
 }
 
 #[tokio::test]
-async fn model_selection_popup_shows_loading_state_before_remote_models_arrive() {
+async fn model_selection_popup_shows_cached_models_before_remote_models_arrive() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5-codex")).await;
     chat.thread_id = Some(ThreadId::new());
 
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("Loading models..."));
-    assert!(popup.contains("Fetching /v1/models for the current provider."));
+    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains("All models"));
+    assert!(!popup.contains("Loading models..."));
 }
 
 #[tokio::test]
@@ -7914,7 +7915,9 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("Loading models..."));
+    assert!(popup.contains("codex-auto-fast"));
+    assert!(!popup.contains(remote_slug));
+    assert!(!popup.contains("Loading models..."));
 
     let result = loop {
         tokio::task::yield_now().await;
