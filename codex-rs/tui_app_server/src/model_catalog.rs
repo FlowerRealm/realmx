@@ -41,7 +41,10 @@ impl ModelCatalog {
     }
 
     pub(crate) fn replace_models(&self, models: Vec<ModelPreset>) {
-        *self.models.write().unwrap_or_else(std::sync::PoisonError::into_inner) = models;
+        *self
+            .models
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = models;
     }
 
     pub(crate) fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
