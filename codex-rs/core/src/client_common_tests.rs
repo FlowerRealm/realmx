@@ -197,6 +197,77 @@ fn reserializes_shell_outputs_for_function_and_custom_tool_calls() {
 }
 
 #[test]
+fn prompt_formatted_input_is_cached_after_reserializing_shell_outputs() {
+    let raw_output = r#"{"output":"hello","metadata":{"exit_code":0,"duration_seconds":0.5}}"#;
+    let expected_output = "Exit code: 0\nWall time: 0.5 seconds\nOutput:\nhello";
+    let prompt = Prompt {
+        input: vec![
+            ResponseItem::FunctionCall {
+                id: None,
+                name: "shell".to_string(),
+                namespace: None,
+                arguments: "{}".to_string(),
+                call_id: "call-1".to_string(),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-1".to_string(),
+                output: FunctionCallOutputPayload::from_text(raw_output.to_string()),
+            },
+        ],
+        tools: vec![tools::ToolSpec::Freeform(tools::FreeformTool {
+            name: "apply_patch".to_string(),
+            description: "Apply a patch.".to_string(),
+            format: tools::FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "*** Begin Patch".to_string(),
+            },
+        })],
+        ..Default::default()
+    };
+
+    let formatted_input = prompt.get_formatted_input();
+    let cached_input = prompt.get_formatted_input();
+
+    assert_eq!(formatted_input.as_ptr(), cached_input.as_ptr());
+    assert_eq!(
+        formatted_input,
+        [
+            ResponseItem::FunctionCall {
+                id: None,
+                name: "shell".to_string(),
+                namespace: None,
+                arguments: "{}".to_string(),
+                call_id: "call-1".to_string(),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-1".to_string(),
+                output: FunctionCallOutputPayload::from_text(expected_output.to_string()),
+            }
+        ]
+    );
+}
+
+#[test]
+fn prompt_tools_json_is_cached() {
+    let prompt = Prompt {
+        tools: vec![tools::ToolSpec::LocalShell {}],
+        ..Default::default()
+    };
+
+    let tools = prompt.get_tools_json().expect("serialize tools");
+    let cached_tools = prompt.get_tools_json().expect("reuse cached tools");
+
+    assert_eq!(tools.as_ptr(), cached_tools.as_ptr());
+    assert_eq!(
+        tools,
+        [serde_json::json!({
+            "type": "local_shell",
+        })]
+    );
+}
+
+#[test]
 fn tool_search_output_namespace_serializes_with_deferred_child_tools() {
     let namespace = tools::ToolSearchOutputTool::Namespace(tools::ResponsesApiNamespace {
         name: "mcp__codex_apps__calendar".to_string(),

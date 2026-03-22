@@ -540,6 +540,33 @@ fn filter_connectors_for_input_skips_disabled_connectors() {
 }
 
 #[test]
+fn turn_tool_router_cache_key_ignores_assistant_only_growth() {
+    let enabled_connectors = HashSet::from(["calendar".to_string()]);
+    let input = vec![user_message("use $calendar")];
+    let follow_up_input = vec![
+        user_message("use $calendar"),
+        assistant_message("I will do that."),
+    ];
+
+    let initial_key = build_turn_tool_router_cache_key(&input, &enabled_connectors);
+    let follow_up_key = build_turn_tool_router_cache_key(&follow_up_input, &enabled_connectors);
+
+    assert_eq!(initial_key, follow_up_key);
+}
+
+#[test]
+fn turn_tool_router_cache_key_normalizes_connector_order() {
+    let input = vec![user_message("use $calendar and $mail")];
+    let first = HashSet::from(["calendar".to_string(), "mail".to_string()]);
+    let second = HashSet::from(["mail".to_string(), "calendar".to_string()]);
+
+    let first_key = build_turn_tool_router_cache_key(&input, &first);
+    let second_key = build_turn_tool_router_cache_key(&input, &second);
+
+    assert_eq!(first_key, second_key);
+}
+
+#[test]
 fn collect_explicit_app_ids_from_skill_items_includes_linked_mentions() {
     let connectors = vec![make_connector("calendar", "Calendar")];
     let skill_items = vec![skill_message(
