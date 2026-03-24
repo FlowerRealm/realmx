@@ -18,6 +18,7 @@ use crate::provider_flow::ProviderDraft;
 use crate::provider_flow::ProviderField;
 use crate::provider_flow::ProviderFlowData;
 use crate::provider_flow::ProviderFlowLocation;
+use crate::provider_flow::ProviderFlowNavigation;
 use crate::provider_flow::ProviderFlowRow;
 use crate::provider_flow::ProviderFlowSource;
 use crate::provider_flow::ProviderScreen;
@@ -188,18 +189,6 @@ pub(crate) fn build_provider_field_editor(
         }),
     )
     .with_initial_text(initial_text))
-}
-
-fn provider_flow_location(
-    source: ProviderFlowSource,
-    scope: SettingsScope,
-    screen: ProviderScreen,
-) -> ProviderFlowLocation {
-    ProviderFlowLocation {
-        source,
-        scope,
-        screen,
-    }
 }
 
 fn build_provider_root_view_params(
@@ -427,7 +416,6 @@ fn provider_row_selection_item(
     let detail_screen = ProviderScreen::Detail {
         provider_id: provider_id.clone(),
     };
-    let return_to = provider_flow_location(source, scope, ProviderScreen::Root);
     let description = provider_row_description(row);
     SelectionItem {
         name: row.id.clone(),
@@ -447,7 +435,7 @@ fn provider_row_selection_item(
             tx.send(AppEvent::PersistDefaultModelProvider {
                 id: provider_id.clone(),
                 scope,
-                return_to: Some(return_to.clone()),
+                navigation: ProviderFlowNavigation::ExitFlow,
             });
         })],
         shortcut_action: Some(SelectionShortcutAction {
@@ -502,13 +490,6 @@ fn default_provider_action_item(
     scope: SettingsScope,
 ) -> SelectionItem {
     let provider_id = row.id.clone();
-    let return_to = provider_flow_location(
-        source,
-        scope,
-        ProviderScreen::Detail {
-            provider_id: provider_id.clone(),
-        },
-    );
     SelectionItem {
         name: "Set current provider".to_string(),
         description: Some(match row.is_default {
@@ -520,7 +501,7 @@ fn default_provider_action_item(
             tx.send(AppEvent::PersistDefaultModelProvider {
                 id: provider_id.clone(),
                 scope,
-                return_to: Some(return_to.clone()),
+                navigation: ProviderFlowNavigation::ReturnToRoot { source, scope },
             });
         })],
         dismiss_on_select: false,
@@ -878,6 +859,7 @@ mod tests {
     use crate::app_event_sender::AppEventSender;
     use crate::provider_flow::ProviderDraft;
     use crate::provider_flow::ProviderField;
+    use crate::provider_flow::ProviderFlowNavigation;
     use crate::provider_flow::ProviderFlowSource;
     use crate::provider_flow::ProviderScreen;
     use crate::settings::data::SettingsScope;
@@ -1209,21 +1191,14 @@ model_provider = "acme"
         let AppEvent::PersistDefaultModelProvider {
             id,
             scope,
-            return_to,
+            navigation,
         } = event
         else {
             panic!("expected PersistDefaultModelProvider event");
         };
         assert_eq!(id, "openai");
         assert_eq!(scope, SettingsScope::ActiveProfile);
-        assert_eq!(
-            return_to,
-            Some(crate::provider_flow::ProviderFlowLocation {
-                source: ProviderFlowSource::SlashCommand,
-                scope: SettingsScope::ActiveProfile,
-                screen: ProviderScreen::Root,
-            })
-        );
+        assert_eq!(navigation, ProviderFlowNavigation::ExitFlow);
     }
 
     #[tokio::test]
@@ -1271,6 +1246,50 @@ model_provider = "acme"
             screen,
             ProviderScreen::Detail {
                 provider_id: "openai".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_detail_set_current_returns_to_root() {
+        let config = provider_test_config(Some("dev")).await;
+        let params = build_provider_view_params(
+            &config,
+            &ProviderDraft::new(),
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::ActiveProfile,
+            &ProviderScreen::Detail {
+                provider_id: "openai".to_string(),
+            },
+        );
+        let item = params
+            .items
+            .iter()
+            .find(|item| item.name == "Set current provider")
+            .expect("detail screen should expose current-provider action");
+        let action = item
+            .actions
+            .first()
+            .expect("current-provider action should exist");
+        let (tx_raw, mut rx) = unbounded_channel();
+        action(&AppEventSender::new(tx_raw));
+
+        let event = rx.try_recv().expect("expected persist event");
+        let AppEvent::PersistDefaultModelProvider {
+            id,
+            scope,
+            navigation,
+        } = event
+        else {
+            panic!("expected PersistDefaultModelProvider event");
+        };
+        assert_eq!(id, "openai");
+        assert_eq!(scope, SettingsScope::ActiveProfile);
+        assert_eq!(
+            navigation,
+            ProviderFlowNavigation::ReturnToRoot {
+                source: ProviderFlowSource::SlashCommand,
+                scope: SettingsScope::ActiveProfile,
             }
         );
     }

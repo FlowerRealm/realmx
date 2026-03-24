@@ -35,10 +35,13 @@ use crate::pager_overlay::Overlay;
 use crate::provider_flow::ProviderField;
 use crate::provider_flow::ProviderFlowData;
 use crate::provider_flow::ProviderFlowLocation;
+use crate::provider_flow::ProviderFlowNavigation;
 use crate::provider_flow::ProviderFlowSource;
 use crate::provider_flow::ProviderScreen;
 use crate::provider_flow::current_provider_id_for_scope;
 use crate::provider_flow::validate_provider_id;
+use crate::provider_flow_view::PROVIDER_DETAIL_VIEW_ID;
+use crate::provider_flow_view::PROVIDER_ROOT_VIEW_ID;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
@@ -880,6 +883,124 @@ impl App {
         self.refresh_config_after_provider_change().await?;
         self.chat_widget.open_provider_flow(source, scope, screen);
         Ok(())
+    }
+
+    async fn apply_provider_navigation(
+        &mut self,
+        navigation: ProviderFlowNavigation,
+    ) -> Result<()> {
+        match navigation {
+            ProviderFlowNavigation::ExitFlow => {
+                let _ = self
+                    .chat_widget
+                    .dismiss_views_with_id(PROVIDER_DETAIL_VIEW_ID);
+                let _ = self
+                    .chat_widget
+                    .dismiss_views_with_id(PROVIDER_ROOT_VIEW_ID);
+            }
+            ProviderFlowNavigation::ReturnToRoot { source, scope } => {
+                let _ = self.chat_widget.dismiss_active_bottom_view();
+                self.open_provider_flow_after_refresh(source, scope, ProviderScreen::Root)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn persist_default_model_provider_and_apply_navigation(
+        &mut self,
+        id: String,
+        scope: SettingsScope,
+        navigation: ProviderFlowNavigation,
+    ) {
+        let scope = scope.normalized(self.active_profile.as_deref());
+        if current_provider_id_for_scope(&self.config, scope) == id {
+            if let Err(err) = self.apply_provider_navigation(navigation).await {
+                self.chat_widget.add_error_message(format!(
+                    "Provider is already current, but failed to update navigation: {err}"
+                ));
+            }
+            return;
+        }
+
+        let profile = match scope {
+            SettingsScope::Global => None,
+            SettingsScope::ActiveProfile => self.active_profile.as_deref(),
+        };
+        match ConfigEditsBuilder::new(&self.config.codex_home)
+            .with_profile(profile)
+            .set_default_model_provider(&id)
+            .apply()
+            .await
+        {
+            Ok(()) => {
+                if let Err(err) = self.refresh_config_after_provider_change().await {
+                    self.chat_widget.add_error_message(format!(
+                        "Provider switched but failed to reload config: {err}"
+                    ));
+                } else {
+                    if let Err(err) = self.apply_provider_navigation(navigation).await {
+                        self.chat_widget.add_error_message(format!(
+                            "Provider changed, but failed to update navigation: {err}"
+                        ));
+                    }
+                    self.chat_widget.add_info_message(
+                        format!("Current provider changed to {id}"),
+                        /*hint*/ None,
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to persist default model provider");
+                self.chat_widget.add_error_message(format!(
+                    "Failed to switch default provider to `{id}`: {err}"
+                ));
+            }
+        }
+    }
+
+    async fn persist_model_selection(
+        &mut self,
+        model: String,
+        effort: Option<ReasoningEffortConfig>,
+    ) {
+        let profile = self.active_profile.as_deref();
+        match ConfigEditsBuilder::new(&self.config.codex_home)
+            .with_profile(profile)
+            .set_model(Some(model.as_str()), effort)
+            .apply()
+            .await
+        {
+            Ok(()) => {
+                self.chat_widget.dismiss_model_selection_flow();
+                let effort_label = effort
+                    .map(|selected_effort| selected_effort.to_string())
+                    .unwrap_or_else(|| "default".to_string());
+                tracing::info!("Selected model: {model}, Selected effort: {effort_label}");
+                let mut message = format!("Model changed to {model}");
+                if let Some(label) = Self::reasoning_label_for(&model, effort) {
+                    message.push(' ');
+                    message.push_str(label);
+                }
+                if let Some(profile) = profile {
+                    message.push_str(" for ");
+                    message.push_str(profile);
+                    message.push_str(" profile");
+                }
+                self.chat_widget.add_info_message(message, /*hint*/ None);
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to persist model selection");
+                if let Some(profile) = profile {
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to save model for profile `{profile}`: {err}"
+                    ));
+                } else {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to save default model: {err}"));
+                }
+            }
+        }
     }
 
     async fn save_provider_create_draft(
@@ -3840,99 +3961,13 @@ impl App {
             AppEvent::PersistDefaultModelProvider {
                 id,
                 scope,
-                return_to,
+                navigation,
             } => {
-                let scope = scope.normalized(self.active_profile.as_deref());
-                if current_provider_id_for_scope(&self.config, scope) == id {
-                    if let Some(return_to) = return_to {
-                        self.chat_widget.open_provider_flow(
-                            return_to.source,
-                            return_to.scope,
-                            return_to.screen,
-                        );
-                    }
-                } else {
-                    let profile = match scope {
-                        SettingsScope::Global => None,
-                        SettingsScope::ActiveProfile => self.active_profile.as_deref(),
-                    };
-                    match ConfigEditsBuilder::new(&self.config.codex_home)
-                        .with_profile(profile)
-                        .set_default_model_provider(&id)
-                        .apply()
-                        .await
-                    {
-                        Ok(()) => {
-                            if let Err(err) = self.refresh_config_after_provider_change().await {
-                                self.chat_widget.add_error_message(format!(
-                                    "Provider switched but failed to reload config: {err}"
-                                ));
-                            } else {
-                                if let Some(return_to) = return_to {
-                                    self.chat_widget.open_provider_flow(
-                                        return_to.source,
-                                        return_to.scope,
-                                        return_to.screen,
-                                    );
-                                }
-                                self.chat_widget.add_info_message(
-                                    format!("Current provider changed to {id}"),
-                                    /*hint*/ None,
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            tracing::error!(
-                                error = %err,
-                                "failed to persist default model provider"
-                            );
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to switch default provider to `{id}`: {err}"
-                            ));
-                        }
-                    }
-                }
+                self.persist_default_model_provider_and_apply_navigation(id, scope, navigation)
+                    .await;
             }
             AppEvent::PersistModelSelection { model, effort } => {
-                let profile = self.active_profile.as_deref();
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_profile(profile)
-                    .set_model(Some(model.as_str()), effort)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        let effort_label = effort
-                            .map(|selected_effort| selected_effort.to_string())
-                            .unwrap_or_else(|| "default".to_string());
-                        tracing::info!("Selected model: {model}, Selected effort: {effort_label}");
-                        let mut message = format!("Model changed to {model}");
-                        if let Some(label) = Self::reasoning_label_for(&model, effort) {
-                            message.push(' ');
-                            message.push_str(label);
-                        }
-                        if let Some(profile) = profile {
-                            message.push_str(" for ");
-                            message.push_str(profile);
-                            message.push_str(" profile");
-                        }
-                        self.chat_widget.add_info_message(message, /*hint*/ None);
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "failed to persist model selection"
-                        );
-                        if let Some(profile) = profile {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to save model for profile `{profile}`: {err}"
-                            ));
-                        } else {
-                            self.chat_widget
-                                .add_error_message(format!("Failed to save default model: {err}"));
-                        }
-                    }
-                }
+                self.persist_model_selection(model, effort).await;
             }
             AppEvent::PersistPersonalitySelection { personality } => {
                 let profile = self.active_profile.as_deref();
@@ -4989,6 +5024,7 @@ mod tests {
     use crate::app_backtrack::BacktrackState;
     use crate::app_backtrack::user_count;
     use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
+    use crate::chatwidget::tests::render_bottom_popup;
     use crate::chatwidget::tests::set_chatgpt_auth;
     use crate::file_search::FileSearchManager;
     use crate::history_cell::AgentMessageCell;
@@ -4996,6 +5032,10 @@ mod tests {
     use crate::history_cell::UserHistoryCell;
     use crate::history_cell::new_session_info;
     use crate::multi_agents::AgentPickerThreadEntry;
+    use crate::provider_flow::ProviderFlowNavigation;
+    use crate::provider_flow::ProviderFlowSource;
+    use crate::provider_flow::ProviderScreen;
+    use crate::settings::data::SettingsScope;
     use assert_matches::assert_matches;
     use codex_core::CodexAuth;
     use codex_core::config::ConfigBuilder;
@@ -7810,6 +7850,95 @@ guardian_approval = true
         app.refresh_in_memory_config_from_disk().await?;
 
         assert_eq!(app.config.cwd, app.chat_widget.config_ref().cwd);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_model_selection_success_dismisses_model_flow() -> Result<()> {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_config(app.config.clone());
+
+        let presets = app
+            .server
+            .get_models_manager()
+            .try_list_models()
+            .expect("model presets should be available");
+        app.chat_widget.open_model_popup_with_presets(presets);
+        let preset = app
+            .server
+            .get_models_manager()
+            .try_list_models()
+            .expect("model presets should be available")
+            .into_iter()
+            .find(|preset| preset.model == "gpt-5.1-codex-max")
+            .expect("expected test model");
+        app.chat_widget.open_reasoning_popup(preset);
+
+        assert!(
+            !render_bottom_popup(&app.chat_widget, 80).is_empty(),
+            "expected model flow popup before persistence"
+        );
+
+        app.persist_model_selection(
+            "gpt-5.1-codex-max".to_string(),
+            Some(ReasoningEffortConfig::High),
+        )
+        .await;
+        let after = render_bottom_popup(&app.chat_widget, 80);
+        assert!(
+            !after.contains("Select Reasoning Level"),
+            "expected reasoning popup to be dismissed after persistence, got:\n{after}"
+        );
+        assert!(
+            after.contains("Ask Codex to do anything"),
+            "expected to return to composer after persistence, got:\n{after}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_default_provider_from_detail_returns_to_root() -> Result<()> {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_config(app.config.clone());
+
+        app.chat_widget.open_provider_flow(
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::Global,
+            ProviderScreen::Root,
+        );
+        app.chat_widget.open_provider_flow(
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::Global,
+            ProviderScreen::Detail {
+                provider_id: "openrouter".to_string(),
+            },
+        );
+
+        let before = render_bottom_popup(&app.chat_widget, 88);
+        assert!(
+            before.contains("openrouter"),
+            "expected provider detail popup before persistence, got:\n{before}"
+        );
+
+        app.persist_default_model_provider_and_apply_navigation(
+            "openrouter".to_string(),
+            SettingsScope::Global,
+            ProviderFlowNavigation::ReturnToRoot {
+                source: ProviderFlowSource::SlashCommand,
+                scope: SettingsScope::Global,
+            },
+        )
+        .await;
+
+        let after = render_bottom_popup(&app.chat_widget, 88);
+        assert!(after.contains("Provider"));
+        assert!(!after.contains("Provider / openrouter"));
+        assert!(after.contains("openrouter"));
         Ok(())
     }
 

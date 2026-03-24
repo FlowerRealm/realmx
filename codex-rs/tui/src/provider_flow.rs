@@ -50,6 +50,15 @@ pub(crate) struct ProviderFlowLocation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ProviderFlowNavigation {
+    ExitFlow,
+    ReturnToRoot {
+        source: ProviderFlowSource,
+        scope: SettingsScope,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProviderDraft {
     pub(crate) id: String,
     pub(crate) name: String,

@@ -15,6 +15,7 @@ use crate::bottom_pane::StatusLineItem;
 use crate::history_cell::HistoryCell;
 use crate::provider_flow::ProviderField;
 use crate::provider_flow::ProviderFlowLocation;
+use crate::provider_flow::ProviderFlowNavigation;
 use crate::provider_flow::ProviderFlowSource;
 use crate::provider_flow::ProviderScreen;
 use crate::provider_usage::ProviderUsageRefreshResult;
@@ -289,7 +290,7 @@ pub(crate) enum AppEvent {
     PersistDefaultModelProvider {
         id: String,
         scope: SettingsScope,
-        return_to: Option<ProviderFlowLocation>,
+        navigation: ProviderFlowNavigation,
     },
 
     /// Persist the selected personality to the appropriate config.

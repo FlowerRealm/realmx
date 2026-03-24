@@ -1662,6 +1662,18 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn dismiss_active_bottom_view(&mut self) -> bool {
+        self.bottom_pane.dismiss_active_view()
+    }
+
+    pub(crate) fn dismiss_views_with_id(&mut self, view_id: &'static str) -> bool {
+        self.bottom_pane.dismiss_views_with_id(view_id)
+    }
+
+    pub(crate) fn dismiss_model_selection_flow(&mut self) -> bool {
+        self.dismiss_views_with_id(MODEL_SELECTION_VIEW_ID)
+    }
+
     pub(crate) fn update_provider_create_draft(&mut self, field: ProviderField, value: String) {
         self.provider_create_draft.update_field(field, value);
     }
@@ -7432,6 +7444,7 @@ impl ChatWidget {
         ));
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
             header: Box::new(header),
             footer_hint: Some(standard_popup_hint_line()),
             items,

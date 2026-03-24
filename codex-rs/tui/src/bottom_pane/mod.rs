@@ -367,6 +367,29 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn dismiss_active_view(&mut self) -> bool {
+        if self.view_stack.is_empty() {
+            return false;
+        }
+        self.pop_completed_view();
+        self.request_redraw();
+        true
+    }
+
+    pub(crate) fn dismiss_views_with_id(&mut self, view_id: &'static str) -> bool {
+        let original_len = self.view_stack.len();
+        self.view_stack
+            .retain(|view| view.view_id() != Some(view_id));
+        if self.view_stack.len() == original_len {
+            return false;
+        }
+        if self.view_stack.is_empty() {
+            self.on_active_view_complete();
+        }
+        self.request_redraw();
+        true
+    }
+
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         // Do not globally intercept space; only composer handles hold-to-talk.

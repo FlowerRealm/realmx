@@ -6879,7 +6879,7 @@ fn render_bottom_first_row(chat: &ChatWidget, width: u16) -> String {
     String::new()
 }
 
-fn render_bottom_popup(chat: &ChatWidget, width: u16) -> String {
+pub(crate) fn render_bottom_popup(chat: &ChatWidget, width: u16) -> String {
     let height = chat.desired_height(width);
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
@@ -8537,6 +8537,32 @@ async fn reasoning_popup_escape_returns_to_model_popup() {
     let after_escape = render_bottom_popup(&chat, 80);
     assert!(after_escape.contains("Select Model"));
     assert!(!after_escape.contains("Select Reasoning Level"));
+}
+
+#[tokio::test]
+async fn dismiss_model_selection_flow_closes_parent_and_child_views() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
+    chat.thread_id = Some(ThreadId::new());
+    let presets = chat
+        .models_manager
+        .try_list_models()
+        .expect("model presets should be available");
+    chat.open_model_popup_with_presets(presets);
+
+    let preset = get_available_model(&chat, "gpt-5.1-codex-max");
+    chat.open_reasoning_popup(preset);
+    assert!(render_bottom_popup(&chat, 80).contains("Select Reasoning Level"));
+
+    assert!(chat.dismiss_model_selection_flow());
+    let after = render_bottom_popup(&chat, 80);
+    assert!(
+        !after.contains("Select Reasoning Level"),
+        "expected reasoning popup to be dismissed, got:\n{after}"
+    );
+    assert!(
+        after.contains("Ask Codex to do anything"),
+        "expected to return to composer after dismissal, got:\n{after}"
+    );
 }
 
 #[tokio::test]
