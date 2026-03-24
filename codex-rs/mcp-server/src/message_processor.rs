@@ -69,6 +69,9 @@ impl MessageProcessor {
                 plan_mode_preparatory_mutations: config
                     .features
                     .enabled(codex_core::features::Feature::PlanModePreparatoryMutations),
+                plan_mode_subagent_review: config
+                    .features
+                    .enabled(codex_core::features::Feature::PlanModeSubagentReview),
             },
         ));
         Self {

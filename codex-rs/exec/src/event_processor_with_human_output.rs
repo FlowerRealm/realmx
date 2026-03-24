@@ -893,6 +893,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | EventMsg::ItemCompleted(_)
             | EventMsg::AgentMessageContentDelta(_)
             | EventMsg::PlanDelta(_)
+            | EventMsg::PlanReviewStatus(_)
+            | EventMsg::PlanReviewMessageDelta(_)
+            | EventMsg::PlanReviewReasoningDelta(_)
+            | EventMsg::PlanReviewActivity(_)
             | EventMsg::ReasoningContentDelta(_)
             | EventMsg::ReasoningRawContentDelta(_)
             | EventMsg::SkillsUpdateAvailable

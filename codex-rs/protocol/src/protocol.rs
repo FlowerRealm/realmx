@@ -1329,6 +1329,15 @@ pub enum EventMsg {
     ReasoningContentDelta(ReasoningContentDeltaEvent),
     ReasoningRawContentDelta(ReasoningRawContentDeltaEvent),
 
+    /// Plan-review interaction: review lifecycle status update.
+    PlanReviewStatus(PlanReviewStatusEvent),
+    /// Plan-review interaction: reviewer message delta.
+    PlanReviewMessageDelta(PlanReviewMessageDeltaEvent),
+    /// Plan-review interaction: reviewer reasoning delta.
+    PlanReviewReasoningDelta(PlanReviewReasoningDeltaEvent),
+    /// Plan-review interaction: reviewer activity update.
+    PlanReviewActivity(PlanReviewActivityEvent),
+
     /// Collab interaction: agent spawn begin.
     CollabAgentSpawnBegin(CollabAgentSpawnBeginEvent),
     /// Collab interaction: agent spawn end.
@@ -1718,6 +1727,42 @@ impl HasLegacyEvent for EventMsg {
             _ => Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum PlanReviewStatusKind {
+    Started,
+    Completed,
+    Revising,
+    Failed,
+    Stalled,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct PlanReviewStatusEvent {
+    pub turn_id: String,
+    pub status: PlanReviewStatusKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct PlanReviewMessageDeltaEvent {
+    pub turn_id: String,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct PlanReviewReasoningDeltaEvent {
+    pub turn_id: String,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct PlanReviewActivityEvent {
+    pub turn_id: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]

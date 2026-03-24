@@ -116,6 +116,15 @@ fn plan_mode_preparatory_mutations_is_under_development() {
 }
 
 #[test]
+fn plan_mode_subagent_review_is_under_development() {
+    assert_eq!(
+        Feature::PlanModeSubagentReview.stage(),
+        Stage::UnderDevelopment
+    );
+    assert_eq!(Feature::PlanModeSubagentReview.default_enabled(), false);
+}
+
+#[test]
 fn tool_suggest_is_under_development() {
     assert_eq!(Feature::ToolSuggest.stage(), Stage::UnderDevelopment);
     assert_eq!(Feature::ToolSuggest.default_enabled(), false);

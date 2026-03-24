@@ -67,6 +67,11 @@ use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PermissionsRequestApprovalParams;
 use codex_app_server_protocol::PermissionsRequestApprovalResponse;
 use codex_app_server_protocol::PlanDeltaNotification;
+use codex_app_server_protocol::PlanReviewActivityNotification;
+use codex_app_server_protocol::PlanReviewMessageDeltaNotification;
+use codex_app_server_protocol::PlanReviewReasoningDeltaNotification;
+use codex_app_server_protocol::PlanReviewStatusKind as V2PlanReviewStatusKind;
+use codex_app_server_protocol::PlanReviewStatusNotification;
 use codex_app_server_protocol::RawResponseItemCompletedNotification;
 use codex_app_server_protocol::ReasoningSummaryPartAddedNotification;
 use codex_app_server_protocol::ReasoningSummaryTextDeltaNotification;
@@ -1222,6 +1227,65 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::PlanDelta(notification))
+                .await;
+        }
+        EventMsg::PlanReviewStatus(event) => {
+            let notification = PlanReviewStatusNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event.turn_id,
+                status: match event.status {
+                    codex_protocol::protocol::PlanReviewStatusKind::Started => {
+                        V2PlanReviewStatusKind::Started
+                    }
+                    codex_protocol::protocol::PlanReviewStatusKind::Completed => {
+                        V2PlanReviewStatusKind::Completed
+                    }
+                    codex_protocol::protocol::PlanReviewStatusKind::Revising => {
+                        V2PlanReviewStatusKind::Revising
+                    }
+                    codex_protocol::protocol::PlanReviewStatusKind::Failed => {
+                        V2PlanReviewStatusKind::Failed
+                    }
+                    codex_protocol::protocol::PlanReviewStatusKind::Stalled => {
+                        V2PlanReviewStatusKind::Stalled
+                    }
+                },
+                message: event.message,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::PlanReviewStatus(notification))
+                .await;
+        }
+        EventMsg::PlanReviewMessageDelta(event) => {
+            let notification = PlanReviewMessageDeltaNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event.turn_id,
+                delta: event.delta,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::PlanReviewMessageDelta(notification))
+                .await;
+        }
+        EventMsg::PlanReviewReasoningDelta(event) => {
+            let notification = PlanReviewReasoningDeltaNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event.turn_id,
+                delta: event.delta,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::PlanReviewReasoningDelta(
+                    notification,
+                ))
+                .await;
+        }
+        EventMsg::PlanReviewActivity(event) => {
+            let notification = PlanReviewActivityNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event.turn_id,
+                message: event.message,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::PlanReviewActivity(notification))
                 .await;
         }
         EventMsg::ContextCompacted(..) => {

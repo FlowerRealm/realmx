@@ -40,6 +40,11 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::PlanDeltaEvent;
+use codex_protocol::protocol::PlanReviewActivityEvent;
+use codex_protocol::protocol::PlanReviewMessageDeltaEvent;
+use codex_protocol::protocol::PlanReviewReasoningDeltaEvent;
+use codex_protocol::protocol::PlanReviewStatusEvent;
+use codex_protocol::protocol::PlanReviewStatusKind;
 use codex_protocol::protocol::RealtimeConversationClosedEvent;
 use codex_protocol::protocol::RealtimeConversationRealtimeEvent;
 use codex_protocol::protocol::RealtimeConversationStartedEvent;
@@ -307,6 +312,63 @@ fn server_notification_thread_events(
                 }),
             }],
         )),
+        ServerNotification::PlanReviewStatus(notification) => Some((
+            ThreadId::from_string(&notification.thread_id).ok()?,
+            vec![Event {
+                id: String::new(),
+                msg: EventMsg::PlanReviewStatus(PlanReviewStatusEvent {
+                    turn_id: notification.turn_id,
+                    status: match notification.status {
+                        codex_app_server_protocol::PlanReviewStatusKind::Started => {
+                            PlanReviewStatusKind::Started
+                        }
+                        codex_app_server_protocol::PlanReviewStatusKind::Completed => {
+                            PlanReviewStatusKind::Completed
+                        }
+                        codex_app_server_protocol::PlanReviewStatusKind::Revising => {
+                            PlanReviewStatusKind::Revising
+                        }
+                        codex_app_server_protocol::PlanReviewStatusKind::Failed => {
+                            PlanReviewStatusKind::Failed
+                        }
+                        codex_app_server_protocol::PlanReviewStatusKind::Stalled => {
+                            PlanReviewStatusKind::Stalled
+                        }
+                    },
+                    message: notification.message,
+                }),
+            }],
+        )),
+        ServerNotification::PlanReviewMessageDelta(notification) => Some((
+            ThreadId::from_string(&notification.thread_id).ok()?,
+            vec![Event {
+                id: String::new(),
+                msg: EventMsg::PlanReviewMessageDelta(PlanReviewMessageDeltaEvent {
+                    turn_id: notification.turn_id,
+                    delta: notification.delta,
+                }),
+            }],
+        )),
+        ServerNotification::PlanReviewReasoningDelta(notification) => Some((
+            ThreadId::from_string(&notification.thread_id).ok()?,
+            vec![Event {
+                id: String::new(),
+                msg: EventMsg::PlanReviewReasoningDelta(PlanReviewReasoningDeltaEvent {
+                    turn_id: notification.turn_id,
+                    delta: notification.delta,
+                }),
+            }],
+        )),
+        ServerNotification::PlanReviewActivity(notification) => Some((
+            ThreadId::from_string(&notification.thread_id).ok()?,
+            vec![Event {
+                id: String::new(),
+                msg: EventMsg::PlanReviewActivity(PlanReviewActivityEvent {
+                    turn_id: notification.turn_id,
+                    message: notification.message,
+                }),
+            }],
+        )),
         ServerNotification::ReasoningSummaryTextDelta(notification) => Some((
             ThreadId::from_string(&notification.thread_id).ok()?,
             vec![Event {
@@ -474,6 +536,11 @@ mod tests {
     use super::server_notification_thread_events;
     use codex_app_server_protocol::AgentMessageDeltaNotification;
     use codex_app_server_protocol::ItemCompletedNotification;
+    use codex_app_server_protocol::PlanReviewActivityNotification;
+    use codex_app_server_protocol::PlanReviewMessageDeltaNotification;
+    use codex_app_server_protocol::PlanReviewReasoningDeltaNotification;
+    use codex_app_server_protocol::PlanReviewStatusKind as ServerPlanReviewStatusKind;
+    use codex_app_server_protocol::PlanReviewStatusNotification;
     use codex_app_server_protocol::ReasoningSummaryTextDeltaNotification;
     use codex_app_server_protocol::ServerNotification;
     use codex_app_server_protocol::ThreadItem;
@@ -609,5 +676,88 @@ mod tests {
             panic!("expected bridged reasoning delta");
         };
         assert_eq!(delta.delta, "Thinking");
+    }
+
+    #[test]
+    fn bridges_plan_review_notifications_from_server_notifications() {
+        let thread_id = "019cee8c-b993-7e33-88c0-014d4e62612d".to_string();
+        let turn_id = "019cee8c-b9b4-7f10-a1b0-38caa876a012".to_string();
+
+        let (actual_thread_id, status_events) = server_notification_thread_events(
+            ServerNotification::PlanReviewStatus(PlanReviewStatusNotification {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+                status: ServerPlanReviewStatusKind::Stalled,
+                message: "Reviewer stopped making progress.".to_string(),
+            }),
+        )
+        .expect("notification should bridge");
+        assert_eq!(
+            actual_thread_id,
+            ThreadId::from_string(&thread_id).expect("valid thread id")
+        );
+        let [status_event] = status_events.as_slice() else {
+            panic!("expected one bridged plan review status event");
+        };
+        let EventMsg::PlanReviewStatus(status) = &status_event.msg else {
+            panic!("expected bridged plan review status");
+        };
+        assert_eq!(status.turn_id, turn_id);
+        assert_eq!(
+            status.status,
+            codex_protocol::protocol::PlanReviewStatusKind::Stalled
+        );
+        assert_eq!(status.message, "Reviewer stopped making progress.");
+
+        let (_, message_events) = server_notification_thread_events(
+            ServerNotification::PlanReviewMessageDelta(PlanReviewMessageDeltaNotification {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+                delta: "Need a rollback story.".to_string(),
+            }),
+        )
+        .expect("notification should bridge");
+        let [message_event] = message_events.as_slice() else {
+            panic!("expected one bridged plan review message delta event");
+        };
+        let EventMsg::PlanReviewMessageDelta(message_delta) = &message_event.msg else {
+            panic!("expected bridged plan review message delta");
+        };
+        assert_eq!(message_delta.turn_id, turn_id);
+        assert_eq!(message_delta.delta, "Need a rollback story.");
+
+        let (_, reasoning_events) = server_notification_thread_events(
+            ServerNotification::PlanReviewReasoningDelta(PlanReviewReasoningDeltaNotification {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+                delta: "Checking compatibility risk.".to_string(),
+            }),
+        )
+        .expect("notification should bridge");
+        let [reasoning_event] = reasoning_events.as_slice() else {
+            panic!("expected one bridged plan review reasoning delta event");
+        };
+        let EventMsg::PlanReviewReasoningDelta(reasoning_delta) = &reasoning_event.msg else {
+            panic!("expected bridged plan review reasoning delta");
+        };
+        assert_eq!(reasoning_delta.turn_id, turn_id);
+        assert_eq!(reasoning_delta.delta, "Checking compatibility risk.");
+
+        let (_, activity_events) = server_notification_thread_events(
+            ServerNotification::PlanReviewActivity(PlanReviewActivityNotification {
+                thread_id,
+                turn_id: turn_id.clone(),
+                message: "Reviewer ran command: rg plan_review".to_string(),
+            }),
+        )
+        .expect("notification should bridge");
+        let [activity_event] = activity_events.as_slice() else {
+            panic!("expected one bridged plan review activity event");
+        };
+        let EventMsg::PlanReviewActivity(activity) = &activity_event.msg else {
+            panic!("expected bridged plan review activity");
+        };
+        assert_eq!(activity.turn_id, turn_id);
+        assert_eq!(activity.message, "Reviewer ran command: rg plan_review");
     }
 }

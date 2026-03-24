@@ -2283,6 +2283,7 @@ impl App {
                 plan_mode_preparatory_mutations: config
                     .features
                     .enabled(Feature::PlanModePreparatoryMutations),
+                plan_mode_subagent_review: config.features.enabled(Feature::PlanModeSubagentReview),
             },
         ));
         let feedback_audience = bootstrap.feedback_audience;

@@ -30,6 +30,7 @@ fn default_mode_instructions_replace_mode_names_placeholder() {
     let default_instructions = default_preset(CollaborationModesConfig {
         default_mode_request_user_input: true,
         plan_mode_preparatory_mutations: false,
+        plan_mode_subagent_review: false,
     })
     .developer_instructions
     .expect("default preset should include instructions")
@@ -92,6 +93,7 @@ fn plan_mode_instructions_allow_preparatory_mutations_when_enabled() {
     let instructions = plan_preset(CollaborationModesConfig {
         default_mode_request_user_input: false,
         plan_mode_preparatory_mutations: true,
+        plan_mode_subagent_review: false,
     })
     .developer_instructions
     .expect("plan preset should include instructions")

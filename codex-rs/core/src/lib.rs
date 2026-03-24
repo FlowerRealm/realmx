@@ -53,6 +53,7 @@ mod network_policy_decision;
 pub mod network_proxy_loader;
 mod original_image_detail;
 mod plan_csv;
+mod plan_review;
 mod provider_credentials;
 mod provider_login_capabilities;
 pub use mcp_connection_manager::MCP_SANDBOX_STATE_CAPABILITY;

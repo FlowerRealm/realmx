@@ -165,6 +165,8 @@ pub enum Feature {
     DefaultModeRequestUserInput,
     /// Allow Plan mode to perform preparatory mutations outside the target repo.
     PlanModePreparatoryMutations,
+    /// Run a plan review pass before accepting a final plan-mode plan.
+    PlanModeSubagentReview,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
@@ -782,6 +784,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::PlanModePreparatoryMutations,
         key: "plan_mode_preparatory_mutations",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::PlanModeSubagentReview,
+        key: "plan_mode_subagent_review",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

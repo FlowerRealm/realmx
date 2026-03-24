@@ -827,6 +827,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
             plan_mode_preparatory_mutations: config
                 .features
                 .enabled(Feature::PlanModePreparatoryMutations),
+            plan_mode_subagent_review: config.features.enabled(Feature::PlanModeSubagentReview),
         },
     );
     let NewThread { thread: codex, .. } = thread_manager

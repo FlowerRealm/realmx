@@ -5496,6 +5496,10 @@ impl ChatWidget {
             }
             EventMsg::ExitedReviewMode(review) => self.on_exited_review_mode(review),
             EventMsg::ContextCompacted(_) => self.on_agent_message("Context compacted".to_owned()),
+            EventMsg::PlanReviewStatus(event) => self.on_plan_review_status(event),
+            EventMsg::PlanReviewMessageDelta(event) => self.on_plan_review_message_delta(event),
+            EventMsg::PlanReviewReasoningDelta(event) => self.on_plan_review_reasoning_delta(event),
+            EventMsg::PlanReviewActivity(event) => self.on_plan_review_activity(event),
             EventMsg::CollabAgentSpawnBegin(CollabAgentSpawnBeginEvent {
                 call_id,
                 model,
@@ -5669,6 +5673,79 @@ impl ChatWidget {
             "<< Code review finished >>".to_string(),
         ));
         self.request_redraw();
+    }
+
+    fn on_plan_review_status(&mut self, event: codex_protocol::protocol::PlanReviewStatusEvent) {
+        let message = event.message;
+        let mut needs_new_cell = true;
+        if let Some(cell) = self.active_cell.as_mut().and_then(|cell| {
+            cell.as_any_mut()
+                .downcast_mut::<history_cell::PlanReviewProgressCell>()
+        }) {
+            cell.set_status(message.clone());
+            needs_new_cell = false;
+        }
+        if needs_new_cell {
+            self.flush_active_cell();
+            self.active_cell = Some(Box::new(history_cell::PlanReviewProgressCell::new(message)));
+        }
+        self.bump_active_cell_revision();
+    }
+
+    fn on_plan_review_message_delta(
+        &mut self,
+        event: codex_protocol::protocol::PlanReviewMessageDeltaEvent,
+    ) {
+        self.ensure_plan_review_progress_cell();
+        if let Some(cell) = self.active_cell.as_mut().and_then(|cell| {
+            cell.as_any_mut()
+                .downcast_mut::<history_cell::PlanReviewProgressCell>()
+        }) {
+            cell.push_message_delta(&event.delta);
+            self.bump_active_cell_revision();
+        }
+    }
+
+    fn on_plan_review_reasoning_delta(
+        &mut self,
+        event: codex_protocol::protocol::PlanReviewReasoningDeltaEvent,
+    ) {
+        self.ensure_plan_review_progress_cell();
+        if let Some(cell) = self.active_cell.as_mut().and_then(|cell| {
+            cell.as_any_mut()
+                .downcast_mut::<history_cell::PlanReviewProgressCell>()
+        }) {
+            cell.push_reasoning_delta(&event.delta);
+            self.bump_active_cell_revision();
+        }
+    }
+
+    fn on_plan_review_activity(
+        &mut self,
+        event: codex_protocol::protocol::PlanReviewActivityEvent,
+    ) {
+        self.ensure_plan_review_progress_cell();
+        if let Some(cell) = self.active_cell.as_mut().and_then(|cell| {
+            cell.as_any_mut()
+                .downcast_mut::<history_cell::PlanReviewProgressCell>()
+        }) {
+            cell.push_activity(event.message);
+            self.bump_active_cell_revision();
+        }
+    }
+
+    fn ensure_plan_review_progress_cell(&mut self) {
+        let has_cell = self
+            .active_cell
+            .as_ref()
+            .is_some_and(|cell| cell.as_any().is::<history_cell::PlanReviewProgressCell>());
+        if !has_cell {
+            self.flush_active_cell();
+            self.active_cell = Some(Box::new(history_cell::PlanReviewProgressCell::new(
+                "Reviewing the plan.".to_string(),
+            )));
+            self.bump_active_cell_revision();
+        }
     }
 
     fn on_user_message_event(&mut self, event: UserMessageEvent) {

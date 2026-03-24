@@ -25,6 +25,8 @@ pub struct CollaborationModesConfig {
     pub default_mode_request_user_input: bool,
     /// Enables preparatory mutations in Plan mode.
     pub plan_mode_preparatory_mutations: bool,
+    /// Enables the hidden plan-review subagent flow in Plan mode.
+    pub plan_mode_subagent_review: bool,
 }
 
 pub fn builtin_collaboration_mode_presets(

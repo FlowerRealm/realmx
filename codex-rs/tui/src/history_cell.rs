@@ -487,6 +487,109 @@ impl HistoryCell for PlainHistoryCell {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct PlanReviewProgressCell {
+    status: String,
+    messages: String,
+    reasoning: String,
+    activities: Vec<String>,
+    started_at: Instant,
+}
+
+impl PlanReviewProgressCell {
+    pub(crate) fn new(status: String) -> Self {
+        Self {
+            status,
+            messages: String::new(),
+            reasoning: String::new(),
+            activities: Vec::new(),
+            started_at: Instant::now(),
+        }
+    }
+
+    pub(crate) fn set_status(&mut self, status: String) {
+        self.status = status;
+    }
+
+    pub(crate) fn push_message_delta(&mut self, delta: &str) {
+        self.messages.push_str(delta);
+    }
+
+    pub(crate) fn push_reasoning_delta(&mut self, delta: &str) {
+        self.reasoning.push_str(delta);
+    }
+
+    pub(crate) fn push_activity(&mut self, message: String) {
+        self.activities.push(message);
+    }
+
+    fn summary_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = vec![Line::from(vec![
+            spinner(Some(self.started_at), /*animations_enabled*/ true),
+            " ".into(),
+            "Plan review".bold(),
+            " ".into(),
+            self.status.clone().cyan(),
+        ])];
+        if let Some(activity) = self.activities.last() {
+            lines.push(Line::from(vec!["  ".into(), activity.clone().dim()]));
+        }
+        lines
+    }
+
+    fn detail_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = self.summary_lines();
+        if !self.activities.is_empty() {
+            lines.push("".into());
+            lines.push("Activities".bold().into());
+            lines.extend(
+                self.activities
+                    .iter()
+                    .map(|activity| Line::from(vec!["  • ".dim(), activity.clone().into()])),
+            );
+        }
+        if !self.reasoning.trim().is_empty() {
+            lines.push("".into());
+            lines.push("Reasoning".bold().into());
+            lines.extend(prefix_lines(
+                self.reasoning
+                    .lines()
+                    .map(|line| Line::from(line.to_string()))
+                    .collect(),
+                "  ".into(),
+                "  ".into(),
+            ));
+        }
+        if !self.messages.trim().is_empty() {
+            lines.push("".into());
+            lines.push("Reviewer output".bold().into());
+            lines.extend(prefix_lines(
+                self.messages
+                    .lines()
+                    .map(|line| Line::from(line.to_string()))
+                    .collect(),
+                "  ".into(),
+                "  ".into(),
+            ));
+        }
+        lines
+    }
+}
+
+impl HistoryCell for PlanReviewProgressCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        self.summary_lines()
+    }
+
+    fn transcript_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        self.detail_lines()
+    }
+
+    fn transcript_animation_tick(&self) -> Option<u64> {
+        Some((self.started_at.elapsed().as_millis() / 50) as u64)
+    }
+}
+
 #[cfg_attr(debug_assertions, allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {

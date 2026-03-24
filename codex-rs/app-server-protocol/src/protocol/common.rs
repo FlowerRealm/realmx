@@ -895,6 +895,10 @@ server_notification_definitions! {
     AgentMessageDelta => "item/agentMessage/delta" (v2::AgentMessageDeltaNotification),
     /// EXPERIMENTAL - proposed plan streaming deltas for plan items.
     PlanDelta => "item/plan/delta" (v2::PlanDeltaNotification),
+    PlanReviewStatus => "item/planReview/status" (v2::PlanReviewStatusNotification),
+    PlanReviewMessageDelta => "item/planReview/messageDelta" (v2::PlanReviewMessageDeltaNotification),
+    PlanReviewReasoningDelta => "item/planReview/reasoningDelta" (v2::PlanReviewReasoningDeltaNotification),
+    PlanReviewActivity => "item/planReview/activity" (v2::PlanReviewActivityNotification),
     /// Stream base64-encoded stdout/stderr chunks for a running `command/exec` session.
     CommandExecOutputDelta => "command/exec/outputDelta" (v2::CommandExecOutputDeltaNotification),
     CommandExecutionOutputDelta => "item/commandExecution/outputDelta" (v2::CommandExecutionOutputDeltaNotification),

@@ -64,6 +64,7 @@ use codex_protocol::protocol::HookScope as CoreHookScope;
 use codex_protocol::protocol::ModelRerouteReason as CoreModelRerouteReason;
 use codex_protocol::protocol::NetworkAccess as CoreNetworkAccess;
 use codex_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
+use codex_protocol::protocol::PlanReviewStatusKind as CorePlanReviewStatusKind;
 use codex_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow as CoreRateLimitWindow;
 use codex_protocol::protocol::ReadOnlyAccess as CoreReadOnlyAccess;
@@ -1005,6 +1006,16 @@ v2_enum_from_core! {
         Https,
         Socks5Tcp,
         Socks5Udp,
+    }
+}
+
+v2_enum_from_core! {
+    pub enum PlanReviewStatusKind from CorePlanReviewStatusKind {
+        Started,
+        Completed,
+        Revising,
+        Failed,
+        Stalled
     }
 }
 
@@ -4891,6 +4902,43 @@ pub struct PlanDeltaNotification {
     pub turn_id: String,
     pub item_id: String,
     pub delta: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct PlanReviewStatusNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub status: PlanReviewStatusKind,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct PlanReviewMessageDeltaNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub delta: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct PlanReviewReasoningDeltaNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub delta: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct PlanReviewActivityNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

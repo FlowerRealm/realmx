@@ -92,6 +92,11 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::PatchApplyBeginEvent;
 use codex_protocol::protocol::PatchApplyEndEvent;
 use codex_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
+use codex_protocol::protocol::PlanReviewActivityEvent;
+use codex_protocol::protocol::PlanReviewMessageDeltaEvent;
+use codex_protocol::protocol::PlanReviewReasoningDeltaEvent;
+use codex_protocol::protocol::PlanReviewStatusEvent;
+use codex_protocol::protocol::PlanReviewStatusKind;
 use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::ReadOnlyAccess;
 use codex_protocol::protocol::ReviewRequest;
@@ -1792,6 +1797,7 @@ fn test_model_catalog(config: &Config) -> Arc<ModelCatalog> {
         plan_mode_preparatory_mutations: config
             .features
             .enabled(Feature::PlanModePreparatoryMutations),
+        plan_mode_subagent_review: config.features.enabled(Feature::PlanModeSubagentReview),
     };
     Arc::new(ModelCatalog::new(
         codex_core::test_support::all_model_presets().clone(),
@@ -3994,6 +4000,49 @@ async fn unified_exec_begin_restores_working_status_snapshot() {
         "unified_exec_begin_restores_working_status",
         terminal.backend()
     );
+}
+
+#[tokio::test]
+async fn plan_review_live_transcript_renders_reviewer_details_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.handle_codex_event(Event {
+        id: "plan-review-status".into(),
+        msg: EventMsg::PlanReviewStatus(PlanReviewStatusEvent {
+            turn_id: "turn-1".to_string(),
+            status: PlanReviewStatusKind::Started,
+            message: "Reviewing the plan with a reviewer subagent.".to_string(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "plan-review-message".into(),
+        msg: EventMsg::PlanReviewMessageDelta(PlanReviewMessageDeltaEvent {
+            turn_id: "turn-1".to_string(),
+            delta: "Need a rollback plan before shipping.".to_string(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "plan-review-reasoning".into(),
+        msg: EventMsg::PlanReviewReasoningDelta(PlanReviewReasoningDeltaEvent {
+            turn_id: "turn-1".to_string(),
+            delta: "Checking backward compatibility impact.".to_string(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "plan-review-activity".into(),
+        msg: EventMsg::PlanReviewActivity(PlanReviewActivityEvent {
+            turn_id: "turn-1".to_string(),
+            message: "Reviewer ran command: rg plan_review".to_string(),
+        }),
+    });
+
+    assert!(drain_insert_history(&mut rx).is_empty());
+
+    let transcript = chat
+        .active_cell_transcript_lines(80)
+        .expect("expected live plan review transcript");
+    let rendered = lines_to_single_string(&transcript);
+    assert_snapshot!("plan_review_live_transcript", rendered);
 }
 
 #[tokio::test]

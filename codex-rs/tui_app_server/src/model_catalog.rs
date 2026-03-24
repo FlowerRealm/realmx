@@ -40,6 +40,7 @@ mod tests {
         let collaboration_modes_config = CollaborationModesConfig {
             default_mode_request_user_input: true,
             plan_mode_preparatory_mutations: true,
+            plan_mode_subagent_review: false,
         };
         let catalog = ModelCatalog::new(Vec::new(), collaboration_modes_config);
 

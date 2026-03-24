@@ -709,6 +709,7 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
         create_request_user_input_tool(CollaborationModesConfig {
             default_mode_request_user_input: true,
             plan_mode_preparatory_mutations: false,
+            plan_mode_subagent_review: false,
         })
     );
 }

@@ -208,6 +208,212 @@ plan-01,in_progress,Legacy step,codex-rs/core/src/codex.rs,first step
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn plan_mode_review_exposes_visible_review_step_and_final_plan() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let first_plan_csv = "\
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,First draft,codex-rs/core/src/codex.rs,first draft,,,,
+```
+";
+    let first_plan = format!("Draft intro\n<proposed_plan>\n{first_plan_csv}</proposed_plan>");
+    let review_json = r#"{"decision":"revise","rationale":"needs a stronger implementation step"}"#;
+    let revised_plan_csv = "\
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Revised final,codex-rs/core/src/codex.rs,revised final,,,,
+```
+";
+    let revised_plan = format!(
+        "Revised intro\n<proposed_plan>\n{revised_plan_csv}</proposed_plan>\nRevised outro"
+    );
+    let responses = vec![
+        responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_message_item_added("msg-1", ""),
+            responses::ev_output_text_delta(&first_plan),
+            responses::ev_assistant_message("msg-1", &first_plan),
+            responses::ev_completed("resp-1"),
+        ]),
+        responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-review", review_json),
+            responses::ev_completed("resp-2"),
+        ]),
+        responses::sse(vec![
+            responses::ev_response_created("resp-3"),
+            responses::ev_message_item_added("msg-2", ""),
+            responses::ev_output_text_delta(&revised_plan),
+            responses::ev_assistant_message("msg-2", &revised_plan),
+            responses::ev_completed("resp-3"),
+        ]),
+    ];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml_with_features(
+        codex_home.path(),
+        &server.uri(),
+        BTreeMap::from([
+            (Feature::CollaborationModes, true),
+            (Feature::PlanModeSubagentReview, true),
+        ]),
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let turn = start_plan_mode_turn(&mut mcp).await?;
+    let (_, completed_items, plan_deltas, turn_completed) =
+        collect_turn_notifications(&mut mcp).await?;
+    wait_for_responses_request_count(&server, 3).await?;
+
+    assert_eq!(turn_completed.turn.id, turn.id);
+    assert_eq!(turn_completed.turn.status, TurnStatus::Completed);
+    assert_eq!(
+        plan_deltas
+            .iter()
+            .map(|delta| delta.delta.as_str())
+            .collect::<String>(),
+        revised_plan_csv
+    );
+    let agent_messages = completed_items
+        .iter()
+        .filter_map(|item| match item {
+            ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_messages,
+        vec![
+            "Review found gaps to strengthen: needs a stronger implementation step\nRevising the plan now."
+                .to_string(),
+            "Revised intro\n\nRevised outro".to_string()
+        ]
+    );
+    let plan_items = completed_items
+        .iter()
+        .filter_map(|item| match item {
+            ThreadItem::Plan { .. } => Some(item.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        plan_items,
+        vec![ThreadItem::Plan {
+            id: format!("{}-plan", turn.id),
+            text: "\
+# Plan
+
+- [in_progress] Revised final (`codex-rs/core/src/codex.rs`) - revised final
+"
+            .to_string(),
+        }]
+    );
+    let visible_text = serde_json::to_string(&completed_items)?;
+    assert!(!visible_text.contains("First draft"));
+    assert!(!visible_text.contains("first draft"));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn plan_mode_review_exposes_failure_log_before_fallback_plan() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let first_plan_csv = "\
+```csv
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Fallback step,codex-rs/core/src/codex.rs,fallback detail,,,,
+```
+";
+    let first_plan = format!(
+        "Fallback intro\n<proposed_plan>\n{first_plan_csv}</proposed_plan>\nFallback outro"
+    );
+    let responses = vec![
+        responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_message_item_added("msg-1", ""),
+            responses::ev_output_text_delta(&first_plan),
+            responses::ev_assistant_message("msg-1", &first_plan),
+            responses::ev_completed("resp-1"),
+        ]),
+        responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-review", "not valid json"),
+            responses::ev_completed("resp-2"),
+        ]),
+    ];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml_with_features(
+        codex_home.path(),
+        &server.uri(),
+        BTreeMap::from([
+            (Feature::CollaborationModes, true),
+            (Feature::PlanModeSubagentReview, true),
+        ]),
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let turn = start_plan_mode_turn(&mut mcp).await?;
+    let (_, completed_items, plan_deltas, turn_completed) =
+        collect_turn_notifications(&mut mcp).await?;
+    wait_for_responses_request_count(&server, 2).await?;
+
+    assert_eq!(turn_completed.turn.id, turn.id);
+    assert_eq!(turn_completed.turn.status, TurnStatus::Completed);
+    assert_eq!(
+        plan_deltas
+            .iter()
+            .map(|delta| delta.delta.as_str())
+            .collect::<String>(),
+        first_plan_csv
+    );
+    let agent_messages = completed_items
+        .iter()
+        .filter_map(|item| match item {
+            ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_messages,
+        vec![
+            "Review failed: failed to parse review verdict: plan review verdict was not valid JSON\nProceeding with the current plan."
+                .to_string(),
+            "Fallback intro\n\nFallback outro".to_string()
+        ]
+    );
+    let plan_items = completed_items
+        .iter()
+        .filter_map(|item| match item {
+            ThreadItem::Plan { .. } => Some(item.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        plan_items,
+        vec![ThreadItem::Plan {
+            id: format!("{}-plan", turn.id),
+            text: "\
+# Plan
+
+- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+"
+            .to_string(),
+        }]
+    );
+
+    Ok(())
+}
+
 async fn start_plan_mode_turn(mcp: &mut McpProcess) -> Result<codex_app_server_protocol::Turn> {
     let thread_req = mcp
         .send_thread_start_request(ThreadStartParams {
@@ -331,7 +537,18 @@ async fn wait_for_responses_request_count(
 }
 
 fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {
-    let features = BTreeMap::from([(Feature::CollaborationModes, true)]);
+    create_config_toml_with_features(
+        codex_home,
+        server_uri,
+        BTreeMap::from([(Feature::CollaborationModes, true)]),
+    )
+}
+
+fn create_config_toml_with_features(
+    codex_home: &Path,
+    server_uri: &str,
+    features: BTreeMap<Feature, bool>,
+) -> std::io::Result<()> {
     let feature_entries = features
         .into_iter()
         .map(|(feature, enabled)| {

@@ -1,0 +1,15 @@
+---
+source: tui_app_server/src/chatwidget/tests.rs
+expression: rendered
+---
+• Plan review Reviewing the plan with a reviewer subagent.
+  Reviewer ran command: rg plan_review
+
+Activities
+  • Reviewer ran command: rg plan_review
+
+Reasoning
+  Checking backward compatibility impact.
+
+Reviewer output
+  Need a rollback plan before shipping.

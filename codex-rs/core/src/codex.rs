@@ -221,9 +221,15 @@ use crate::mentions::collect_explicit_app_ids;
 use crate::mentions::collect_explicit_plugin_mentions;
 use crate::mentions::collect_tool_mentions_from_messages;
 use crate::network_policy_decision::execpolicy_network_rule_amendment;
+use crate::plan_csv::CanonicalPlanCsv;
 use crate::plan_csv::canonical_plan_csv_from_proposed_plan;
 use crate::plan_csv::render_plan_text;
 use crate::plan_csv::update_plan_from_thread_plan_items;
+use crate::plan_review::PlanReviewDecision;
+use crate::plan_review::PlanReviewOutcome;
+use crate::plan_review::build_plan_review_user_message;
+use crate::plan_review::build_plan_revision_developer_message;
+use crate::plan_review::review_plan_candidate;
 use crate::plugins::PluginsManager;
 use crate::plugins::build_plugin_injections;
 use crate::plugins::render_plugins_section;
@@ -5783,6 +5789,12 @@ pub(crate) async fn run_turn(
     // many turns, from the perspective of the user, it is a single turn.
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     let mut server_model_warning_emitted_for_turn = false;
+    let mut plan_acceptance = PlanAcceptanceState::new(
+        turn_context.collaboration_mode.mode.is_plan_output_mode()
+            && turn_context
+                .features
+                .enabled(Feature::PlanModeSubagentReview),
+    );
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
@@ -5903,7 +5915,73 @@ pub(crate) async fn run_turn(
                 let SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message: sampling_request_last_agent_message,
+                    plan_candidate,
                 } = sampling_request_output;
+                if let Some(candidate) = plan_candidate {
+                    if plan_acceptance.hidden_review_enabled {
+                        if !plan_acceptance.review_attempted {
+                            plan_acceptance.review_attempted = true;
+                            let rendered_plan =
+                                render_plan_text(candidate.canonical_plan.rows.as_slice());
+                            let assistant_text =
+                                raw_assistant_output_text_from_item(&candidate.assistant_item)
+                                    .unwrap_or_default();
+                            plan_acceptance.fallback_candidate = Some(candidate);
+                            let review_outcome = review_plan_candidate(
+                                &sess,
+                                &turn_context,
+                                &assistant_text,
+                                plan_acceptance
+                                    .fallback_candidate
+                                    .as_ref()
+                                    .map(|candidate| candidate.canonical_plan.raw_csv.as_str())
+                                    .unwrap_or_default(),
+                                &rendered_plan,
+                                cancellation_token.child_token(),
+                            )
+                            .await;
+                            plan_acceptance.review_message =
+                                Some(build_plan_review_user_message(&review_outcome));
+                            match review_outcome {
+                                PlanReviewOutcome::Verdict(verdict) => match verdict.decision {
+                                    PlanReviewDecision::Accept => {
+                                        plan_acceptance.accept_fallback();
+                                    }
+                                    PlanReviewDecision::Revise => {
+                                        let text = build_plan_revision_developer_message(
+                                            &assistant_text,
+                                            &verdict.rationale,
+                                        );
+                                        let response_item = ResponseItem::Message {
+                                            id: None,
+                                            role: "developer".to_string(),
+                                            content: vec![ContentItem::InputText { text }],
+                                            end_turn: None,
+                                            phase: None,
+                                        };
+                                        sess.record_into_history(
+                                            std::slice::from_ref(&response_item),
+                                            turn_context.as_ref(),
+                                        )
+                                        .await;
+                                        sess.persist_rollout_response_items(std::slice::from_ref(
+                                            &response_item,
+                                        ))
+                                        .await;
+                                        continue;
+                                    }
+                                },
+                                PlanReviewOutcome::Unavailable { .. } => {
+                                    plan_acceptance.accept_fallback();
+                                }
+                            }
+                        } else {
+                            plan_acceptance.accepted_candidate = Some(candidate);
+                        }
+                    } else {
+                        plan_acceptance.accepted_candidate = Some(candidate);
+                    }
+                }
                 let total_usage_tokens = sess.get_total_token_usage().await;
                 let token_limit_reached = total_usage_tokens >= auto_compact_limit;
 
@@ -5936,7 +6014,36 @@ pub(crate) async fn run_turn(
                 }
 
                 if !needs_follow_up {
-                    last_agent_message = sampling_request_last_agent_message;
+                    if let Some(review_message) = plan_acceptance.take_review_message() {
+                        sess.record_response_item_and_emit_turn_item(
+                            turn_context.as_ref(),
+                            review_message,
+                        )
+                        .await;
+                    }
+                    if let Some(candidate) = plan_acceptance.take_final_candidate() {
+                        let mut plan_mode_state = PlanModeStreamState::new(
+                            &turn_context.sub_id,
+                            /*hidden_review_enabled*/ false,
+                            /*allow_non_plan_message_emission*/ true,
+                        );
+                        if let Err(err) = accept_plan_candidate(
+                            &sess,
+                            &turn_context,
+                            &mut plan_mode_state,
+                            candidate,
+                            &mut last_agent_message,
+                        )
+                        .await
+                        {
+                            let event =
+                                EventMsg::Error(err.to_error_event(/*message_prefix*/ None));
+                            sess.send_event(&turn_context, event).await;
+                            return None;
+                        }
+                    } else {
+                        last_agent_message = sampling_request_last_agent_message;
+                    }
                     let stop_hook_permission_mode = match turn_context.approval_policy.value() {
                         AskForApproval::Never => "bypassPermissions",
                         AskForApproval::UnlessTrusted
@@ -6647,6 +6754,48 @@ pub(crate) async fn built_tools(
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+    plan_candidate: Option<PlanCandidate>,
+}
+
+#[derive(Debug)]
+struct PlanCandidate {
+    assistant_item: ResponseItem,
+    canonical_plan: CanonicalPlanCsv,
+}
+
+#[derive(Debug)]
+struct PlanAcceptanceState {
+    hidden_review_enabled: bool,
+    review_attempted: bool,
+    accepted_candidate: Option<PlanCandidate>,
+    fallback_candidate: Option<PlanCandidate>,
+    review_message: Option<ResponseItem>,
+}
+
+impl PlanAcceptanceState {
+    fn new(hidden_review_enabled: bool) -> Self {
+        Self {
+            hidden_review_enabled,
+            review_attempted: false,
+            accepted_candidate: None,
+            fallback_candidate: None,
+            review_message: None,
+        }
+    }
+
+    fn accept_fallback(&mut self) {
+        self.accepted_candidate = self.fallback_candidate.take();
+    }
+
+    fn take_final_candidate(&mut self) -> Option<PlanCandidate> {
+        self.accepted_candidate
+            .take()
+            .or_else(|| self.fallback_candidate.take())
+    }
+
+    fn take_review_message(&mut self) -> Option<ResponseItem> {
+        self.review_message.take()
+    }
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -6663,6 +6812,8 @@ struct ProposedPlanItemState {
 /// Aggregated state used only while streaming a plan-mode response.
 /// Includes per-item parsers, deferred agent message bookkeeping, and the plan item lifecycle.
 struct PlanModeStreamState {
+    hidden_review_enabled: bool,
+    allow_non_plan_message_emission: bool,
     /// Agent message items started by the model but deferred until we see non-plan text.
     pending_agent_message_items: HashMap<String, TurnItem>,
     /// Agent message items whose start notification has been emitted.
@@ -6674,8 +6825,14 @@ struct PlanModeStreamState {
 }
 
 impl PlanModeStreamState {
-    fn new(turn_id: &str) -> Self {
+    fn new(
+        turn_id: &str,
+        hidden_review_enabled: bool,
+        allow_non_plan_message_emission: bool,
+    ) -> Self {
         Self {
+            hidden_review_enabled,
+            allow_non_plan_message_emission,
             pending_agent_message_items: HashMap::new(),
             started_agent_message_items: HashSet::new(),
             leading_whitespace_by_item: HashMap::new(),
@@ -6897,6 +7054,10 @@ fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         | EventMsg::PlanDelta(_)
         | EventMsg::ReasoningContentDelta(_)
         | EventMsg::ReasoningRawContentDelta(_)
+        | EventMsg::PlanReviewStatus(_)
+        | EventMsg::PlanReviewMessageDelta(_)
+        | EventMsg::PlanReviewReasoningDelta(_)
+        | EventMsg::PlanReviewActivity(_)
         | EventMsg::CollabAgentSpawnBegin(_)
         | EventMsg::CollabAgentSpawnEnd(_)
         | EventMsg::CollabAgentInteractionBegin(_)
@@ -6924,6 +7085,9 @@ async fn handle_plan_segments(
         match segment {
             ProposedPlanSegment::Normal(delta) => {
                 if delta.is_empty() {
+                    continue;
+                }
+                if !state.allow_non_plan_message_emission {
                     continue;
                 }
                 let has_non_whitespace = delta.chars().any(|ch| !ch.is_whitespace());
@@ -6956,12 +7120,12 @@ async fn handle_plan_segments(
                     .await;
             }
             ProposedPlanSegment::ProposedPlanStart => {
-                if !state.plan_item_state.completed {
+                if !state.hidden_review_enabled && !state.plan_item_state.completed {
                     state.plan_item_state.start(sess, turn_context).await;
                 }
             }
             ProposedPlanSegment::ProposedPlanDelta(delta) => {
-                if !state.plan_item_state.completed {
+                if !state.hidden_review_enabled && !state.plan_item_state.completed {
                     if !state.plan_item_state.started {
                         state.plan_item_state.start(sess, turn_context).await;
                     }
@@ -7043,11 +7207,9 @@ async fn flush_assistant_text_segments_all(
 
 /// Emit completion for plan items by parsing the finalized assistant message.
 async fn maybe_complete_plan_item_from_message(
-    sess: &Session,
-    turn_context: &TurnContext,
-    state: &mut PlanModeStreamState,
+    _state: &mut PlanModeStreamState,
     item: &ResponseItem,
-) -> Result<(), CodexErr> {
+) -> Result<Option<PlanCandidate>, CodexErr> {
     if let ResponseItem::Message { role, content, .. } = item
         && role == "assistant"
     {
@@ -7063,29 +7225,13 @@ async fn maybe_complete_plan_item_from_message(
                 .map_err(|err| {
                     CodexErr::InvalidRequest(format!("invalid proposed plan CSV: {err}"))
                 })?;
-            if !state.plan_item_state.started {
-                state.plan_item_state.start(sess, turn_context).await;
-            }
-            sess.persist_active_thread_plan(
-                turn_context,
-                state.plan_item_state.item_id.as_str(),
-                canonical_plan.raw_csv.as_str(),
-            )
-            .await
-            .map_err(|err| {
-                CodexErr::Fatal(format!("failed to persist active thread plan: {err}"))
-            })?;
-            state
-                .plan_item_state
-                .complete_with_text(
-                    sess,
-                    turn_context,
-                    render_plan_text(canonical_plan.rows.as_slice()),
-                )
-                .await;
+            return Ok(Some(PlanCandidate {
+                assistant_item: item.clone(),
+                canonical_plan,
+            }));
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Emit a completed agent message in plan mode, respecting deferred starts.
@@ -7159,32 +7305,81 @@ async fn handle_assistant_item_done_in_plan_mode(
     state: &mut PlanModeStreamState,
     previously_active_item: Option<&TurnItem>,
     last_agent_message: &mut Option<String>,
+    accepted_plan_candidate: &mut Option<PlanCandidate>,
 ) -> Result<bool, CodexErr> {
     if let ResponseItem::Message { role, .. } = item
         && role == "assistant"
     {
-        maybe_complete_plan_item_from_message(sess, turn_context, state, item).await?;
+        *accepted_plan_candidate = maybe_complete_plan_item_from_message(state, item).await?;
 
         if let Some(turn_item) =
             handle_non_tool_response_item(sess, turn_context, item, /*plan_mode*/ true).await
         {
-            emit_turn_item_in_plan_mode(
-                sess,
-                turn_context,
-                turn_item,
-                previously_active_item,
-                state,
-            )
-            .await;
+            let should_emit = match turn_item {
+                TurnItem::AgentMessage(_) => state.allow_non_plan_message_emission,
+                _ => !state.hidden_review_enabled,
+            };
+            if should_emit {
+                emit_turn_item_in_plan_mode(
+                    sess,
+                    turn_context,
+                    turn_item,
+                    previously_active_item,
+                    state,
+                )
+                .await;
+            }
         }
 
-        record_completed_response_item(sess, turn_context, item).await;
-        if let Some(agent_message) = last_assistant_message_from_item(item, /*plan_mode*/ true) {
+        if !state.hidden_review_enabled {
+            record_completed_response_item(sess, turn_context, item).await;
+        }
+        if state.allow_non_plan_message_emission
+            && let Some(agent_message) =
+                last_assistant_message_from_item(item, /*plan_mode*/ true)
+        {
             *last_agent_message = Some(agent_message);
         }
         return Ok(true);
     }
     Ok(false)
+}
+
+async fn accept_plan_candidate(
+    sess: &Session,
+    turn_context: &TurnContext,
+    state: &mut PlanModeStreamState,
+    candidate: PlanCandidate,
+    last_agent_message: &mut Option<String>,
+) -> Result<(), CodexErr> {
+    if !state.plan_item_state.started {
+        state.plan_item_state.start(sess, turn_context).await;
+    }
+    sess.persist_active_thread_plan(
+        turn_context,
+        state.plan_item_state.item_id.as_str(),
+        candidate.canonical_plan.raw_csv.as_str(),
+    )
+    .await
+    .map_err(|err| CodexErr::Fatal(format!("failed to persist active thread plan: {err}")))?;
+    state
+        .plan_item_state
+        .complete_with_text(
+            sess,
+            turn_context,
+            render_plan_text(candidate.canonical_plan.rows.as_slice()),
+        )
+        .await;
+    if let Some(turn_item) =
+        handle_non_tool_response_item(sess, turn_context, &candidate.assistant_item, true).await
+    {
+        emit_turn_item_in_plan_mode(sess, turn_context, turn_item, None, state).await;
+    }
+    record_completed_response_item(sess, turn_context, &candidate.assistant_item).await;
+    if state.allow_non_plan_message_emission {
+        *last_agent_message = last_assistant_message_from_item(&candidate.assistant_item, true);
+    }
+    Ok(())
 }
 
 async fn drain_in_flight(
@@ -7253,8 +7448,20 @@ async fn try_run_sampling_request(
     let mut active_item: Option<TurnItem> = None;
     let mut should_emit_turn_diff = false;
     let plan_mode = turn_context.collaboration_mode.mode.is_plan_output_mode();
+    let hidden_plan_review_enabled = plan_mode
+        && turn_context
+            .features
+            .enabled(Feature::PlanModeSubagentReview);
     let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
-    let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
+    let allow_non_plan_message_emission = !hidden_plan_review_enabled;
+    let mut plan_mode_state = plan_mode.then(|| {
+        PlanModeStreamState::new(
+            &turn_context.sub_id,
+            hidden_plan_review_enabled,
+            allow_non_plan_message_emission,
+        )
+    });
+    let mut plan_candidate: Option<PlanCandidate> = None;
     let receiving_span = trace_span!("receiving_stream");
     let outcome: CodexResult<SamplingRequestResult> = loop {
         let handle_responses = trace_span!(
@@ -7315,6 +7522,7 @@ async fn try_run_sampling_request(
                         state,
                         previously_active_item.as_ref(),
                         &mut last_agent_message,
+                        &mut plan_candidate,
                     )
                     .await?
                 {
@@ -7438,6 +7646,7 @@ async fn try_run_sampling_request(
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message,
+                    plan_candidate,
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {

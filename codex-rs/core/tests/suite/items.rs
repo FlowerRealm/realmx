@@ -1,16 +1,21 @@
 #![cfg(not(target_os = "windows"))]
 
 use anyhow::Ok;
+use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::items::AgentMessageContent;
+use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::PlanItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::WebSearchAction;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 use codex_protocol::user_input::UserInput;
@@ -27,14 +32,23 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::ev_web_search_call_added_partial;
 use core_test_support::responses::ev_web_search_call_done;
 use core_test_support::responses::mount_sse_once;
+use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
+use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
+
+#[derive(Debug)]
+struct HiddenPlanReviewOutcome {
+    plan_item: Option<PlanItem>,
+    agent_items: Vec<AgentMessageItem>,
+    collab_events: usize,
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_message_item_is_emitted() -> anyhow::Result<()> {
@@ -1143,6 +1157,443 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
     assert_eq!(delta_event.item_id, reasoning_item.id);
     assert_eq!(delta_event.delta, "step one");
     assert_eq!(legacy_delta.delta, "step one");
+
+    Ok(())
+}
+
+fn canonical_plan_csv(step: &str, details: &str) -> String {
+    format!(
+        "```csv\nid,status,step,path,details,inputs,outputs,depends_on,acceptance\nplan-01,in_progress,{step},codex-rs/core/src/codex.rs,{details},,,,\n```\n"
+    )
+}
+
+fn plan_message(prefix: &str, step: &str, details: &str, suffix: &str) -> String {
+    format!(
+        "{prefix}<proposed_plan>\n{}{}</proposed_plan>{suffix}",
+        canonical_plan_csv(step, details),
+        if suffix.is_empty() { "" } else { "\n" }
+    )
+}
+
+fn plan_collaboration_mode(model: String) -> CollaborationMode {
+    CollaborationMode {
+        mode: ModeKind::Plan,
+        settings: Settings {
+            model,
+            reasoning_effort: None,
+            developer_instructions: None,
+        },
+    }
+}
+
+async fn submit_plan_turn(
+    codex: &codex_core::CodexThread,
+    model: String,
+    prompt: &str,
+) -> anyhow::Result<()> {
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: prompt.into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: std::env::current_dir()?,
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: Some(plan_collaboration_mode(model)),
+            personality: None,
+        })
+        .await?;
+    Ok(())
+}
+
+async fn collect_hidden_plan_review_outcome(
+    codex: &codex_core::CodexThread,
+) -> HiddenPlanReviewOutcome {
+    let mut plan_item = None;
+    let mut agent_items = Vec::new();
+    let mut collab_events = 0usize;
+    loop {
+        let ev = wait_for_event(codex, |_| true).await;
+        match ev {
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::Plan(item),
+                ..
+            }) => plan_item = Some(item),
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::AgentMessage(item),
+                ..
+            }) => agent_items.push(item),
+            EventMsg::CollabAgentSpawnBegin(_)
+            | EventMsg::CollabAgentSpawnEnd(_)
+            | EventMsg::CollabAgentInteractionBegin(_)
+            | EventMsg::CollabAgentInteractionEnd(_)
+            | EventMsg::CollabWaitingBegin(_)
+            | EventMsg::CollabWaitingEnd(_)
+            | EventMsg::CollabCloseBegin(_)
+            | EventMsg::CollabCloseEnd(_)
+            | EventMsg::CollabResumeBegin(_)
+            | EventMsg::CollabResumeEnd(_) => collab_events += 1,
+            EventMsg::TurnComplete(_) => {
+                break HiddenPlanReviewOutcome {
+                    plan_item,
+                    agent_items,
+                    collab_events,
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plan_mode_review_shows_visible_review_step_before_accepting_first_candidate()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::PlanModeSubagentReview)
+            .expect("feature should enable in test");
+    }))
+    .await?;
+    let server = harness.server();
+    let codex = harness.test().codex.clone();
+    let model = harness.test().session_configured.model.clone();
+
+    let first_plan = plan_message(
+        "Intro\n",
+        "First accepted step",
+        "first accepted detail",
+        "\nOutro",
+    );
+    let review_json = r#"{"decision":"accept","rationale":"looks good"}"#;
+    mount_sse_sequence(
+        server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_message_item_added("msg-1", ""),
+                ev_output_text_delta(&first_plan),
+                ev_assistant_message("msg-1", &first_plan),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-review", review_json),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    submit_plan_turn(&codex, model, "please plan").await?;
+
+    let outcome = collect_hidden_plan_review_outcome(&codex).await;
+
+    assert_eq!(outcome.collab_events, 0);
+    assert_eq!(
+        outcome.plan_item.expect("plan item").text,
+        "\
+# Plan
+
+- [in_progress] First accepted step (`codex-rs/core/src/codex.rs`) - first accepted detail
+"
+    );
+    let agent_texts = outcome
+        .agent_items
+        .iter()
+        .map(|item| {
+            item.content
+                .iter()
+                .map(|entry| match entry {
+                    AgentMessageContent::Text { text } => text.as_str(),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_texts,
+        vec![
+            "Review complete. The plan is ready.".to_string(),
+            "Intro\n\nOutro".to_string()
+        ]
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plan_mode_review_shows_visible_review_step_before_revised_plan() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::PlanModeSubagentReview)
+            .expect("feature should enable in test");
+    }))
+    .await?;
+    let server = harness.server();
+    let codex = harness.test().codex.clone();
+    let model = harness.test().session_configured.model.clone();
+
+    let first_plan = plan_message(
+        "Draft intro\n",
+        "First draft step",
+        "first draft detail",
+        "",
+    );
+    let revised_plan = plan_message(
+        "Revised intro\n",
+        "Revised step",
+        "revised detail",
+        "\nRevised outro",
+    );
+    let review_json = r#"{"decision":"revise","rationale":"needs a stronger implementation step"}"#;
+    let response_mock = mount_sse_sequence(
+        server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_message_item_added("msg-1", ""),
+                ev_output_text_delta(&first_plan),
+                ev_assistant_message("msg-1", &first_plan),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-review", review_json),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_message_item_added("msg-2", ""),
+                ev_output_text_delta(&revised_plan),
+                ev_assistant_message("msg-2", &revised_plan),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+
+    submit_plan_turn(&codex, model, "please plan").await?;
+
+    let outcome = collect_hidden_plan_review_outcome(&codex).await;
+
+    assert_eq!(outcome.collab_events, 0);
+    assert_eq!(
+        outcome.plan_item.expect("plan item").text,
+        "\
+# Plan
+
+- [in_progress] Revised step (`codex-rs/core/src/codex.rs`) - revised detail
+"
+    );
+    let agent_texts = outcome
+        .agent_items
+        .iter()
+        .map(|item| {
+            item.content
+                .iter()
+                .map(|entry| match entry {
+                    AgentMessageContent::Text { text } => text.as_str(),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_texts,
+        vec![
+            "Review found gaps to strengthen: needs a stronger implementation step\nRevising the plan now."
+                .to_string(),
+            "Revised intro\n\nRevised outro".to_string()
+        ]
+    );
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let final_request = requests.last().expect("final request");
+    assert!(
+        final_request
+            .message_input_texts("developer")
+            .iter()
+            .any(|text| {
+                text.contains("needs a stronger implementation step")
+                    && text.contains("<previous_draft>")
+                    && text.contains("First draft step")
+            })
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plan_mode_review_shows_visible_fallback_message_when_review_is_unavailable()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::PlanModeSubagentReview)
+            .expect("feature should enable in test");
+    }))
+    .await?;
+    let server = harness.server();
+    let codex = harness.test().codex.clone();
+    let model = harness.test().session_configured.model.clone();
+
+    let first_plan = plan_message(
+        "Fallback intro\n",
+        "Fallback step",
+        "fallback detail",
+        "\nFallback outro",
+    );
+    mount_sse_sequence(
+        server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_message_item_added("msg-1", ""),
+                ev_output_text_delta(&first_plan),
+                ev_assistant_message("msg-1", &first_plan),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-review", "not valid json"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    submit_plan_turn(&codex, model, "please plan").await?;
+
+    let outcome = collect_hidden_plan_review_outcome(&codex).await;
+
+    assert_eq!(outcome.collab_events, 0);
+    assert_eq!(
+        outcome.plan_item.expect("plan item").text,
+        "\
+# Plan
+
+- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+"
+    );
+    let agent_texts = outcome
+        .agent_items
+        .iter()
+        .map(|item| {
+            item.content
+                .iter()
+                .map(|entry| match entry {
+                    AgentMessageContent::Text { text } => text.as_str(),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_texts,
+        vec![
+            "Review failed: failed to parse review verdict: plan review verdict was not valid JSON\nProceeding with the current plan."
+                .to_string(),
+            "Fallback intro\n\nFallback outro".to_string()
+        ]
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plan_mode_review_stalled_reviewer_does_not_surface_internal_agent_died()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::PlanModeSubagentReview)
+            .expect("feature should enable in test");
+    }))
+    .await?;
+    let server = harness.server();
+    let codex = harness.test().codex.clone();
+    let model = harness.test().session_configured.model.clone();
+
+    let first_plan = plan_message(
+        "Fallback intro\n",
+        "Fallback step",
+        "fallback detail",
+        "\nFallback outro",
+    );
+    mount_sse_sequence(
+        server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_message_item_added("msg-1", ""),
+                ev_output_text_delta(&first_plan),
+                ev_assistant_message("msg-1", &first_plan),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![ev_response_created("resp-2")]),
+        ],
+    )
+    .await;
+
+    submit_plan_turn(&codex, model, "please plan").await?;
+
+    let outcome = collect_hidden_plan_review_outcome(&codex).await;
+
+    assert_eq!(outcome.collab_events, 0);
+    assert_eq!(
+        outcome.plan_item.expect("plan item").text,
+        "\
+# Plan
+
+- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+"
+    );
+    let agent_texts = outcome
+        .agent_items
+        .iter()
+        .map(|item| {
+            item.content
+                .iter()
+                .map(|entry| match entry {
+                    AgentMessageContent::Text { text } => text.as_str(),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(agent_texts.len(), 2);
+    assert!(
+        agent_texts[0].contains("Review failed: reviewer stalled without finishing"),
+        "unexpected fallback review message: {}",
+        agent_texts[0]
+    );
+    assert!(
+        !agent_texts[0].contains("failed to drain stalled reviewer"),
+        "should not surface drain failure: {}",
+        agent_texts[0]
+    );
+    assert!(
+        !agent_texts[0].contains("agent loop died unexpectedly"),
+        "should not surface internal agent death: {}",
+        agent_texts[0]
+    );
+    assert_eq!(
+        agent_texts[1],
+        "Fallback intro\n\nFallback outro".to_string()
+    );
 
     Ok(())
 }
