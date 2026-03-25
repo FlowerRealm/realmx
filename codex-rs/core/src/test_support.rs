@@ -42,6 +42,15 @@ pub fn set_deterministic_process_ids(enabled: bool) {
     unified_exec::set_deterministic_process_ids_for_tests(enabled);
 }
 
+pub fn install_mock_secrets_keyring_for_tests(
+    codex_home: PathBuf,
+) -> codex_secrets::test_support::TestKeyringStoreGuard {
+    codex_secrets::test_support::set_test_keyring_store(
+        codex_home,
+        Arc::new(codex_keyring_store::tests::MockKeyringStore::default()),
+    )
+}
+
 pub fn auth_manager_from_auth(auth: CodexAuth) -> Arc<AuthManager> {
     AuthManager::from_auth_for_testing(auth)
 }

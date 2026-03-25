@@ -13,6 +13,10 @@ use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::key_hint;
+use crate::provider_edit::ProviderFieldValue;
+use crate::provider_edit::provider_field_groups;
+use crate::provider_edit::provider_field_placeholder as provider_edit_placeholder;
+use crate::provider_edit::provider_field_value;
 use crate::provider_flow::ProviderDetailRuntimeState;
 use crate::provider_flow::ProviderDraft;
 use crate::provider_flow::ProviderField;
@@ -28,6 +32,10 @@ pub(crate) const PROVIDER_ROOT_VIEW_ID: &str = "provider.root";
 pub(crate) const PROVIDER_DETAIL_VIEW_ID: &str = "provider.detail";
 pub(crate) const PROVIDER_SCOPE_VIEW_ID: &str = "provider.scope";
 const CLEAR_SENTINEL: &str = "CLEAR";
+
+pub(crate) fn provider_clear_sentinel() -> &'static str {
+    CLEAR_SENTINEL
+}
 
 pub(crate) fn build_provider_view_params(
     config: &Config,
@@ -275,30 +283,16 @@ fn build_provider_detail_view_params(
         active_profile,
     )];
     items.push(default_provider_action_item(row, source, scope));
-    items.push(provider_field_item(
-        row,
-        &location,
-        ProviderField::Id,
-        runtime_state.has_secure_api_key,
-    ));
-    items.push(provider_field_item(
-        row,
-        &location,
-        ProviderField::Name,
-        runtime_state.has_secure_api_key,
-    ));
-    items.push(provider_field_item(
-        row,
-        &location,
-        ProviderField::BaseUrl,
-        runtime_state.has_secure_api_key,
-    ));
-    items.push(provider_field_item(
-        row,
-        &location,
-        ProviderField::ApiKey,
-        runtime_state.has_secure_api_key,
-    ));
+    for group in provider_field_groups() {
+        for field in *group {
+            items.push(provider_field_item(
+                row,
+                &location,
+                *field,
+                runtime_state.has_secure_api_key,
+            ));
+        }
+    }
     items.push(provider_usage_item(
         row,
         &location,
@@ -343,13 +337,10 @@ fn build_provider_create_view_params(
         ProviderScreen::Create,
         active_profile,
     )];
-    for field in [
-        ProviderField::Id,
-        ProviderField::Name,
-        ProviderField::BaseUrl,
-        ProviderField::ApiKey,
-    ] {
-        items.push(create_draft_field_item(data, &location, field));
+    for group in provider_field_groups() {
+        for field in *group {
+            items.push(create_draft_field_item(data, &location, *field));
+        }
     }
     items.push(save_create_item(source, scope));
 
@@ -362,7 +353,7 @@ fn build_provider_create_view_params(
         ),
         footer_note: Some(
             Line::from(
-                "Leave API key blank to keep this provider unauthenticated for now. Type CLEAR later to remove a saved key."
+                "New providers default to wire_api = \"responses\" and requires_openai_auth = true. Hidden values open blank for safety, and typing CLEAR removes an existing secret."
                     .to_string(),
             )
             .dim(),
@@ -707,36 +698,24 @@ fn provider_field_description(
     field: ProviderField,
     has_secure_api_key: bool,
 ) -> (String, Option<String>) {
-    match field {
-        ProviderField::Id => {
-            let description = format!("Current: {}", row.id);
-            let disabled_reason =
-                Some("Provider IDs are stable references. Create a new provider instead of renaming one in place.".to_string());
-            (description, disabled_reason)
-        }
-        ProviderField::Name => (
-            format!("Current: {}", row.provider.name),
-            row.is_builtin
-                .then_some("Built-in providers cannot be edited. Create a custom provider instead.".to_string()),
-        ),
-        ProviderField::BaseUrl => (
-            format!(
-                "Current: {}",
-                row.provider.base_url.as_deref().unwrap_or("<unset>")
-            ),
-            row.is_builtin
-                .then_some("Built-in providers cannot be edited. Create a custom provider instead.".to_string()),
-        ),
-        ProviderField::ApiKey => (
-            if has_secure_api_key {
-                "A secure API key is already stored for this provider.".to_string()
+    let value = provider_field_value(&row.id, &row.provider, field, has_secure_api_key);
+    let description = match value {
+        ProviderFieldValue::Visible(value) => {
+            if value.trim().is_empty() {
+                "Current: <unset>".to_string()
             } else {
-                "No secure API key is stored for this provider.".to_string()
-            },
-            row.is_builtin
-                .then_some("Built-in providers use their built-in auth flow and do not support editing API keys here.".to_string()),
-        ),
-    }
+                format!("Current: {value}")
+            }
+        }
+        ProviderFieldValue::Hidden { current_status, .. } => current_status,
+    };
+    let disabled_reason = row.is_builtin.then(|| match field {
+        ProviderField::ApiKey => {
+            "Built-in providers use their built-in auth flow and do not support editing API keys here.".to_string()
+        }
+        _ => "Built-in providers cannot be edited. Create a custom provider instead.".to_string(),
+    });
+    (description, disabled_reason)
 }
 
 fn selected_provider_field_description(
@@ -745,7 +724,7 @@ fn selected_provider_field_description(
 ) -> Option<String> {
     Some(match field {
         ProviderField::Id => {
-            "Provider IDs are stable references. To change one safely, create a new provider and switch defaults."
+            "Edit the provider ID. Renaming will migrate secure credentials and update saved default-provider references."
                 .to_string()
         }
         ProviderField::Name => "Edit the human-readable provider name stored in config.toml.".to_string(),
@@ -758,17 +737,39 @@ fn selected_provider_field_description(
             }
             text
         }
+        ProviderField::WireApi => "Edit the wire_api value stored in config.toml.".to_string(),
+        ProviderField::RequiresOpenAiAuth => {
+            "Edit whether this provider requires OpenAI auth to be available.".to_string()
+        }
+        ProviderField::AuthStrategy => "Edit the explicit auth_strategy stored in config.toml.".to_string(),
+        ProviderField::OAuth => "Edit the oauth TOML object stored in config.toml.".to_string(),
+        ProviderField::EnvKey => "Edit the environment variable name used to load an API key.".to_string(),
+        ProviderField::EnvKeyInstructions => {
+            "Edit the help text shown when the environment variable is missing.".to_string()
+        }
+        ProviderField::ExperimentalBearerToken => {
+            "Edit the inline bearer token stored in config.toml. Leave blank to keep it, or type CLEAR to remove it.".to_string()
+        }
+        ProviderField::QueryParams => "Edit the query_params TOML map.".to_string(),
+        ProviderField::HttpHeaders => "Edit the http_headers TOML map.".to_string(),
+        ProviderField::EnvHttpHeaders => "Edit the env_http_headers TOML map.".to_string(),
+        ProviderField::RequestMaxRetries => "Edit the maximum number of request retries.".to_string(),
+        ProviderField::StreamMaxRetries => "Edit the maximum number of stream retries.".to_string(),
+        ProviderField::StreamIdleTimeoutMs => "Edit the stream idle timeout in milliseconds.".to_string(),
+        ProviderField::SupportsWebsockets => {
+            "Edit whether this provider can use the Responses API websocket transport.".to_string()
+        }
     })
 }
 
 fn create_field_description(data: &ProviderFlowData, field: ProviderField) -> String {
     let value = data.create_field_value(field).trim();
     match field {
-        ProviderField::ApiKey => {
+        ProviderField::ApiKey | ProviderField::ExperimentalBearerToken => {
             if value.is_empty() {
-                "No API key will be stored yet.".to_string()
+                format!("No {} will be stored yet.", field.label())
             } else {
-                "A secure API key will be stored outside config.toml.".to_string()
+                format!("A value will be stored for {}.", field.label())
             }
         }
         _ => {
@@ -790,6 +791,36 @@ fn create_field_selected_description(field: ProviderField) -> String {
             "Optionally store a secure API key outside config.toml while creating this provider."
                 .to_string()
         }
+        ProviderField::WireApi => {
+            "Defaults to responses. Leave it as-is unless you have a provider-specific reason to change it."
+                .to_string()
+        }
+        ProviderField::RequiresOpenAiAuth => {
+            "Defaults to true for new providers. Enter false if this provider should not use OpenAI auth."
+                .to_string()
+        }
+        ProviderField::AuthStrategy => {
+            "Optional explicit auth strategy. Leave blank to keep the provider definition minimal."
+                .to_string()
+        }
+        ProviderField::OAuth => "Optional TOML object for oauth configuration.".to_string(),
+        ProviderField::EnvKey => "Optional environment variable name for API key lookup.".to_string(),
+        ProviderField::EnvKeyInstructions => {
+            "Optional user-facing help for obtaining or setting the env var.".to_string()
+        }
+        ProviderField::ExperimentalBearerToken => {
+            "Optional inline bearer token. This is stored in config.toml, so leave it blank unless you explicitly want that."
+                .to_string()
+        }
+        ProviderField::QueryParams => "Optional TOML map of query parameters.".to_string(),
+        ProviderField::HttpHeaders => "Optional TOML map of static HTTP headers.".to_string(),
+        ProviderField::EnvHttpHeaders => {
+            "Optional TOML map of header names to environment variable names.".to_string()
+        }
+        ProviderField::RequestMaxRetries => "Optional request retry count.".to_string(),
+        ProviderField::StreamMaxRetries => "Optional stream retry count.".to_string(),
+        ProviderField::StreamIdleTimeoutMs => "Optional stream idle timeout in milliseconds.".to_string(),
+        ProviderField::SupportsWebsockets => "Optional websocket support flag.".to_string(),
     }
 }
 
@@ -803,11 +834,14 @@ fn provider_field_initial_text(
         Some(provider_id) => config
             .model_providers
             .get(provider_id)
-            .map(|provider| match field {
-                ProviderField::Id => provider_id.to_string(),
-                ProviderField::Name => provider.name.clone(),
-                ProviderField::BaseUrl => provider.base_url.clone().unwrap_or_default(),
-                ProviderField::ApiKey => String::new(),
+            .map(|provider| {
+                provider_field_value(
+                    provider_id,
+                    provider,
+                    field,
+                    provider.inline_api_key().is_some(),
+                )
+                .initial_text()
             })
             .unwrap_or_else(|| {
                 if field == ProviderField::Id {
@@ -821,13 +855,26 @@ fn provider_field_initial_text(
 }
 
 fn provider_field_placeholder(field: ProviderField) -> String {
-    match field {
-        ProviderField::Id => "Provider ID editing is disabled.".to_string(),
-        ProviderField::Name => "Enter a display name.".to_string(),
-        ProviderField::BaseUrl => "Enter the provider base URL.".to_string(),
-        ProviderField::ApiKey => format!(
-            "Enter an API key, leave blank to keep the current value, or type {CLEAR_SENTINEL} to remove it."
-        ),
+    let value = match field {
+        ProviderField::ApiKey => Some(provider_field_value(
+            "",
+            &crate::provider_edit::default_create_provider(),
+            field,
+            false,
+        )),
+        ProviderField::ExperimentalBearerToken => Some(provider_field_value(
+            "",
+            &crate::provider_edit::default_create_provider(),
+            field,
+            false,
+        )),
+        _ => None,
+    };
+
+    if let Some(ProviderFieldValue::Hidden { placeholder, .. }) = value {
+        placeholder
+    } else {
+        provider_edit_placeholder(field)
     }
 }
 
@@ -1009,6 +1056,23 @@ model_provider = "acme"
     }
 
     #[tokio::test]
+    async fn provider_create_snapshot_lists_defaults_and_advanced_fields() {
+        let config = provider_test_config(Some("dev")).await;
+        let params = build_provider_view_params(
+            &config,
+            &ProviderDraft::new(),
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::ActiveProfile,
+            &ProviderScreen::Create,
+        );
+
+        assert_snapshot!(
+            "provider_create_profile",
+            provider_view_focus_summary(&params)
+        );
+    }
+
+    #[tokio::test]
     async fn provider_root_footer_note_mentions_e_shortcut() {
         let config = provider_test_config(Some("dev")).await;
         let params = build_provider_view_params(
@@ -1029,7 +1093,7 @@ model_provider = "acme"
     }
 
     #[tokio::test]
-    async fn provider_detail_snapshot_disables_id_editing() {
+    async fn provider_detail_snapshot_lists_all_provider_fields() {
         let config = provider_test_config(Some("dev")).await;
         let params = build_provider_view_params(
             &config,
@@ -1104,6 +1168,24 @@ model_provider = "acme"
             ),
             "https://acme.example/v1"
         );
+        assert_eq!(
+            provider_field_initial_text(
+                &config,
+                &ProviderDraft::new(),
+                Some("acme"),
+                ProviderField::WireApi,
+            ),
+            "responses"
+        );
+        assert_eq!(
+            provider_field_initial_text(
+                &config,
+                &ProviderDraft::new(),
+                Some("acme"),
+                ProviderField::RequiresOpenAiAuth,
+            ),
+            "false"
+        );
     }
 
     #[tokio::test]
@@ -1123,6 +1205,18 @@ model_provider = "acme"
         assert_eq!(
             provider_field_initial_text(&config, &draft, None, ProviderField::BaseUrl),
             "https://draft.example/v1"
+        );
+        assert_eq!(
+            provider_field_initial_text(&config, &draft, None, ProviderField::WireApi),
+            "responses"
+        );
+        assert_eq!(
+            provider_field_initial_text(&config, &draft, None, ProviderField::RequiresOpenAiAuth,),
+            "true"
+        );
+        assert_eq!(
+            provider_field_initial_text(&config, &draft, None, ProviderField::SupportsWebsockets),
+            ""
         );
     }
 

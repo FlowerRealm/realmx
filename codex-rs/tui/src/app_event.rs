@@ -73,13 +73,6 @@ pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
 }
 
-#[derive(Debug)]
-pub(crate) enum ProviderApiKeyInput {
-    KeepExisting,
-    Set(String),
-    Clear,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {

@@ -108,6 +108,7 @@ mod notifications;
 pub mod onboarding;
 mod oss_selection;
 mod pager_overlay;
+mod provider_edit;
 mod provider_flow;
 mod provider_flow_view;
 mod provider_usage;

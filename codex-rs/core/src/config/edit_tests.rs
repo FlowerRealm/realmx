@@ -1,4 +1,8 @@
 use super::*;
+use crate::ModelProviderAuthStrategy;
+use crate::ModelProviderInfo;
+use crate::ModelProviderOAuthConfig;
+use crate::WireApi;
 use crate::config::types::McpServerTransportConfig;
 use codex_protocol::openai_models::ReasoningEffort;
 use pretty_assertions::assert_eq;
@@ -963,6 +967,104 @@ fn blocking_builder_set_realtime_audio_persists_and_clears() {
         realtime_audio.get("speaker").and_then(TomlValue::as_str),
         Some("Desk Speakers")
     );
+}
+
+#[test]
+fn set_model_provider_omits_untouched_defaults() {
+    let tmp = tempdir().expect("tmpdir");
+    let codex_home = tmp.path();
+
+    ConfigEditsBuilder::new(codex_home)
+        .set_model_provider(
+            "acme",
+            &ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
+        )
+        .apply_blocking()
+        .expect("persist provider");
+
+    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+    let expected = r#"[model_providers.acme]
+name = "Acme"
+base_url = "https://acme.example/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#;
+    assert_eq!(contents, expected);
+}
+
+#[test]
+fn set_model_provider_persists_advanced_values() {
+    let tmp = tempdir().expect("tmpdir");
+    let codex_home = tmp.path();
+
+    ConfigEditsBuilder::new(codex_home)
+        .set_model_provider(
+            "acme",
+            &ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: ModelProviderAuthStrategy::OAuthOrApiKey,
+                oauth: Some(ModelProviderOAuthConfig {
+                    url: Some("https://acme.example/oauth".to_string()),
+                    scopes: Some(vec!["model.read".to_string()]),
+                    oauth_resource: Some("https://acme.example/resource".to_string()),
+                }),
+                api_key: Some("should-not-persist".to_string()),
+                env_key: Some("ACME_API_KEY".to_string()),
+                env_key_instructions: Some("Set ACME_API_KEY".to_string()),
+                experimental_bearer_token: Some("inline-token".to_string()),
+                wire_api: WireApi::Responses,
+                query_params: Some(HashMap::from([(
+                    "api-version".to_string(),
+                    "2025-04-01-preview".to_string(),
+                )])),
+                http_headers: Some(HashMap::from([("X-Trace".to_string(), "1".to_string())])),
+                env_http_headers: Some(HashMap::from([(
+                    "Authorization".to_string(),
+                    "ACME_AUTH_HEADER".to_string(),
+                )])),
+                request_max_retries: Some(4),
+                stream_max_retries: Some(8),
+                stream_idle_timeout_ms: Some(30_000),
+                requires_openai_auth: true,
+                supports_websockets: true,
+            },
+        )
+        .apply_blocking()
+        .expect("persist provider");
+
+    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+    assert!(contents.contains("auth_strategy = \"oauth_or_api_key\""));
+    assert!(contents.contains("env_key = \"ACME_API_KEY\""));
+    assert!(contents.contains("env_key_instructions = \"Set ACME_API_KEY\""));
+    assert!(contents.contains("experimental_bearer_token = \"inline-token\""));
+    assert!(contents.contains("requires_openai_auth = true"));
+    assert!(contents.contains("supports_websockets = true"));
+    assert!(contents.contains("request_max_retries = 4"));
+    assert!(contents.contains("stream_max_retries = 8"));
+    assert!(contents.contains("stream_idle_timeout_ms = 30000"));
+    assert!(contents.contains("api-version = \"2025-04-01-preview\""));
+    assert!(contents.contains("X-Trace = \"1\""));
+    assert!(contents.contains("Authorization = \"ACME_AUTH_HEADER\""));
+    assert!(!contents.contains("should-not-persist"));
 }
 
 #[test]

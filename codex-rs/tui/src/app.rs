@@ -1,7 +1,6 @@
 use crate::app_backtrack::BacktrackState;
 use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
-use crate::app_event::ProviderApiKeyInput;
 use crate::app_event::RealtimeAudioDeviceKind;
 #[cfg(target_os = "windows")]
 use crate::app_event::WindowsSandboxEnableMode;
@@ -32,6 +31,11 @@ use crate::multi_agents::format_agent_picker_item_name;
 use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
 use crate::pager_overlay::Overlay;
+use crate::provider_edit::ProviderCreateSubmission;
+use crate::provider_edit::ProviderEditSubmission;
+use crate::provider_edit::ProviderSecretInput;
+use crate::provider_edit::parse_create_draft;
+use crate::provider_edit::parse_edit_submission;
 use crate::provider_flow::ProviderField;
 use crate::provider_flow::ProviderFlowData;
 use crate::provider_flow::ProviderFlowLocation;
@@ -129,6 +133,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
+use toml_edit::Item as TomlItem;
 #[cfg(test)]
 use wiremock::MockServer;
 
@@ -1009,32 +1014,17 @@ impl App {
         scope: SettingsScope,
     ) -> Result<()> {
         let draft = self.chat_widget.provider_create_draft().clone();
-        let provider_id = draft.id.trim().to_string();
+        let ProviderCreateSubmission {
+            id: provider_id,
+            provider,
+            api_key_input,
+        } = parse_create_draft(&draft).map_err(color_eyre::eyre::Error::msg)?;
         let data = ProviderFlowData::from_config(
             &self.config,
             scope.normalized(self.active_profile.as_deref()),
         );
         validate_provider_id(&provider_id, &data.rows, None)
             .map_err(|err| color_eyre::eyre::eyre!(err))?;
-        if draft.name.trim().is_empty() {
-            return Err(color_eyre::eyre::eyre!("Display name is required."));
-        }
-        if draft.base_url.trim().is_empty() {
-            return Err(color_eyre::eyre::eyre!("Base URL is required."));
-        }
-
-        let provider = draft.to_provider();
-        let api_key_input = {
-            let api_key = draft.api_key.trim();
-            if api_key.eq_ignore_ascii_case("CLEAR") {
-                ProviderApiKeyInput::Clear
-            } else if !api_key.is_empty() {
-                ProviderApiKeyInput::Set(api_key.to_string())
-            } else {
-                ProviderApiKeyInput::KeepExisting
-            }
-        };
-
         self.persist_model_provider(None, provider_id.clone(), provider, api_key_input)
             .await?;
         self.chat_widget.clear_provider_create_draft();
@@ -1060,76 +1050,36 @@ impl App {
                 "Provider `{provider_id}` not found."
             ));
         };
-
-        match field {
-            ProviderField::ApiKey => {
-                let api_key_input = {
-                    let api_key = value.trim();
-                    if api_key.eq_ignore_ascii_case("CLEAR") {
-                        ProviderApiKeyInput::Clear
-                    } else if !api_key.is_empty() {
-                        ProviderApiKeyInput::Set(api_key.to_string())
-                    } else {
-                        ProviderApiKeyInput::KeepExisting
-                    }
-                };
-                self.persist_model_provider(
-                    Some(provider_id.clone()),
-                    provider_id.clone(),
-                    row.provider.clone(),
-                    api_key_input,
-                )
-                .await?;
-                self.open_provider_flow_after_refresh(
-                    location.source,
-                    location.scope.normalized(self.active_profile.as_deref()),
-                    ProviderScreen::Detail { provider_id },
-                )
-                .await?;
-            }
-            ProviderField::Id => {
-                let _ = (row, value);
-                return Err(color_eyre::eyre::eyre!(
-                    "Provider IDs are stable references. Create a new provider instead of renaming one in place."
-                ));
-            }
-            ProviderField::Name | ProviderField::BaseUrl => {
-                if row.is_builtin {
-                    return Err(color_eyre::eyre::eyre!(
-                        "Built-in providers cannot be edited. Create a custom provider instead."
-                    ));
-                }
-                let mut provider = row.provider.clone();
-                match field {
-                    ProviderField::Name => {
-                        if value.trim().is_empty() {
-                            return Err(color_eyre::eyre::eyre!("Display name is required."));
-                        }
-                        provider.name = value.trim().to_string();
-                    }
-                    ProviderField::BaseUrl => {
-                        if value.trim().is_empty() {
-                            return Err(color_eyre::eyre::eyre!("Base URL is required."));
-                        }
-                        provider.base_url = Some(value.trim().to_string());
-                    }
-                    ProviderField::Id | ProviderField::ApiKey => unreachable!(),
-                }
-                self.persist_model_provider(
-                    Some(provider_id.clone()),
-                    provider_id.clone(),
-                    provider,
-                    ProviderApiKeyInput::KeepExisting,
-                )
-                .await?;
-                self.open_provider_flow_after_refresh(
-                    location.source,
-                    location.scope.normalized(self.active_profile.as_deref()),
-                    ProviderScreen::Detail { provider_id },
-                )
-                .await?;
-            }
+        if row.is_builtin {
+            return Err(color_eyre::eyre::eyre!(
+                "Built-in providers cannot be edited. Create a custom provider instead."
+            ));
         }
+
+        let ProviderEditSubmission {
+            id,
+            provider,
+            api_key_input,
+        } = parse_edit_submission(&provider_id, &row.provider, field, &value)
+            .map_err(color_eyre::eyre::Error::msg)?;
+        validate_provider_id(&id, &data.rows, Some(&provider_id))
+            .map_err(|err| color_eyre::eyre::eyre!(err))?;
+        let next_provider_id = id.clone();
+        self.persist_model_provider(
+            Some(provider_id.clone()),
+            id,
+            provider,
+            api_key_input.unwrap_or(ProviderSecretInput::KeepExisting),
+        )
+        .await?;
+        self.open_provider_flow_after_refresh(
+            location.source,
+            location.scope.normalized(self.active_profile.as_deref()),
+            ProviderScreen::Detail {
+                provider_id: next_provider_id,
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -1138,22 +1088,28 @@ impl App {
         original_id: Option<String>,
         id: String,
         provider: codex_core::ModelProviderInfo,
-        api_key_input: ProviderApiKeyInput,
+        api_key_input: ProviderSecretInput,
     ) -> Result<()> {
-        let mut builder =
-            ConfigEditsBuilder::new(&self.config.codex_home).set_model_provider(&id, &provider);
+        let mut edits = vec![ConfigEdit::SetModelProvider {
+            id: id.clone(),
+            provider: provider.clone(),
+        }];
         if let Some(original_id) = original_id.as_deref()
             && original_id != id
         {
-            builder = builder.remove_model_provider(original_id);
+            edits.push(ConfigEdit::RemoveModelProvider {
+                id: original_id.to_string(),
+            });
+            edits.extend(self.provider_reference_update_edits(original_id, &id));
         }
-        builder
+        ConfigEditsBuilder::new(&self.config.codex_home)
+            .with_edits(edits)
             .apply()
             .await
             .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
 
         match api_key_input {
-            ProviderApiKeyInput::KeepExisting => {
+            ProviderSecretInput::KeepExisting => {
                 if let Some(original_id) = original_id
                     .as_deref()
                     .filter(|original_id| *original_id != id)
@@ -1175,7 +1131,7 @@ impl App {
                     }
                 }
             }
-            ProviderApiKeyInput::Set(api_key) => {
+            ProviderSecretInput::Set(api_key) => {
                 codex_core::activate_provider_api_key(
                     &self.config.codex_home,
                     &id,
@@ -1183,17 +1139,87 @@ impl App {
                     self.config.mcp_oauth_credentials_store_mode,
                     &api_key,
                 )?;
+                if let Some(original_id) = original_id
+                    .as_deref()
+                    .filter(|original_id| *original_id != id)
+                {
+                    codex_core::clear_provider_credentials(
+                        &self.config.codex_home,
+                        original_id,
+                        &provider,
+                        self.config.mcp_oauth_credentials_store_mode,
+                    )?;
+                }
             }
-            ProviderApiKeyInput::Clear => {
+            ProviderSecretInput::Clear => {
                 codex_core::clear_provider_credentials(
                     &self.config.codex_home,
                     &id,
                     &provider,
                     self.config.mcp_oauth_credentials_store_mode,
                 )?;
+                if let Some(original_id) = original_id
+                    .as_deref()
+                    .filter(|original_id| *original_id != id)
+                {
+                    codex_core::clear_provider_credentials(
+                        &self.config.codex_home,
+                        original_id,
+                        &provider,
+                        self.config.mcp_oauth_credentials_store_mode,
+                    )?;
+                }
             }
         }
         Ok(())
+    }
+
+    fn provider_reference_update_edits(&self, original_id: &str, new_id: &str) -> Vec<ConfigEdit> {
+        let mut edits = Vec::new();
+        let Some(user_config) = self
+            .config
+            .config_layer_stack
+            .get_user_layer()
+            .map(|layer| &layer.config)
+        else {
+            return edits;
+        };
+
+        if user_config
+            .get("model_provider")
+            .and_then(TomlValue::as_str)
+            == Some(original_id)
+        {
+            let value = TomlItem::Value(toml_edit::Value::from(new_id));
+            edits.push(ConfigEdit::SetPath {
+                segments: vec!["model_provider".to_string()],
+                value,
+            });
+        }
+
+        let Some(profiles) = user_config.get("profiles").and_then(TomlValue::as_table) else {
+            return edits;
+        };
+
+        for (profile, profile_value) in profiles {
+            if profile_value
+                .as_table()
+                .and_then(|profile| profile.get("model_provider"))
+                .and_then(TomlValue::as_str)
+                == Some(original_id)
+            {
+                let value = TomlItem::Value(toml_edit::Value::from(new_id));
+                edits.push(ConfigEdit::SetPath {
+                    segments: vec![
+                        "profiles".to_string(),
+                        profile.to_string(),
+                        "model_provider".to_string(),
+                    ],
+                    value,
+                });
+            }
+        }
+        edits
     }
 
     fn settings_segments(&self, key_path: &str, scope: SettingsScope) -> Result<Vec<String>> {
@@ -5067,6 +5093,7 @@ mod tests {
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use ratatui::prelude::Line;
+    use serial_test::serial;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -7939,6 +7966,180 @@ guardian_approval = true
         assert!(after.contains("Provider"));
         assert!(!after.contains("Provider / openrouter"));
         assert!(after.contains("openrouter"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_provider_create_draft_persists_requested_defaults() -> Result<()> {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_config(app.config.clone());
+
+        app.chat_widget
+            .update_provider_create_draft(ProviderField::Id, "acme".to_string());
+        app.chat_widget
+            .update_provider_create_draft(ProviderField::Name, "Acme".to_string());
+        app.chat_widget.update_provider_create_draft(
+            ProviderField::BaseUrl,
+            "https://acme.example/v1".to_string(),
+        );
+
+        app.save_provider_create_draft(ProviderFlowSource::SlashCommand, SettingsScope::Global)
+            .await?;
+
+        let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+        assert!(config.contains("[model_providers.acme]"));
+        assert!(config.contains("wire_api = \"responses\""));
+        assert!(config.contains("requires_openai_auth = true"));
+        assert!(!config.contains("auth_strategy"));
+        assert!(!config.contains("supports_websockets"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn persist_model_provider_rename_updates_user_references_and_moves_secure_key()
+    -> Result<()> {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        let _keyring_guard = codex_core::test_support::install_mock_secrets_keyring_for_tests(
+            codex_home.path().to_path_buf(),
+        );
+
+        let user_config = toml::from_str::<TomlValue>(
+            r#"
+model_provider = "acme"
+
+[model_providers.acme]
+name = "Acme"
+base_url = "https://acme.example/v1"
+wire_api = "responses"
+
+[profiles.dev]
+model_provider = "acme"
+"#,
+        )?;
+        let config_toml_path = codex_home.path().join("config.toml");
+        let config_toml_path =
+            codex_utils_absolute_path::AbsolutePathBuf::try_from(config_toml_path)?;
+        app.config.config_layer_stack = app
+            .config
+            .config_layer_stack
+            .with_user_config(&config_toml_path, user_config);
+        app.config.model_providers.insert(
+            "acme".to_string(),
+            codex_core::ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: codex_core::WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
+        );
+        codex_core::store_provider_api_key(codex_home.path(), "acme", "secret-key")?;
+        app.chat_widget.set_config(app.config.clone());
+
+        let provider = app
+            .config
+            .model_providers
+            .get("acme")
+            .expect("provider")
+            .clone();
+        app.persist_model_provider(
+            Some("acme".to_string()),
+            "acme-renamed".to_string(),
+            provider,
+            ProviderSecretInput::KeepExisting,
+        )
+        .await?;
+
+        let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+        assert!(config.contains("model_provider = \"acme-renamed\""));
+        assert!(config.contains("[profiles.dev]"));
+        assert!(config.contains("[model_providers.acme-renamed]"));
+        assert!(!config.contains("[model_providers.acme]"));
+        assert_eq!(
+            codex_core::read_provider_api_key(codex_home.path(), "acme")?,
+            None
+        );
+        assert_eq!(
+            codex_core::read_provider_api_key(codex_home.path(), "acme-renamed")?,
+            Some("secret-key".to_string())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn persist_model_provider_rename_replaces_secure_key_without_leaving_old_secret()
+    -> Result<()> {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        let _keyring_guard = codex_core::test_support::install_mock_secrets_keyring_for_tests(
+            codex_home.path().to_path_buf(),
+        );
+
+        app.config.model_providers.insert(
+            "acme".to_string(),
+            codex_core::ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: codex_core::WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
+        );
+        codex_core::store_provider_api_key(codex_home.path(), "acme", "old-secret")?;
+
+        let provider = app
+            .config
+            .model_providers
+            .get("acme")
+            .expect("provider")
+            .clone();
+        app.persist_model_provider(
+            Some("acme".to_string()),
+            "acme-renamed".to_string(),
+            provider,
+            ProviderSecretInput::Set("new-secret".to_string()),
+        )
+        .await?;
+
+        assert_eq!(
+            codex_core::read_provider_api_key(codex_home.path(), "acme")?,
+            None
+        );
+        assert_eq!(
+            codex_core::read_provider_api_key(codex_home.path(), "acme-renamed")?,
+            Some("new-secret".to_string())
+        );
         Ok(())
     }
 

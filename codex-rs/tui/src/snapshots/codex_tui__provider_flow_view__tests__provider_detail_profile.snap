@@ -1,6 +1,6 @@
 ---
 source: tui/src/provider_flow_view.rs
-assertion_line: 1005
+assertion_line: 1108
 expression: provider_view_focus_summary(&params)
 ---
 title: Provider / acme
@@ -21,11 +21,11 @@ item: Set current provider
   disabled_reason: 
 item: Provider ID
   current: false
-  disabled: true
-  selected_description: Provider IDs are stable references. To change one safely, create a new provider and switch defaults.
+  disabled: false
+  selected_description: Edit the provider ID. Renaming will migrate secure credentials and update saved default-provider references.
   shortcut: 
   description: Current: acme
-  disabled_reason: Provider IDs are stable references. Create a new provider instead of renaming one in place.
+  disabled_reason: 
 item: Display name
   current: false
   disabled: false
@@ -46,6 +46,104 @@ item: API key
   selected_description: Leave the field blank to keep the existing secure value. Type CLEAR to remove it.
   shortcut: 
   description: No secure API key is stored for this provider.
+  disabled_reason: 
+item: wire_api
+  current: false
+  disabled: false
+  selected_description: Edit the wire_api value stored in config.toml.
+  shortcut: 
+  description: Current: responses
+  disabled_reason: 
+item: requires_openai_auth
+  current: false
+  disabled: false
+  selected_description: Edit whether this provider requires OpenAI auth to be available.
+  shortcut: 
+  description: Current: false
+  disabled_reason: 
+item: auth_strategy
+  current: false
+  disabled: false
+  selected_description: Edit the explicit auth_strategy stored in config.toml.
+  shortcut: 
+  description: Current: openai
+  disabled_reason: 
+item: oauth
+  current: false
+  disabled: false
+  selected_description: Edit the oauth TOML object stored in config.toml.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: env_key
+  current: false
+  disabled: false
+  selected_description: Edit the environment variable name used to load an API key.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: env_key_instructions
+  current: false
+  disabled: false
+  selected_description: Edit the help text shown when the environment variable is missing.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: experimental_bearer_token
+  current: false
+  disabled: false
+  selected_description: Edit the inline bearer token stored in config.toml. Leave blank to keep it, or type CLEAR to remove it.
+  shortcut: 
+  description: No bearer token is currently saved.
+  disabled_reason: 
+item: query_params
+  current: false
+  disabled: false
+  selected_description: Edit the query_params TOML map.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: http_headers
+  current: false
+  disabled: false
+  selected_description: Edit the http_headers TOML map.
+  shortcut: 
+  description: Current: { version = "0.2.0" }
+  disabled_reason: 
+item: env_http_headers
+  current: false
+  disabled: false
+  selected_description: Edit the env_http_headers TOML map.
+  shortcut: 
+  description: Current: { OpenAI-Organization = "OPENAI_ORGANIZATION", OpenAI-Project = "OPENAI_PROJECT" }
+  disabled_reason: 
+item: request_max_retries
+  current: false
+  disabled: false
+  selected_description: Edit the maximum number of request retries.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: stream_max_retries
+  current: false
+  disabled: false
+  selected_description: Edit the maximum number of stream retries.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: stream_idle_timeout_ms
+  current: false
+  disabled: false
+  selected_description: Edit the stream idle timeout in milliseconds.
+  shortcut: 
+  description: Current: <unset>
+  disabled_reason: 
+item: supports_websockets
+  current: false
+  disabled: false
+  selected_description: Edit whether this provider can use the Responses API websocket transport.
+  shortcut: 
+  description: Current: true
   disabled_reason: 
 item: Usage script
   current: false

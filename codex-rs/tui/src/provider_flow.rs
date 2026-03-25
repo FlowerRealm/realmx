@@ -1,13 +1,12 @@
 use std::collections::HashSet;
 
-use codex_core::ModelProviderAuthStrategy;
 use codex_core::ModelProviderInfo;
 use codex_core::OPENAI_PROVIDER_ID;
-use codex_core::WireApi;
 use codex_core::built_in_model_providers;
 use codex_core::config::Config;
 use codex_core::read_provider_api_key;
 
+use crate::provider_edit::default_create_provider;
 use crate::settings::data::SettingsScope;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +21,20 @@ pub(crate) enum ProviderField {
     Name,
     BaseUrl,
     ApiKey,
+    WireApi,
+    RequiresOpenAiAuth,
+    AuthStrategy,
+    OAuth,
+    EnvKey,
+    EnvKeyInstructions,
+    ExperimentalBearerToken,
+    QueryParams,
+    HttpHeaders,
+    EnvHttpHeaders,
+    RequestMaxRetries,
+    StreamMaxRetries,
+    StreamIdleTimeoutMs,
+    SupportsWebsockets,
 }
 
 impl ProviderField {
@@ -31,6 +44,20 @@ impl ProviderField {
             Self::Name => "Display name",
             Self::BaseUrl => "Base URL",
             Self::ApiKey => "API key",
+            Self::WireApi => "wire_api",
+            Self::RequiresOpenAiAuth => "requires_openai_auth",
+            Self::AuthStrategy => "auth_strategy",
+            Self::OAuth => "oauth",
+            Self::EnvKey => "env_key",
+            Self::EnvKeyInstructions => "env_key_instructions",
+            Self::ExperimentalBearerToken => "experimental_bearer_token",
+            Self::QueryParams => "query_params",
+            Self::HttpHeaders => "http_headers",
+            Self::EnvHttpHeaders => "env_http_headers",
+            Self::RequestMaxRetries => "request_max_retries",
+            Self::StreamMaxRetries => "stream_max_retries",
+            Self::StreamIdleTimeoutMs => "stream_idle_timeout_ms",
+            Self::SupportsWebsockets => "supports_websockets",
         }
     }
 }
@@ -64,15 +91,44 @@ pub(crate) struct ProviderDraft {
     pub(crate) name: String,
     pub(crate) base_url: String,
     pub(crate) api_key: String,
+    pub(crate) wire_api: String,
+    pub(crate) requires_openai_auth: String,
+    pub(crate) auth_strategy: String,
+    pub(crate) oauth: String,
+    pub(crate) env_key: String,
+    pub(crate) env_key_instructions: String,
+    pub(crate) experimental_bearer_token: String,
+    pub(crate) query_params: String,
+    pub(crate) http_headers: String,
+    pub(crate) env_http_headers: String,
+    pub(crate) request_max_retries: String,
+    pub(crate) stream_max_retries: String,
+    pub(crate) stream_idle_timeout_ms: String,
+    pub(crate) supports_websockets: String,
 }
 
 impl ProviderDraft {
     pub(crate) fn new() -> Self {
+        let defaults = default_create_provider();
         Self {
             id: String::new(),
             name: String::new(),
             base_url: String::new(),
             api_key: String::new(),
+            wire_api: defaults.wire_api.to_string(),
+            requires_openai_auth: defaults.requires_openai_auth.to_string(),
+            auth_strategy: String::new(),
+            oauth: String::new(),
+            env_key: String::new(),
+            env_key_instructions: String::new(),
+            experimental_bearer_token: String::new(),
+            query_params: String::new(),
+            http_headers: String::new(),
+            env_http_headers: String::new(),
+            request_max_retries: String::new(),
+            stream_max_retries: String::new(),
+            stream_idle_timeout_ms: String::new(),
+            supports_websockets: String::new(),
         }
     }
 
@@ -82,6 +138,20 @@ impl ProviderDraft {
             ProviderField::Name => &self.name,
             ProviderField::BaseUrl => &self.base_url,
             ProviderField::ApiKey => &self.api_key,
+            ProviderField::WireApi => &self.wire_api,
+            ProviderField::RequiresOpenAiAuth => &self.requires_openai_auth,
+            ProviderField::AuthStrategy => &self.auth_strategy,
+            ProviderField::OAuth => &self.oauth,
+            ProviderField::EnvKey => &self.env_key,
+            ProviderField::EnvKeyInstructions => &self.env_key_instructions,
+            ProviderField::ExperimentalBearerToken => &self.experimental_bearer_token,
+            ProviderField::QueryParams => &self.query_params,
+            ProviderField::HttpHeaders => &self.http_headers,
+            ProviderField::EnvHttpHeaders => &self.env_http_headers,
+            ProviderField::RequestMaxRetries => &self.request_max_retries,
+            ProviderField::StreamMaxRetries => &self.stream_max_retries,
+            ProviderField::StreamIdleTimeoutMs => &self.stream_idle_timeout_ms,
+            ProviderField::SupportsWebsockets => &self.supports_websockets,
         }
     }
 
@@ -91,28 +161,20 @@ impl ProviderDraft {
             ProviderField::Name => self.name = value,
             ProviderField::BaseUrl => self.base_url = value,
             ProviderField::ApiKey => self.api_key = value,
-        }
-    }
-
-    pub(crate) fn to_provider(&self) -> ModelProviderInfo {
-        ModelProviderInfo {
-            name: self.name.trim().to_string(),
-            base_url: Some(self.base_url.trim().to_string()).filter(|value| !value.is_empty()),
-            auth_strategy: ModelProviderAuthStrategy::ApiKey,
-            oauth: None,
-            api_key: None,
-            env_key: None,
-            env_key_instructions: None,
-            experimental_bearer_token: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: None,
-            stream_max_retries: None,
-            stream_idle_timeout_ms: None,
-            requires_openai_auth: false,
-            supports_websockets: false,
+            ProviderField::WireApi => self.wire_api = value,
+            ProviderField::RequiresOpenAiAuth => self.requires_openai_auth = value,
+            ProviderField::AuthStrategy => self.auth_strategy = value,
+            ProviderField::OAuth => self.oauth = value,
+            ProviderField::EnvKey => self.env_key = value,
+            ProviderField::EnvKeyInstructions => self.env_key_instructions = value,
+            ProviderField::ExperimentalBearerToken => self.experimental_bearer_token = value,
+            ProviderField::QueryParams => self.query_params = value,
+            ProviderField::HttpHeaders => self.http_headers = value,
+            ProviderField::EnvHttpHeaders => self.env_http_headers = value,
+            ProviderField::RequestMaxRetries => self.request_max_retries = value,
+            ProviderField::StreamMaxRetries => self.stream_max_retries = value,
+            ProviderField::StreamIdleTimeoutMs => self.stream_idle_timeout_ms = value,
+            ProviderField::SupportsWebsockets => self.supports_websockets = value,
         }
     }
 }

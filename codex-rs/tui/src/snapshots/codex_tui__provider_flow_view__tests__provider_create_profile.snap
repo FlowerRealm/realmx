@@ -1,0 +1,147 @@
+---
+source: tui/src/provider_flow_view.rs
+assertion_line: 1069
+expression: provider_view_focus_summary(&params)
+---
+title: Provider / create
+subtitle: Create a custom provider. Definitions save globally; default selection still follows the chosen scope.
+item: Default provider scope
+  current: false
+  disabled: false
+  selected_description: Switch where /provider saves the default provider selection. Provider definitions stay global.
+  shortcut: 
+  description: Currently writing model_provider under [profiles.dev].
+  disabled_reason: 
+item: Provider ID
+  current: false
+  disabled: false
+  selected_description: Set the new provider ID. It must be globally unique.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: Display name
+  current: false
+  disabled: false
+  selected_description: Set the display name shown in the UI.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: Base URL
+  current: false
+  disabled: false
+  selected_description: Set the provider base URL used for requests.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: API key
+  current: false
+  disabled: false
+  selected_description: Optionally store a secure API key outside config.toml while creating this provider.
+  shortcut: 
+  description: No API key will be stored yet.
+  disabled_reason: 
+item: wire_api
+  current: false
+  disabled: false
+  selected_description: Defaults to responses. Leave it as-is unless you have a provider-specific reason to change it.
+  shortcut: 
+  description: Current draft: responses
+  disabled_reason: 
+item: requires_openai_auth
+  current: false
+  disabled: false
+  selected_description: Defaults to true for new providers. Enter false if this provider should not use OpenAI auth.
+  shortcut: 
+  description: Current draft: true
+  disabled_reason: 
+item: auth_strategy
+  current: false
+  disabled: false
+  selected_description: Optional explicit auth strategy. Leave blank to keep the provider definition minimal.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: oauth
+  current: false
+  disabled: false
+  selected_description: Optional TOML object for oauth configuration.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: env_key
+  current: false
+  disabled: false
+  selected_description: Optional environment variable name for API key lookup.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: env_key_instructions
+  current: false
+  disabled: false
+  selected_description: Optional user-facing help for obtaining or setting the env var.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: experimental_bearer_token
+  current: false
+  disabled: false
+  selected_description: Optional inline bearer token. This is stored in config.toml, so leave it blank unless you explicitly want that.
+  shortcut: 
+  description: No experimental_bearer_token will be stored yet.
+  disabled_reason: 
+item: query_params
+  current: false
+  disabled: false
+  selected_description: Optional TOML map of query parameters.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: http_headers
+  current: false
+  disabled: false
+  selected_description: Optional TOML map of static HTTP headers.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: env_http_headers
+  current: false
+  disabled: false
+  selected_description: Optional TOML map of header names to environment variable names.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: request_max_retries
+  current: false
+  disabled: false
+  selected_description: Optional request retry count.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: stream_max_retries
+  current: false
+  disabled: false
+  selected_description: Optional stream retry count.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: stream_idle_timeout_ms
+  current: false
+  disabled: false
+  selected_description: Optional stream idle timeout in milliseconds.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: supports_websockets
+  current: false
+  disabled: false
+  selected_description: Optional websocket support flag.
+  shortcut: 
+  description: <unset>
+  disabled_reason: 
+item: Save provider
+  current: false
+  disabled: false
+  selected_description: Creates a new global provider definition, stores any provided API key securely, and returns to the new provider detail page.
+  shortcut: 
+  description: Validate and persist this custom provider.
+  disabled_reason:

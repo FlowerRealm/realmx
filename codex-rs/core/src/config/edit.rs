@@ -707,8 +707,86 @@ fn normalize_skill_config_path(path: &Path) -> String {
 }
 
 fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
-    let value = TomlValue::try_from(provider.sanitized_for_config_persistence())?;
-    toml_value_to_item(&value)
+    let provider = provider.sanitized_for_config_persistence();
+    let mut table = TomlTable::new();
+    table.set_implicit(false);
+    table["name"] = value(provider.name);
+    if let Some(base_url) = provider.base_url {
+        table["base_url"] = value(base_url);
+    }
+    table["wire_api"] = value(provider.wire_api.to_string());
+    if provider.requires_openai_auth {
+        table["requires_openai_auth"] = value(true);
+    }
+    if provider.supports_websockets {
+        table["supports_websockets"] = value(true);
+    }
+    if provider.auth_strategy != crate::ModelProviderAuthStrategy::None {
+        let auth_strategy = match provider.auth_strategy {
+            crate::ModelProviderAuthStrategy::None => unreachable!(),
+            crate::ModelProviderAuthStrategy::OpenAi => "openai",
+            crate::ModelProviderAuthStrategy::ApiKey => "api_key",
+            crate::ModelProviderAuthStrategy::OAuth => "oauth",
+            crate::ModelProviderAuthStrategy::OAuthOrApiKey => "oauth_or_api_key",
+        };
+        table["auth_strategy"] = value(auth_strategy);
+    }
+    if let Some(oauth) = provider.oauth {
+        let oauth_value = TomlValue::try_from(oauth)?;
+        table["oauth"] = toml_value_to_item(&oauth_value)?;
+    }
+    if let Some(env_key) = provider.env_key {
+        table["env_key"] = value(env_key);
+    }
+    if let Some(env_key_instructions) = provider.env_key_instructions {
+        table["env_key_instructions"] = value(env_key_instructions);
+    }
+    if let Some(token) = provider.experimental_bearer_token {
+        table["experimental_bearer_token"] = value(token);
+    }
+    if let Some(query_params) = provider.query_params
+        && !query_params.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = query_params.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["query_params"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(http_headers) = provider.http_headers
+        && !http_headers.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = http_headers.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(env_http_headers) = provider.env_http_headers
+        && !env_http_headers.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = env_http_headers.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["env_http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(request_max_retries) = provider.request_max_retries {
+        table["request_max_retries"] = value(i64::try_from(request_max_retries)?);
+    }
+    if let Some(stream_max_retries) = provider.stream_max_retries {
+        table["stream_max_retries"] = value(i64::try_from(stream_max_retries)?);
+    }
+    if let Some(stream_idle_timeout_ms) = provider.stream_idle_timeout_ms {
+        table["stream_idle_timeout_ms"] = value(i64::try_from(stream_idle_timeout_ms)?);
+    }
+    Ok(TomlItem::Table(table))
 }
 
 /// Convert a `toml::Value` into the `toml_edit` item used by config persistence.

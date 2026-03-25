@@ -1,7 +1,11 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::sync::PoisonError;
 
 use anyhow::Result;
 use codex_keyring_store::DefaultKeyringStore;
@@ -101,7 +105,9 @@ impl SecretsManager {
     pub fn new(codex_home: PathBuf, backend_kind: SecretsBackendKind) -> Self {
         let backend: Arc<dyn SecretsBackend> = match backend_kind {
             SecretsBackendKind::Local => {
-                let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+                let keyring_store: Arc<dyn KeyringStore> =
+                    test_support::current_test_keyring_store(&codex_home)
+                        .unwrap_or_else(|| Arc::new(DefaultKeyringStore));
                 Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
             }
         };
@@ -195,6 +201,62 @@ pub(crate) fn keyring_service() -> &'static str {
     KEYRING_SERVICE
 }
 
+pub mod test_support {
+    use super::*;
+
+    static TEST_KEYRING_STORES: OnceLock<Mutex<HashMap<PathBuf, Arc<dyn KeyringStore>>>> =
+        OnceLock::new();
+
+    pub struct TestKeyringStoreGuard {
+        codex_home: PathBuf,
+        previous: Option<Arc<dyn KeyringStore>>,
+    }
+
+    impl Drop for TestKeyringStoreGuard {
+        fn drop(&mut self) {
+            let mut guard = TEST_KEYRING_STORES
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(previous) = self.previous.take() {
+                guard.insert(self.codex_home.clone(), previous);
+            } else {
+                guard.remove(&self.codex_home);
+            }
+        }
+    }
+
+    pub fn set_test_keyring_store(
+        codex_home: PathBuf,
+        keyring_store: Arc<dyn KeyringStore>,
+    ) -> TestKeyringStoreGuard {
+        let codex_home = codex_home
+            .canonicalize()
+            .unwrap_or_else(|_| codex_home.clone());
+        let mut guard = TEST_KEYRING_STORES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let previous = guard.insert(codex_home.clone(), keyring_store);
+        TestKeyringStoreGuard {
+            codex_home,
+            previous,
+        }
+    }
+
+    pub(crate) fn current_test_keyring_store(codex_home: &Path) -> Option<Arc<dyn KeyringStore>> {
+        let codex_home = codex_home
+            .canonicalize()
+            .unwrap_or_else(|_| codex_home.to_path_buf());
+        TEST_KEYRING_STORES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&codex_home)
+            .cloned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +302,21 @@ mod tests {
 
         assert!(manager.delete(&scope, &name)?);
         assert_eq!(manager.get(&scope, &name)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn manager_uses_registered_test_keyring_for_matching_home() -> Result<()> {
+        let codex_home = tempfile::tempdir().expect("tempdir");
+        let keyring = Arc::new(MockKeyringStore::default());
+        let _guard = test_support::set_test_keyring_store(codex_home.path().to_path_buf(), keyring);
+        let manager =
+            SecretsManager::new(codex_home.path().to_path_buf(), SecretsBackendKind::Local);
+        let scope = SecretScope::Global;
+        let name = SecretName::new("GITHUB_TOKEN")?;
+
+        manager.set(&scope, &name, "token-1")?;
+        assert_eq!(manager.get(&scope, &name)?, Some("token-1".to_string()));
         Ok(())
     }
 }
