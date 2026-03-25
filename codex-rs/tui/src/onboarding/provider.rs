@@ -555,9 +555,10 @@ mod tests {
             error: None,
         };
 
+        #[rustfmt::skip]
         insta::assert_snapshot!(
-                                                                                                                                                                                                                    render(&widget, 70, 24),
-                                                                                                                                                                                                                    @r"
+            render(&widget, 70, 24),
+            @r"
 Create custom provider
 < Back to provider list (Esc)
 Tab switches fields. Enter saves.
@@ -565,7 +566,7 @@ Tab switches fields. Enter saves.
   Display name
   Base URL
 "
-                                                                                                                                                                                                                );
+        );
     }
 
     #[test]
