@@ -1164,7 +1164,8 @@ mod tests {
                 thread_id: codex_protocol::ThreadId::from_string(
                     "019cee8c-b993-7e33-88c0-014d4e62612d",
                 )
-                .expect("valid thread id"),
+                .expect("valid thread id")
+                .to_string(),
                 turn_id: "turn-1".to_string(),
                 item_id: "reasoning-1".to_string(),
                 delta: "still thinking".to_string(),

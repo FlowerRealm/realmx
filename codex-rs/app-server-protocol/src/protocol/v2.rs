@@ -3564,6 +3564,7 @@ pub struct Thread {
     /// the turns field will be an empty list.
     pub turns: Vec<Turn>,
     pub active_plan: Option<ThreadActivePlan>,
+    pub draft_plan: Option<ThreadActivePlan>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

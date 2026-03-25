@@ -17,6 +17,8 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_core::find_archived_thread_path_by_id_str;
 use codex_core::find_thread_path_by_id_str;
+use codex_core::plan_workspace::PlanWorkspace;
+use codex_core::plan_workspace::PlanWorkspaceFile;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use std::fs::FileTimes;
@@ -79,6 +81,16 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
         .await?
         .expect("expected rollout path for thread id to exist");
     assert_paths_match_on_disk(&found_rollout_path, &rollout_path)?;
+    let workspace = PlanWorkspace::new(codex_home.path(), thread.cwd.as_path(), &thread.id);
+    workspace
+        .write_file(
+            PlanWorkspaceFile::TasksCsv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Restore workspace,file.rs,,,,,
+",
+        )
+        .await?;
 
     let archive_id = mcp
         .send_thread_archive_request(ThreadArchiveParams {
@@ -163,6 +175,8 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
         !archived_path.exists(),
         "expected archived rollout path {archived_path_display} to be moved"
     );
+    assert!(workspace.root().exists());
+    assert!(!workspace.archived_root().exists());
 
     Ok(())
 }

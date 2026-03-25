@@ -920,6 +920,16 @@
           "description": "Working directory captured for the thread.",
           "type": "string"
         },
+        "draftPlan": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivePlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ephemeral": {
           "description": "Whether the thread is ephemeral and should not be materialized on disk.",
           "type": "boolean"

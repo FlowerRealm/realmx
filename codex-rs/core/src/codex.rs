@@ -221,7 +221,6 @@ use crate::mentions::collect_explicit_app_ids;
 use crate::mentions::collect_explicit_plugin_mentions;
 use crate::mentions::collect_tool_mentions_from_messages;
 use crate::network_policy_decision::execpolicy_network_rule_amendment;
-use crate::plan_csv::CanonicalPlanCsv;
 use crate::plan_csv::canonical_plan_csv_from_proposed_plan;
 use crate::plan_csv::render_plan_text;
 use crate::plan_csv::update_plan_from_thread_plan_items;
@@ -230,6 +229,8 @@ use crate::plan_review::PlanReviewOutcome;
 use crate::plan_review::build_plan_review_user_message;
 use crate::plan_review::build_plan_revision_developer_message;
 use crate::plan_review::review_plan_candidate;
+use crate::plan_workspace::PlanWorkspace;
+use crate::plan_workspace::PlanWorkspacePlan;
 use crate::plugins::PluginsManager;
 use crate::plugins::build_plugin_injections;
 use crate::plugins::render_plugins_section;
@@ -896,6 +897,7 @@ impl TurnContext {
             session_source: self.session_source.clone(),
             sandbox_policy: self.sandbox_policy.get(),
             windows_sandbox_level: self.windows_sandbox_level,
+            mode: Some(self.collaboration_mode.mode),
         })
         .with_unified_exec_shell_mode(self.tools_config.unified_exec_shell_mode.clone())
         .with_web_search_config(self.tools_config.web_search_config.clone())
@@ -1343,6 +1345,7 @@ impl Session {
             session_source: session_source.clone(),
             sandbox_policy: session_configuration.sandbox_policy.get(),
             windows_sandbox_level: session_configuration.windows_sandbox_level,
+            mode: Some(session_configuration.collaboration_mode.mode),
         })
         .with_unified_exec_shell_mode_for_session(
             user_shell,
@@ -2740,11 +2743,18 @@ impl Session {
                 raw_csv: raw_csv.to_string(),
             })
             .await?;
+        let codex_home = self.codex_home().await;
+        let thread_id = self.conversation_id.to_string();
+        let workspace =
+            PlanWorkspace::new(codex_home.as_path(), turn_context.cwd.as_path(), &thread_id);
+        workspace
+            .persist_active_plan(raw_csv, /*update_public_draft*/ false)
+            .await?;
         self.send_event(
             turn_context,
             EventMsg::PlanUpdate(update_plan_from_thread_plan_items(
                 active_plan.items.as_slice(),
-                Some("Imported from proposed plan CSV".to_string()),
+                Some("Synced active plan to runtime workspace".to_string()),
             )),
         )
         .await;
@@ -5384,6 +5394,7 @@ async fn spawn_review_thread(
         session_source: parent_turn_context.session_source.clone(),
         sandbox_policy: parent_turn_context.sandbox_policy.get(),
         windows_sandbox_level: parent_turn_context.windows_sandbox_level,
+        mode: Some(ModeKind::Default),
     })
     .with_unified_exec_shell_mode_for_session(
         sess.services.user_shell.as_ref(),
@@ -5921,8 +5932,7 @@ pub(crate) async fn run_turn(
                     if plan_acceptance.hidden_review_enabled {
                         if !plan_acceptance.review_attempted {
                             plan_acceptance.review_attempted = true;
-                            let rendered_plan =
-                                render_plan_text(candidate.canonical_plan.rows.as_slice());
+                            let rendered_plan = candidate.rendered_text.clone();
                             let assistant_text =
                                 raw_assistant_output_text_from_item(&candidate.assistant_item)
                                     .unwrap_or_default();
@@ -5934,7 +5944,7 @@ pub(crate) async fn run_turn(
                                 plan_acceptance
                                     .fallback_candidate
                                     .as_ref()
-                                    .map(|candidate| candidate.canonical_plan.raw_csv.as_str())
+                                    .map(|candidate| candidate.accepted_plan.raw_csv.as_str())
                                     .unwrap_or_default(),
                                 &rendered_plan,
                                 cancellation_token.child_token(),
@@ -6760,7 +6770,8 @@ struct SamplingRequestResult {
 #[derive(Debug)]
 struct PlanCandidate {
     assistant_item: ResponseItem,
-    canonical_plan: CanonicalPlanCsv,
+    accepted_plan: PlanWorkspacePlan,
+    rendered_text: String,
 }
 
 #[derive(Debug)]
@@ -7207,6 +7218,8 @@ async fn flush_assistant_text_segments_all(
 
 /// Emit completion for plan items by parsing the finalized assistant message.
 async fn maybe_complete_plan_item_from_message(
+    sess: &Session,
+    turn_context: &TurnContext,
     _state: &mut PlanModeStreamState,
     item: &ResponseItem,
 ) -> Result<Option<PlanCandidate>, CodexErr> {
@@ -7220,14 +7233,35 @@ async fn maybe_complete_plan_item_from_message(
             }
         }
         if let Some(plan_text) = extract_proposed_plan_text(&text) {
+            let codex_home = sess.codex_home().await;
+            let thread_id = sess.conversation_id.to_string();
+            let workspace =
+                PlanWorkspace::new(codex_home.as_path(), turn_context.cwd.as_path(), &thread_id);
+            if let Ok(accepted_plan) = workspace.finalize_plan_for_acceptance().await {
+                let rendered_text = workspace
+                    .rendered_plan_document()
+                    .await
+                    .unwrap_or_else(|_| accepted_plan.plan_text.clone());
+                return Ok(Some(PlanCandidate {
+                    assistant_item: item.clone(),
+                    accepted_plan,
+                    rendered_text,
+                }));
+            }
             let (plan_text, _citations) = strip_citations(&plan_text);
             let canonical_plan = canonical_plan_csv_from_proposed_plan(plan_text.as_str())
                 .map_err(|err| {
                     CodexErr::InvalidRequest(format!("invalid proposed plan CSV: {err}"))
                 })?;
+            let rendered_text = render_plan_text(canonical_plan.rows.as_slice());
             return Ok(Some(PlanCandidate {
                 assistant_item: item.clone(),
-                canonical_plan,
+                accepted_plan: PlanWorkspacePlan {
+                    raw_csv: canonical_plan.raw_csv,
+                    plan_text: render_plan_text(canonical_plan.rows.as_slice()),
+                    rows: canonical_plan.rows,
+                },
+                rendered_text,
             }));
         }
     }
@@ -7310,7 +7344,8 @@ async fn handle_assistant_item_done_in_plan_mode(
     if let ResponseItem::Message { role, .. } = item
         && role == "assistant"
     {
-        *accepted_plan_candidate = maybe_complete_plan_item_from_message(state, item).await?;
+        *accepted_plan_candidate =
+            maybe_complete_plan_item_from_message(sess, turn_context, state, item).await?;
 
         if let Some(turn_item) =
             handle_non_tool_response_item(sess, turn_context, item, /*plan_mode*/ true).await
@@ -7358,17 +7393,13 @@ async fn accept_plan_candidate(
     sess.persist_active_thread_plan(
         turn_context,
         state.plan_item_state.item_id.as_str(),
-        candidate.canonical_plan.raw_csv.as_str(),
+        candidate.accepted_plan.raw_csv.as_str(),
     )
     .await
     .map_err(|err| CodexErr::Fatal(format!("failed to persist active thread plan: {err}")))?;
     state
         .plan_item_state
-        .complete_with_text(
-            sess,
-            turn_context,
-            render_plan_text(candidate.canonical_plan.rows.as_slice()),
-        )
+        .complete_with_text(sess, turn_context, candidate.rendered_text.clone())
         .await;
     if let Some(turn_item) =
         handle_non_tool_response_item(sess, turn_context, &candidate.assistant_item, true).await

@@ -106,15 +106,19 @@ When you present the official plan, wrap it in a `<proposed_plan>` block so the 
 Example:
 
 <proposed_plan>
-```csv
-id,status,step,path,details,inputs,outputs,depends_on,acceptance
-plan-01,in_progress,Parse proposed-plan CSV,codex-rs/core/src/plan_csv.rs,extract fenced csv and validate headers,proposed plan markdown,validated plan rows,,rows parse with stable ids
-```
+Plan ready. Finalize the current plan workspace files.
 </proposed_plan>
 
-The final `<proposed_plan>` block is **CSV-first**. Inside the block, output exactly one fenced `csv` block and nothing else that should be treated as authoritative plan content. Do not include summaries, titles, flowcharts, prose sections, or Markdown bullets inside `<proposed_plan>`.
+Use the plan workspace while planning. The authoritative editable sources are:
 
-The CSV is the only structured source of truth for the final plan. The system will generate any human-readable rendering from that CSV.
+* `requirements.md`
+* `design.md`
+* `tasks.csv`
+* `tasks.md` (derived from `tasks.csv`)
+
+Use the plan workspace tools to read/write these files incrementally during planning. Do not wait until the end to assemble the first draft.
+
+`tasks.csv` is the canonical structured source of truth for the plan rows. `tasks.md` is derived from `tasks.csv` and should not be edited directly.
 
 The CSV must:
 
@@ -129,6 +133,14 @@ The CSV must:
 * include at most one `in_progress` row
 
 When a task spans multiple files, split it into multiple rows rather than stuffing multiple paths into one row. Prefer the smallest set of rows that keeps file ownership clear.
+
+The final `<proposed_plan>` block is a completion/finalization signal and lightweight preview, not the only source of truth. Before emitting it:
+
+* ensure the plan workspace files are fully up to date
+* ensure `tasks.csv` is valid and decision-complete
+* assume the client/runtime will load the final accepted plan from the workspace files
+
+Inside `<proposed_plan>`, include concise Markdown only. Do not include a fenced CSV block unless you are intentionally providing backward-compatible fallback content.
 
 Do not ask "should I proceed?" in the final output. The user can easily switch out of Plan mode and request implementation if you have included a `<proposed_plan>` block in your response. Alternatively, they can decide to stay in Plan mode and continue refining the plan.
 

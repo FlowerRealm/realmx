@@ -858,13 +858,22 @@ There are additional item-specific events:
 
 - `item/plan/delta` — streams proposed plan content for plan items (experimental); concatenate `delta` values for the same plan `itemId`. These deltas are preview-only and may not match the final completed `plan.text`.
 
-Plan mode treats the fenced CSV inside `<proposed_plan>` as the only structured source of truth. The required header is:
+Plan mode is file-first. During planning, the model updates a per-thread plan workspace containing:
+
+- `requirements.md`
+- `design.md`
+- `tasks.csv`
+- `tasks.md` (derived from `tasks.csv`)
+
+`tasks.csv` remains the canonical structured source of truth for plan rows. The required header is:
 
 ```text
 id,status,step,path,details,inputs,outputs,depends_on,acceptance
 ```
 
 `inputs`, `outputs`, and `depends_on` use `|`-delimited values inside a single CSV cell. Older 5-column CSV blocks are no longer accepted.
+
+The final `<proposed_plan>` block is now primarily a finalize/preview signal. Clients and restore flows should prefer the workspace-backed plan data (`draftPlan` when present, otherwise `activePlan`) instead of treating the `<proposed_plan>` body as the only authoritative plan source.
 
 #### reasoning
 

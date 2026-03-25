@@ -4,6 +4,7 @@ use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::function_tool::FunctionCallError;
 use crate::plan_csv::update_plan_from_thread_plan_items;
+use crate::plan_workspace::PlanWorkspace;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -157,7 +158,7 @@ pub(crate) async fn handle_update_plan(
         ));
     }
     let mut args = parse_update_plan_arguments(&arguments)?;
-    if try_update_active_thread_plan(session, &mut args).await? {
+    if try_update_active_thread_plan(session, turn_context, &mut args).await? {
         session
             .send_event(turn_context, EventMsg::PlanUpdate(args))
             .await;
@@ -177,6 +178,7 @@ fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, Functi
 
 async fn try_update_active_thread_plan(
     session: &Session,
+    turn_context: &TurnContext,
     args: &mut UpdatePlanArgs,
 ) -> Result<bool, FunctionCallError> {
     let Some(state_db) = session.state_db() else {
@@ -247,6 +249,47 @@ async fn try_update_active_thread_plan(
         .unwrap_or(active_plan);
     let refreshed_args =
         update_plan_from_thread_plan_items(refreshed.items.as_slice(), args.explanation.clone());
+    let refreshed_rows = refreshed
+        .items
+        .iter()
+        .map(|item| codex_state::ThreadPlanItemCreateParams {
+            row_id: item.row_id.clone(),
+            row_index: item.row_index,
+            status: item.status,
+            step: item.step.clone(),
+            path: item.path.clone(),
+            details: item.details.clone(),
+            inputs: item.inputs.clone(),
+            outputs: item.outputs.clone(),
+            depends_on: item.depends_on.clone(),
+            acceptance: item.acceptance.clone(),
+        })
+        .collect::<Vec<_>>();
+    let refreshed_csv =
+        codex_state::render_thread_plan_csv(refreshed_rows.as_slice()).map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to render refreshed active thread plan csv: {err}"
+            ))
+        })?;
+    let codex_home = session.codex_home().await;
+    let workspace = PlanWorkspace::new(
+        codex_home.as_path(),
+        turn_context.cwd.as_path(),
+        thread_id.as_str(),
+    );
+    let update_public_draft = workspace.draft_matches_active().await.map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "failed to compare plan workspace draft and active plan: {err}"
+        ))
+    })?;
+    workspace
+        .persist_active_plan(refreshed_csv.as_str(), update_public_draft)
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to sync refreshed active thread plan to workspace: {err}"
+            ))
+        })?;
     for item in &mut args.plan {
         let Some(row_id) = item.id.as_deref() else {
             continue;

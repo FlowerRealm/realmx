@@ -804,6 +804,7 @@ mod tests {
             name: None,
             turns: Vec::new(),
             active_plan: None,
+            draft_plan: None,
         }
     }
 }

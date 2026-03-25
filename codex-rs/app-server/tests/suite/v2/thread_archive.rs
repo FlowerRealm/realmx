@@ -20,6 +20,8 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_core::ARCHIVED_SESSIONS_SUBDIR;
 use codex_core::find_thread_path_by_id_str;
+use codex_core::plan_workspace::PlanWorkspace;
+use codex_core::plan_workspace::PlanWorkspaceFile;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
@@ -65,6 +67,17 @@ async fn thread_archive_requires_materialized_rollout() -> Result<()> {
     );
 
     // Archive should fail before the rollout is materialized.
+    let workspace = PlanWorkspace::new(codex_home.path(), thread.cwd.as_path(), &thread.id);
+    workspace
+        .write_file(
+            PlanWorkspaceFile::TasksCsv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Archive workspace,file.rs,,,,,
+",
+        )
+        .await?;
+
     let archive_id = mcp
         .send_thread_archive_request(ThreadArchiveParams {
             thread_id: thread.id.clone(),
@@ -156,6 +169,8 @@ async fn thread_archive_requires_materialized_rollout() -> Result<()> {
         "expected archived rollout path {} to exist",
         archived_rollout_path.display()
     );
+    assert!(!workspace.root().exists());
+    assert!(workspace.archived_root().exists());
 
     Ok(())
 }

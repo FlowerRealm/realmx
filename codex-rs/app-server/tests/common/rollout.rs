@@ -139,6 +139,28 @@ pub fn create_fake_rollout_with_text_elements(
     model_provider: Option<&str>,
     git_info: Option<GitInfo>,
 ) -> Result<String> {
+    create_fake_rollout_with_text_elements_in_cwd(
+        codex_home,
+        filename_ts,
+        meta_rfc3339,
+        preview,
+        text_elements,
+        model_provider,
+        git_info,
+        Path::new("/"),
+    )
+}
+
+pub fn create_fake_rollout_with_text_elements_in_cwd(
+    codex_home: &Path,
+    filename_ts: &str,
+    meta_rfc3339: &str,
+    preview: &str,
+    text_elements: Vec<serde_json::Value>,
+    model_provider: Option<&str>,
+    git_info: Option<GitInfo>,
+    cwd: &Path,
+) -> Result<String> {
     let uuid = Uuid::new_v4();
     let uuid_str = uuid.to_string();
     let conversation_id = ThreadId::from_string(&uuid_str)?;
@@ -157,7 +179,7 @@ pub fn create_fake_rollout_with_text_elements(
         id: conversation_id,
         forked_from_id: None,
         timestamp: meta_rfc3339.to_string(),
-        cwd: PathBuf::from("/"),
+        cwd: cwd.to_path_buf(),
         originator: "codex".to_string(),
         cli_version: "0.0.0".to_string(),
         source: SessionSource::Cli,

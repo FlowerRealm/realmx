@@ -1012,11 +1012,16 @@ fn thread_initial_messages(
         .iter()
         .flat_map(|turn| turn_initial_messages(thread_id, turn, show_raw_agent_reasoning))
         .collect();
-    if let Some(active_plan) = &thread.active_plan {
+    if let Some(restored_plan) = thread.draft_plan.as_ref().or(thread.active_plan.as_ref()) {
+        let explanation = if thread.draft_plan.is_some() {
+            "Restored draft plan"
+        } else {
+            "Restored active plan"
+        };
         events.push(EventMsg::PlanUpdate(
             codex_protocol::plan_tool::UpdatePlanArgs {
-                explanation: Some("Restored active plan".to_string()),
-                plan: active_plan
+                explanation: Some(explanation.to_string()),
+                plan: restored_plan
                     .rows
                     .iter()
                     .map(|row| codex_protocol::plan_tool::PlanItemArg {
@@ -1286,6 +1291,7 @@ mod tests {
                     error: None,
                 }],
                 active_plan: None,
+                draft_plan: None,
             },
             model: "gpt-5.4".to_string(),
             model_provider: "openai".to_string(),
@@ -1369,6 +1375,7 @@ mod tests {
                     acceptance: None,
                 }],
             }),
+            draft_plan: None,
         };
 
         let initial_messages =
@@ -1393,6 +1400,78 @@ mod tests {
                 assert_eq!(update.plan[0].step, "Current plan");
             }
             other => panic!("expected restored active plan last, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thread_initial_messages_prefer_restored_draft_plan() {
+        let thread_id = ThreadId::new();
+        let thread = codex_app_server_protocol::Thread {
+            id: thread_id.to_string(),
+            preview: "hello".to_string(),
+            ephemeral: false,
+            model_provider: "openai".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            status: ThreadStatus::Idle,
+            path: None,
+            cwd: PathBuf::from("/tmp/project"),
+            cli_version: "0.0.0".to_string(),
+            source: codex_protocol::protocol::SessionSource::Cli.into(),
+            agent_nickname: None,
+            agent_role: None,
+            git_info: None,
+            name: None,
+            turns: Vec::new(),
+            active_plan: Some(codex_app_server_protocol::ThreadActivePlan {
+                snapshot_id: "snapshot-1".to_string(),
+                source_turn_id: "turn-1".to_string(),
+                source_item_id: "plan-item-1".to_string(),
+                raw_csv: "active".to_string(),
+                rows: vec![codex_app_server_protocol::ThreadActivePlanRow {
+                    id: "active-row".to_string(),
+                    step: "Active plan".to_string(),
+                    status: codex_app_server_protocol::TurnPlanStepStatus::InProgress,
+                    path: "codex-rs/core/src/tools/handlers/plan.rs".to_string(),
+                    details: String::new(),
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    depends_on: Vec::new(),
+                    acceptance: None,
+                }],
+            }),
+            draft_plan: Some(codex_app_server_protocol::ThreadActivePlan {
+                snapshot_id: "draft:thread".to_string(),
+                source_turn_id: String::new(),
+                source_item_id: format!("{thread_id}-plan"),
+                raw_csv: "draft".to_string(),
+                rows: vec![codex_app_server_protocol::ThreadActivePlanRow {
+                    id: "draft-row".to_string(),
+                    step: "Draft plan".to_string(),
+                    status: codex_app_server_protocol::TurnPlanStepStatus::Pending,
+                    path: "codex-rs/core/src/plan_workspace.rs".to_string(),
+                    details: "preferred".to_string(),
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    depends_on: Vec::new(),
+                    acceptance: None,
+                }],
+            }),
+        };
+
+        let initial_messages =
+            thread_initial_messages(&thread_id, &thread, /*show_raw_agent_reasoning*/ false)
+                .expect("thread should restore initial messages");
+
+        assert_eq!(initial_messages.len(), 1);
+        match &initial_messages[0] {
+            EventMsg::PlanUpdate(update) => {
+                assert_eq!(update.explanation.as_deref(), Some("Restored draft plan"));
+                assert_eq!(update.plan.len(), 1);
+                assert_eq!(update.plan[0].id.as_deref(), Some("draft-row"));
+                assert_eq!(update.plan[0].step, "Draft plan");
+            }
+            other => panic!("expected restored draft plan, got {other:?}"),
         }
     }
 }

@@ -22,6 +22,8 @@ use crate::tools::discoverable::DiscoverableTool;
 use crate::tools::discoverable::DiscoverableToolAction;
 use crate::tools::discoverable::DiscoverableToolType;
 use crate::tools::handlers::PLAN_TOOL;
+use crate::tools::handlers::PLAN_WORKSPACE_READ_TOOL;
+use crate::tools::handlers::PLAN_WORKSPACE_WRITE_TOOL;
 use crate::tools::handlers::TOOL_SEARCH_DEFAULT_LIMIT;
 use crate::tools::handlers::TOOL_SEARCH_TOOL_NAME;
 use crate::tools::handlers::TOOL_SUGGEST_TOOL_NAME;
@@ -276,6 +278,7 @@ pub(crate) struct ToolsConfig {
     pub artifact_tools: bool,
     pub request_user_input: bool,
     pub default_mode_request_user_input: bool,
+    pub plan_workspace_enabled: bool,
     pub experimental_supported_tools: Vec<String>,
     pub agent_jobs_tools: bool,
     pub agent_jobs_worker_tools: bool,
@@ -289,6 +292,7 @@ pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) session_source: SessionSource,
     pub(crate) sandbox_policy: &'a SandboxPolicy,
     pub(crate) windows_sandbox_level: WindowsSandboxLevel,
+    pub(crate) mode: Option<codex_protocol::config_types::ModeKind>,
 }
 
 fn unified_exec_allowed_in_environment(
@@ -314,6 +318,7 @@ impl ToolsConfig {
             session_source,
             sandbox_policy,
             windows_sandbox_level,
+            mode,
         } = params;
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
         let include_code_mode = features.enabled(Feature::CodeMode);
@@ -326,6 +331,9 @@ impl ToolsConfig {
         let include_request_user_input = !matches!(session_source, SessionSource::SubAgent(_));
         let include_default_mode_request_user_input =
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
+        let plan_workspace_enabled = features.enabled(Feature::PlanModeWorkspace)
+            && mode.is_some_and(codex_protocol::config_types::ModeKind::is_plan_output_mode)
+            && !matches!(session_source, SessionSource::SubAgent(_));
         let include_search_tool = model_info.supports_search_tool;
         let include_tool_suggest = include_search_tool && features.enabled(Feature::ToolSuggest);
         let include_original_image_detail = can_request_original_image_detail(features, model_info);
@@ -408,6 +416,7 @@ impl ToolsConfig {
             artifact_tools: include_artifact_tools,
             request_user_input: include_request_user_input,
             default_mode_request_user_input: include_default_mode_request_user_input,
+            plan_workspace_enabled,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
             agent_jobs_tools: include_agent_jobs,
             agent_jobs_worker_tools,
@@ -2520,6 +2529,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::McpHandler;
     use crate::tools::handlers::McpResourceHandler;
     use crate::tools::handlers::PlanHandler;
+    use crate::tools::handlers::PlanWorkspaceReadHandler;
+    use crate::tools::handlers::PlanWorkspaceWriteHandler;
     use crate::tools::handlers::ReadFileHandler;
     use crate::tools::handlers::RequestPermissionsHandler;
     use crate::tools::handlers::RequestUserInputHandler;
@@ -2542,6 +2553,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let shell_handler = Arc::new(ShellHandler);
     let unified_exec_handler = Arc::new(UnifiedExecHandler);
     let plan_handler = Arc::new(PlanHandler);
+    let plan_workspace_read_handler = Arc::new(PlanWorkspaceReadHandler);
+    let plan_workspace_write_handler = Arc::new(PlanWorkspaceWriteHandler);
     let apply_patch_handler = Arc::new(ApplyPatchHandler);
     let dynamic_tool_handler = Arc::new(DynamicToolHandler);
     let view_image_handler = Arc::new(ViewImageHandler);
@@ -2692,6 +2705,23 @@ pub(crate) fn build_specs_with_discoverable_tools(
         config.code_mode_enabled,
     );
     builder.register_handler("update_plan", plan_handler);
+
+    if config.plan_workspace_enabled {
+        push_tool_spec(
+            &mut builder,
+            PLAN_WORKSPACE_READ_TOOL.clone(),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        push_tool_spec(
+            &mut builder,
+            PLAN_WORKSPACE_WRITE_TOOL.clone(),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        builder.register_handler("plan_workspace_read", plan_workspace_read_handler);
+        builder.register_handler("plan_workspace_write", plan_workspace_write_handler);
+    }
 
     if config.js_repl_enabled {
         push_tool_spec(

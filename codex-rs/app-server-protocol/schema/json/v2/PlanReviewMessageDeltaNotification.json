@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "delta": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "delta",
+    "threadId",
+    "turnId"
+  ],
+  "title": "PlanReviewMessageDeltaNotification",
+  "type": "object"
+}

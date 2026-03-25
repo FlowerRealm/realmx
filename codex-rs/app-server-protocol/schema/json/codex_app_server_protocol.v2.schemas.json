@@ -5992,6 +5992,104 @@
       "title": "PlanDeltaNotification",
       "type": "object"
     },
+    "PlanReviewActivityNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "threadId",
+        "turnId"
+      ],
+      "title": "PlanReviewActivityNotification",
+      "type": "object"
+    },
+    "PlanReviewMessageDeltaNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "delta": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delta",
+        "threadId",
+        "turnId"
+      ],
+      "title": "PlanReviewMessageDeltaNotification",
+      "type": "object"
+    },
+    "PlanReviewReasoningDeltaNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "delta": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delta",
+        "threadId",
+        "turnId"
+      ],
+      "title": "PlanReviewReasoningDeltaNotification",
+      "type": "object"
+    },
+    "PlanReviewStatusKind": {
+      "enum": [
+        "started",
+        "completed",
+        "revising",
+        "failed",
+        "stalled"
+      ],
+      "type": "string"
+    },
+    "PlanReviewStatusNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/PlanReviewStatusKind"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "status",
+        "threadId",
+        "turnId"
+      ],
+      "title": "PlanReviewStatusNotification",
+      "type": "object"
+    },
     "PlanType": {
       "enum": [
         "free",
@@ -8300,6 +8398,86 @@
           "type": "object"
         },
         {
+          "properties": {
+            "method": {
+              "enum": [
+                "item/planReview/status"
+              ],
+              "title": "Item/planReview/statusNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PlanReviewStatusNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Item/planReview/statusNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "item/planReview/messageDelta"
+              ],
+              "title": "Item/planReview/messageDeltaNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PlanReviewMessageDeltaNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Item/planReview/messageDeltaNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "item/planReview/reasoningDelta"
+              ],
+              "title": "Item/planReview/reasoningDeltaNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PlanReviewReasoningDeltaNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Item/planReview/reasoningDeltaNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "item/planReview/activity"
+              ],
+              "title": "Item/planReview/activityNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PlanReviewActivityNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Item/planReview/activityNotification",
+          "type": "object"
+        },
+        {
           "description": "Stream base64-encoded stdout/stderr chunks for a running `command/exec` session.",
           "properties": {
             "method": {
@@ -9551,6 +9729,16 @@
         "cwd": {
           "description": "Working directory captured for the thread.",
           "type": "string"
+        },
+        "draftPlan": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivePlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "ephemeral": {
           "description": "Whether the thread is ephemeral and should not be materialized on disk.",

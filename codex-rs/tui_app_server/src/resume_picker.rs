@@ -2576,6 +2576,7 @@ mod tests {
             name: Some(String::from("Named thread")),
             turns: Vec::new(),
             active_plan: None,
+            draft_plan: None,
         };
 
         let row = row_from_app_server_thread(thread).expect("row should be preserved");

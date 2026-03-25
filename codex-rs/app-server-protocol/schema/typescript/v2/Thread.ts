@@ -70,4 +70,4 @@ name: string | null,
  * For all other responses and notifications returning a Thread,
  * the turns field will be an empty list.
  */
-turns: Array<Turn>, activePlan: ThreadActivePlan | null, };
+turns: Array<Turn>, activePlan: ThreadActivePlan | null, draftPlan: ThreadActivePlan | null, };

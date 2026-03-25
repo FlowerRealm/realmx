@@ -1,6 +1,7 @@
 use codex_protocol::plan_tool::PlanItemArg;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
+use codex_state::THREAD_PLAN_CSV_HEADERS;
 use codex_state::ThreadPlanItem;
 use codex_state::ThreadPlanItemCreateParams;
 use codex_state::ThreadPlanItemStatus;
@@ -24,6 +25,10 @@ pub(crate) fn canonical_plan_csv_from_proposed_plan(
     let raw_csv = canonicalize_thread_plan_csv(raw_csv.as_str())?;
     let rows = parse_thread_plan_csv(raw_csv.as_str())?;
     Ok(CanonicalPlanCsv { raw_csv, rows })
+}
+
+pub(crate) fn render_empty_plan_csv() -> String {
+    format!("{}\n", THREAD_PLAN_CSV_HEADERS.join(","))
 }
 
 pub(crate) fn render_plan_text(rows: &[ThreadPlanItemCreateParams]) -> String {

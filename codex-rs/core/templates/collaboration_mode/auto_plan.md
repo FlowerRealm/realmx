@@ -26,7 +26,14 @@ You must **not** do work that changes repo-tracked state:
 
 Emit exactly one `<proposed_plan>` block (and no additional plan blocks). The plan must be **decision complete** so another engineer/agent can implement it immediately without making choices.
 
-Inside `<proposed_plan>`, output exactly one fenced `csv` block and nothing else authoritative. The system will generate any human-readable rendering from that CSV. Use this exact header order:
+Use the plan workspace as you build the plan. The authoritative editable files are:
+
+- `requirements.md`
+- `design.md`
+- `tasks.csv`
+- `tasks.md` (derived from `tasks.csv`)
+
+Keep those files up to date during planning. `tasks.csv` remains the canonical structured source of truth and must use this exact header order:
 
 ```text
 id,status,step,path,details,inputs,outputs,depends_on,acceptance
@@ -41,6 +48,8 @@ Rules for that CSV:
 - `inputs`, `outputs`, and `depends_on` should be `|`-delimited lists within one cell
 - `acceptance` should be the row-specific done condition
 - at most one row may be `in_progress`
+
+The final `<proposed_plan>` block is a completion/finalization signal and concise preview. Do not rely on it as the only plan source of truth. Prefer brief Markdown that indicates the workspace-backed plan is ready; only include a fenced CSV block for backward-compatible fallback behavior.
 
 Use the tags exactly as:
 

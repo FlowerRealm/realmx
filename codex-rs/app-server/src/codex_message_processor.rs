@@ -229,6 +229,9 @@ use codex_core::mcp::collect_mcp_snapshot;
 use codex_core::mcp::group_tools_by_server;
 use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use codex_core::parse_cursor;
+use codex_core::plan_workspace::PlanWorkspace;
+use codex_core::plan_workspace::PlanWorkspacePlan;
+use codex_core::plan_workspace::PlanWorkspacePlanSource;
 use codex_core::plugins::MarketplaceError;
 use codex_core::plugins::MarketplacePluginSourceSummary;
 use codex_core::plugins::PluginInstallError as CorePluginInstallError;
@@ -3153,19 +3156,40 @@ impl CodexMessageProcessor {
                 message: format!("failed to update unarchived thread timestamp: {err}"),
                 data: None,
             })?;
+            let summary = match read_summary_from_rollout(
+                restored_path.as_path(),
+                fallback_provider.as_str(),
+            )
+            .await
+            {
+                Ok(summary) => summary,
+                Err(err) => {
+                    let _ = tokio::fs::rename(&restored_path, &canonical_rollout_path).await;
+                    return Err(JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("failed to read unarchived thread: {err}"),
+                        data: None,
+                    });
+                }
+            };
+            let workspace = PlanWorkspace::new(
+                self.config.codex_home.as_path(),
+                summary.cwd.as_path(),
+                &thread_id.to_string(),
+            );
+            if let Err(err) = workspace.restore_from_archived().await {
+                let _ = tokio::fs::rename(&restored_path, &canonical_rollout_path).await;
+                return Err(JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to restore archived plan workspace: {err}"),
+                    data: None,
+                });
+            }
             if let Some(ctx) = state_db_ctx {
                 let _ = ctx
                     .mark_unarchived(thread_id, restored_path.as_path())
                     .await;
             }
-            let summary =
-                read_summary_from_rollout(restored_path.as_path(), fallback_provider.as_str())
-                    .await
-                    .map_err(|err| JSONRPCErrorError {
-                        code: INTERNAL_ERROR_CODE,
-                        message: format!("failed to read unarchived thread: {err}"),
-                        data: None,
-                    })?;
             Ok(summary_to_thread(summary))
         }
         .await;
@@ -4179,6 +4203,7 @@ impl CodexMessageProcessor {
             }
         }
         thread.active_plan = self.active_plan_for_thread(thread_id).await?;
+        thread.draft_plan = self.draft_plan_for_thread(thread).await?;
         Ok(())
     }
 
@@ -4205,37 +4230,65 @@ impl CodexMessageProcessor {
         let Some(active_plan) = active_plan else {
             return Ok(None);
         };
-        Ok(Some(ThreadActivePlan {
-            snapshot_id: active_plan.snapshot.id,
-            source_turn_id: active_plan.snapshot.source_turn_id,
-            source_item_id: active_plan.snapshot.source_item_id,
-            raw_csv: active_plan.snapshot.raw_csv,
-            rows: active_plan
-                .items
-                .into_iter()
-                .map(|item| ThreadActivePlanRow {
-                    id: item.row_id,
-                    step: item.step,
-                    status: match item.status {
-                        codex_state::ThreadPlanItemStatus::Pending => {
-                            codex_app_server_protocol::TurnPlanStepStatus::Pending
-                        }
-                        codex_state::ThreadPlanItemStatus::InProgress => {
-                            codex_app_server_protocol::TurnPlanStepStatus::InProgress
-                        }
-                        codex_state::ThreadPlanItemStatus::Completed => {
-                            codex_app_server_protocol::TurnPlanStepStatus::Completed
-                        }
-                    },
-                    path: item.path,
-                    details: item.details,
-                    inputs: item.inputs,
-                    outputs: item.outputs,
-                    depends_on: item.depends_on,
-                    acceptance: item.acceptance,
-                })
-                .collect(),
-        }))
+        Ok(Some(thread_active_plan_from_state_items(
+            active_plan.snapshot.id,
+            active_plan.snapshot.source_turn_id,
+            active_plan.snapshot.source_item_id,
+            active_plan.snapshot.raw_csv,
+            active_plan.items,
+        )))
+    }
+
+    async fn draft_plan_for_thread(
+        &self,
+        thread: &Thread,
+    ) -> Result<Option<ThreadActivePlan>, String> {
+        if thread.path.is_none() {
+            return Ok(None);
+        }
+        let workspace = PlanWorkspace::new(
+            self.config.codex_home.as_path(),
+            thread.cwd.as_path(),
+            thread.id.as_str(),
+        );
+        let resolved = workspace.resolve_plan_for_restore().await.map_err(|err| {
+            format!(
+                "failed to resolve draft plan for thread {}: {err}",
+                thread.id
+            )
+        })?;
+        let Some(resolved) = resolved else {
+            return Ok(None);
+        };
+        if matches!(resolved.source, PlanWorkspacePlanSource::Active)
+            && thread.active_plan.is_some()
+        {
+            return Ok(None);
+        }
+        let source_item_id = thread
+            .active_plan
+            .as_ref()
+            .map(|plan| plan.source_item_id.clone())
+            .unwrap_or_else(|| format!("{}-plan", thread.id));
+        let source_turn_id = thread
+            .active_plan
+            .as_ref()
+            .map(|plan| plan.source_turn_id.clone())
+            .unwrap_or_default();
+        let snapshot_id = match resolved.source {
+            PlanWorkspacePlanSource::Draft => format!("draft:{}", thread.id),
+            PlanWorkspacePlanSource::Active => thread
+                .active_plan
+                .as_ref()
+                .map(|plan| plan.snapshot_id.clone())
+                .unwrap_or_else(|| format!("active:{}", thread.id)),
+        };
+        Ok(Some(thread_active_plan_from_workspace_plan(
+            snapshot_id,
+            source_turn_id,
+            source_item_id,
+            resolved.plan,
+        )))
     }
 
     async fn state_db_ctx_for_thread(&self) -> Option<StateDbHandle> {
@@ -5475,14 +5528,45 @@ impl CodexMessageProcessor {
         }
 
         // Move the rollout file to archived.
-        let result: std::io::Result<()> = async move {
+        let cwd = read_summary_from_rollout(
+            canonical_rollout_path.as_path(),
+            self.config.model_provider_id.as_str(),
+        )
+        .await
+        .ok()
+        .map(|summary| summary.cwd);
+
+        let result: Result<(), String> = async move {
             let archive_folder = self
                 .config
                 .codex_home
                 .join(codex_core::ARCHIVED_SESSIONS_SUBDIR);
-            tokio::fs::create_dir_all(&archive_folder).await?;
+            tokio::fs::create_dir_all(&archive_folder)
+                .await
+                .map_err(|err| err.to_string())?;
+            if let Some(cwd) = cwd.as_ref() {
+                let workspace = PlanWorkspace::new(
+                    self.config.codex_home.as_path(),
+                    cwd.as_path(),
+                    &thread_id.to_string(),
+                );
+                workspace
+                    .move_to_archived()
+                    .await
+                    .map_err(|err| err.to_string())?;
+            }
             let archived_path = archive_folder.join(&file_name);
-            tokio::fs::rename(&canonical_rollout_path, &archived_path).await?;
+            if let Err(err) = tokio::fs::rename(&canonical_rollout_path, &archived_path).await {
+                if let Some(cwd) = cwd.as_ref() {
+                    let workspace = PlanWorkspace::new(
+                        self.config.codex_home.as_path(),
+                        cwd.as_path(),
+                        &thread_id.to_string(),
+                    );
+                    let _ = workspace.restore_from_archived().await;
+                }
+                return Err(err.to_string());
+            }
             if let Some(ctx) = state_db_ctx {
                 let _ = ctx
                     .mark_archived(thread_id, archived_path.as_path(), Utc::now())
@@ -7510,6 +7594,96 @@ impl CodexMessageProcessor {
     }
 }
 
+fn thread_active_plan_row_from_state_item(
+    item: codex_state::ThreadPlanItem,
+) -> ThreadActivePlanRow {
+    ThreadActivePlanRow {
+        id: item.row_id,
+        step: item.step,
+        status: match item.status {
+            codex_state::ThreadPlanItemStatus::Pending => {
+                codex_app_server_protocol::TurnPlanStepStatus::Pending
+            }
+            codex_state::ThreadPlanItemStatus::InProgress => {
+                codex_app_server_protocol::TurnPlanStepStatus::InProgress
+            }
+            codex_state::ThreadPlanItemStatus::Completed => {
+                codex_app_server_protocol::TurnPlanStepStatus::Completed
+            }
+        },
+        path: item.path,
+        details: item.details,
+        inputs: item.inputs,
+        outputs: item.outputs,
+        depends_on: item.depends_on,
+        acceptance: item.acceptance,
+    }
+}
+
+fn thread_active_plan_row_from_create_params(
+    item: codex_state::ThreadPlanItemCreateParams,
+) -> ThreadActivePlanRow {
+    ThreadActivePlanRow {
+        id: item.row_id,
+        step: item.step,
+        status: match item.status {
+            codex_state::ThreadPlanItemStatus::Pending => {
+                codex_app_server_protocol::TurnPlanStepStatus::Pending
+            }
+            codex_state::ThreadPlanItemStatus::InProgress => {
+                codex_app_server_protocol::TurnPlanStepStatus::InProgress
+            }
+            codex_state::ThreadPlanItemStatus::Completed => {
+                codex_app_server_protocol::TurnPlanStepStatus::Completed
+            }
+        },
+        path: item.path,
+        details: item.details,
+        inputs: item.inputs,
+        outputs: item.outputs,
+        depends_on: item.depends_on,
+        acceptance: item.acceptance,
+    }
+}
+
+fn thread_active_plan_from_state_items(
+    snapshot_id: String,
+    source_turn_id: String,
+    source_item_id: String,
+    raw_csv: String,
+    items: Vec<codex_state::ThreadPlanItem>,
+) -> ThreadActivePlan {
+    ThreadActivePlan {
+        snapshot_id,
+        source_turn_id,
+        source_item_id,
+        raw_csv,
+        rows: items
+            .into_iter()
+            .map(thread_active_plan_row_from_state_item)
+            .collect(),
+    }
+}
+
+fn thread_active_plan_from_workspace_plan(
+    snapshot_id: String,
+    source_turn_id: String,
+    source_item_id: String,
+    plan: PlanWorkspacePlan,
+) -> ThreadActivePlan {
+    ThreadActivePlan {
+        snapshot_id,
+        source_turn_id,
+        source_item_id,
+        raw_csv: plan.raw_csv,
+        rows: plan
+            .rows
+            .into_iter()
+            .map(thread_active_plan_row_from_create_params)
+            .collect(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_thread_listener_command(
     conversation_id: ThreadId,
@@ -8536,6 +8710,7 @@ fn build_thread_from_snapshot(
         name: None,
         turns: Vec::new(),
         active_plan: None,
+        draft_plan: None,
     }
 }
 
@@ -8579,6 +8754,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         name: None,
         turns: Vec::new(),
         active_plan: None,
+        draft_plan: None,
     }
 }
 

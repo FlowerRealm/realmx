@@ -1,12 +1,15 @@
 use anyhow::Result;
 use app_test_support::McpProcess;
 use app_test_support::create_fake_rollout_with_text_elements;
+use app_test_support::create_fake_rollout_with_text_elements_in_cwd;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::to_response;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SessionSource;
+use codex_app_server_protocol::ThreadArchiveParams;
+use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
@@ -208,6 +211,7 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract active rows,
     let ThreadReadResponse { thread } = to_response::<ThreadReadResponse>(read_resp)?;
 
     let active_plan = thread.active_plan.expect("active plan should be returned");
+    assert_eq!(thread.draft_plan, None);
     assert_eq!(active_plan.snapshot_id, "snapshot-1");
     assert_eq!(active_plan.rows.len(), 1);
     assert_eq!(active_plan.rows[0].id, "plan-01");
@@ -263,6 +267,180 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract active rows,
         first_row.get("acceptance").and_then(Value::as_str),
         Some("active plan rows reload")
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_read_returns_draft_plan_from_workspace() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let preview = "Saved user message";
+    let cwd = PathBuf::from("/tmp/plan-workspace-project");
+    let conversation_id = create_fake_rollout_with_text_elements_in_cwd(
+        codex_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        preview,
+        vec![],
+        Some("mock_provider"),
+        None,
+        cwd.as_path(),
+    )?;
+
+    let workspace = codex_core::plan_workspace::PlanWorkspace::new(
+        codex_home.path(),
+        cwd.as_path(),
+        conversation_id.as_str(),
+    );
+    workspace.ensure_scaffold().await?;
+    workspace
+        .write_file(
+            codex_core::plan_workspace::PlanWorkspaceFile::TasksCsv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Draft step,codex-rs/core/src/plan_workspace.rs,restore draft,,,,
+",
+        )
+        .await?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let read_id = mcp
+        .send_thread_read_request(ThreadReadParams {
+            thread_id: conversation_id,
+            include_turns: false,
+        })
+        .await?;
+    let read_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+    )
+    .await??;
+    let read_result = read_resp.result.clone();
+    let ThreadReadResponse { thread } = to_response::<ThreadReadResponse>(read_resp)?;
+
+    assert_eq!(thread.active_plan, None);
+    let draft_plan = thread.draft_plan.expect("draft plan should be returned");
+    assert_eq!(draft_plan.snapshot_id, format!("draft:{}", thread.id));
+    assert_eq!(draft_plan.rows.len(), 1);
+    assert_eq!(draft_plan.rows[0].id, "plan-01");
+    assert_eq!(draft_plan.rows[0].step, "Draft step");
+    assert_eq!(draft_plan.rows[0].status, TurnPlanStepStatus::Pending);
+
+    let thread_json = read_result
+        .get("thread")
+        .and_then(Value::as_object)
+        .expect("thread/read result.thread must be an object");
+    let draft_plan_json = thread_json
+        .get("draftPlan")
+        .and_then(Value::as_object)
+        .expect("thread/read must serialize thread.draftPlan");
+    assert_eq!(
+        draft_plan_json.get("snapshotId").and_then(Value::as_str),
+        Some(format!("draft:{}", thread.id).as_str())
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_read_returns_draft_plan_from_archived_workspace() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+
+    let workspace = codex_core::plan_workspace::PlanWorkspace::new(
+        codex_home.path(),
+        thread.cwd.as_path(),
+        thread.id.as_str(),
+    );
+    workspace
+        .write_file(
+            codex_core::plan_workspace::PlanWorkspaceFile::TasksCsv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Archived draft step,codex-rs/core/src/plan_workspace.rs,read archived draft,,,,
+",
+        )
+        .await?;
+
+    let turn_start_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "materialize".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_start_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
+    )
+    .await??;
+    let _: TurnStartResponse = to_response::<TurnStartResponse>(turn_start_response)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let archive_id = mcp
+        .send_thread_archive_request(ThreadArchiveParams {
+            thread_id: thread.id.clone(),
+        })
+        .await?;
+    let archive_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(archive_id)),
+    )
+    .await??;
+    let _: ThreadArchiveResponse = to_response::<ThreadArchiveResponse>(archive_resp)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("thread/archived"),
+    )
+    .await??;
+
+    let read_id = mcp
+        .send_thread_read_request(ThreadReadParams {
+            thread_id: thread.id.clone(),
+            include_turns: false,
+        })
+        .await?;
+    let read_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+    )
+    .await??;
+    let ThreadReadResponse { thread } = to_response::<ThreadReadResponse>(read_resp)?;
+
+    let draft_plan = thread
+        .draft_plan
+        .expect("archived draft plan should be returned");
+    assert_eq!(draft_plan.rows.len(), 1);
+    assert_eq!(draft_plan.rows[0].step, "Archived draft step");
 
     Ok(())
 }
