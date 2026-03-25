@@ -5,6 +5,7 @@ use codex_core::OPENAI_PROVIDER_ID;
 use codex_core::built_in_model_providers;
 use codex_core::config::Config;
 use codex_core::read_provider_api_key;
+use codex_core::validate_model_provider_id;
 
 use crate::provider_edit::default_create_provider;
 use crate::settings::data::SettingsScope;
@@ -287,15 +288,7 @@ pub(crate) fn validate_provider_id(
     rows: &[ProviderFlowRow],
     current_id: Option<&str>,
 ) -> Result<(), String> {
-    if provider_id.is_empty() {
-        return Err("Provider ID is required.".to_string());
-    }
-    if !provider_id
-        .chars()
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
-    {
-        return Err("Provider ID must use lowercase letters, digits, '-' or '_'.".to_string());
-    }
+    validate_model_provider_id(provider_id)?;
     if rows
         .iter()
         .any(|row| row.is_builtin && row.id == provider_id)

@@ -9,6 +9,7 @@ use crate::provider_flow::ProviderDraft;
 use crate::provider_flow::ProviderField;
 use crate::provider_flow_view::provider_clear_sentinel;
 use crate::settings::data::parse_toml_fragment;
+use codex_core::model_provider_id_requirements;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ProviderCreateSubmission {
@@ -329,7 +330,9 @@ pub(crate) fn provider_field_value(
 
 pub(crate) fn provider_field_placeholder(field: ProviderField) -> String {
     match field {
-        ProviderField::Id => "Enter a provider ID using lowercase letters, digits, '-' or '_'.".to_string(),
+        ProviderField::Id => {
+            format!("Enter a provider ID using {}.", model_provider_id_requirements())
+        }
         ProviderField::Name => "Enter a display name.".to_string(),
         ProviderField::BaseUrl => "Enter the provider base URL.".to_string(),
         ProviderField::ApiKey => format!(
@@ -623,6 +626,7 @@ mod tests {
     use super::default_create_provider;
     use super::parse_create_draft;
     use super::parse_edit_submission;
+    use super::provider_field_placeholder;
     use super::provider_field_value;
     use crate::provider_flow::ProviderDraft;
     use crate::provider_flow::ProviderField;
@@ -745,6 +749,14 @@ mod tests {
                 ),
                 current_status: "A bearer token is currently saved in config.toml.".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn provider_id_placeholder_uses_runtime_rules() {
+        assert_eq!(
+            provider_field_placeholder(ProviderField::Id),
+            "Enter a provider ID using ASCII letters, digits, '-' or '_'.".to_string()
         );
     }
 }

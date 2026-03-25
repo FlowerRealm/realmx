@@ -6080,21 +6080,14 @@ impl ChatWidget {
 
     fn configured_status_line_items(&self) -> Vec<String> {
         if let Some(items) = self.config.tui_status_line.clone() {
-            let mut normalized = Vec::new();
+            let mut deduped = Vec::new();
             let mut seen = HashSet::new();
             for id in items {
-                let normalized_id = match id.as_str() {
-                    "provider-usage-remaining"
-                    | "provider-usage-used"
-                    | "su8-remaining"
-                    | "su8-today-used" => StatusLineItem::RemoteUsage.to_string(),
-                    _ => id,
-                };
-                if seen.insert(normalized_id.clone()) {
-                    normalized.push(normalized_id);
+                if seen.insert(id.clone()) {
+                    deduped.push(id);
                 }
             }
-            return normalized;
+            return deduped;
         }
 
         let mut items = DEFAULT_STATUS_LINE_ITEMS
@@ -6519,7 +6512,6 @@ impl ChatWidget {
 
     fn provider_usage_enabled(&self) -> bool {
         crate::provider_usage::provider_usage_enabled(&self.config)
-            || crate::provider_usage_compat::is_legacy_su8_provider(&self.config.model_provider_id)
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {

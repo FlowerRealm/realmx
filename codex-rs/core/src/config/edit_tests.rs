@@ -1068,6 +1068,78 @@ fn set_model_provider_persists_advanced_values() {
 }
 
 #[test]
+fn set_model_provider_accepts_uppercase_id() {
+    let tmp = tempdir().expect("tmpdir");
+    let codex_home = tmp.path();
+
+    ConfigEditsBuilder::new(codex_home)
+        .set_model_provider(
+            "Acme_API",
+            &ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
+        )
+        .apply_blocking()
+        .expect("persist provider");
+
+    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+    assert!(contents.contains("[model_providers.Acme_API]"));
+}
+
+#[test]
+fn set_model_provider_rejects_invalid_id() {
+    let tmp = tempdir().expect("tmpdir");
+    let codex_home = tmp.path();
+
+    let err = ConfigEditsBuilder::new(codex_home)
+        .set_model_provider(
+            "acme.api",
+            &ModelProviderInfo {
+                name: "Acme".to_string(),
+                base_url: Some("https://acme.example/v1".to_string()),
+                auth_strategy: ModelProviderAuthStrategy::None,
+                oauth: None,
+                api_key: None,
+                env_key: None,
+                env_key_instructions: None,
+                experimental_bearer_token: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: true,
+                supports_websockets: false,
+            },
+        )
+        .apply_blocking()
+        .expect_err("invalid provider id should fail");
+
+    assert!(
+        err.to_string()
+            .contains("Provider ID must use ASCII letters, digits, '-' or '_'")
+    );
+}
+
+#[test]
 fn replace_mcp_servers_blocking_clears_table_when_empty() {
     let tmp = tempdir().expect("tmpdir");
     let codex_home = tmp.path();

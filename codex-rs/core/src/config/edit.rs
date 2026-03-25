@@ -4,6 +4,8 @@ use crate::features::FEATURES;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
+use crate::provider_id::validate_model_provider_id;
+use crate::provider_id::validate_model_provider_reference;
 use anyhow::Context;
 use codex_config::CONFIG_TOML_FILE;
 use codex_protocol::config_types::Personality;
@@ -389,13 +391,16 @@ impl ConfigDocument {
             ConfigEdit::SetPath { segments, value } => Ok(self.insert(segments, value.clone())),
             ConfigEdit::ClearPath { segments } => Ok(self.clear_owned(segments)),
             ConfigEdit::SetModelProvider { id, provider } => {
+                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
                 let item = model_provider_to_item(provider)?;
                 Ok(self.insert(&["model_providers".to_string(), id.clone()], item))
             }
             ConfigEdit::RemoveModelProvider { id } => {
+                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
                 Ok(self.remove(&["model_providers".to_string(), id.clone()]))
             }
             ConfigEdit::SetDefaultModelProvider { id } => {
+                validate_model_provider_reference(id).map_err(anyhow::Error::msg)?;
                 Ok(self.write_profile_value(&["model_provider"], Some(value(id.clone()))))
             }
             ConfigEdit::SetProjectTrustLevel { path, level } => {

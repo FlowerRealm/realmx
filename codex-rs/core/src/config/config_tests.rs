@@ -31,6 +31,7 @@ use pretty_assertions::assert_eq;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -4086,6 +4087,54 @@ wire_api = "responses"
         .get("example")
         .expect("example provider should exist");
     assert_eq!(provider.api_key.as_deref(), Some("secret-inline"));
+}
+
+#[test]
+fn config_rejects_invalid_provider_id_key() {
+    let err = toml::from_str::<ConfigToml>(
+        r#"[model_providers."openai.custom"]
+name = "Example"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#,
+    )
+    .expect_err("provider id with dots should fail");
+
+    assert!(
+        err.to_string()
+            .contains("Provider ID must use ASCII letters, digits, '-' or '_'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn config_rejects_invalid_model_provider_reference() {
+    let err = deserialize_config_toml_with_base(
+        toml::from_str::<TomlValue>(r#"model_provider = "openai.custom""#).expect("parse toml"),
+        Path::new("/tmp"),
+    )
+    .expect_err("invalid model_provider reference should fail");
+
+    assert!(
+        err.to_string().contains(
+            "model_provider is invalid: Provider ID must use ASCII letters, digits, '-' or '_'"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn config_accepts_uppercase_provider_id_key() {
+    let cfg: ConfigToml = toml::from_str(
+        r#"[model_providers.OpenAI_Custom]
+name = "Example"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#,
+    )
+    .expect("uppercase provider config should parse");
+
+    assert!(cfg.model_providers.contains_key("OpenAI_Custom"));
 }
 
 fn create_test_fixture() -> std::io::Result<PrecedenceTestFixture> {

@@ -9,6 +9,7 @@ use codex_core::default_client::build_reqwest_client;
 use codex_core::git_info::resolve_root_git_project_for_trust;
 use codex_core::path_utils::write_atomically;
 use codex_core::resolve_provider_credential;
+use codex_core::validate_model_provider_id;
 use reqwest::Method;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
@@ -398,14 +399,6 @@ pub(crate) async fn fetch_provider_usage_snapshot(
             .await;
     }
 
-    if crate::provider_usage_compat::is_legacy_su8_provider(&config.model_provider_id) {
-        return crate::provider_usage_compat::fetch_legacy_su8_provider_usage_snapshot(
-            config.model_provider.clone(),
-            auth,
-        )
-        .await;
-    }
-
     None
 }
 
@@ -490,11 +483,9 @@ fn trusted_project_root(config: &Config) -> Option<PathBuf> {
 }
 
 fn provider_usage_script_path(config: &Config, provider_id: &str) -> Result<PathBuf, String> {
-    if !is_safe_provider_id(provider_id) {
-        return Err(format!(
-            "Provider ID `{provider_id}` cannot be used for a project usage script"
-        ));
-    }
+    validate_model_provider_id(provider_id).map_err(|_| {
+        format!("Provider ID `{provider_id}` cannot be used for a project usage script")
+    })?;
 
     let project_root = trusted_project_root(config)
         .ok_or_else(|| "Usage scripts can only be edited inside a trusted project.".to_string())?;
@@ -503,13 +494,6 @@ fn provider_usage_script_path(config: &Config, provider_id: &str) -> Result<Path
         .join("providers")
         .join(provider_id)
         .join(PROVIDER_USAGE_SCRIPT))
-}
-
-fn is_safe_provider_id(provider_id: &str) -> bool {
-    !provider_id.trim().is_empty()
-        && provider_id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
 async fn fetch_scripted_provider_usage_snapshot(

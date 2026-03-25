@@ -10903,16 +10903,6 @@ async fn remote_usage_appends_default_status_item() {
 }
 
 #[tokio::test]
-async fn legacy_su8_provider_appends_remote_usage_default_item() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.model_provider_id = "su8".to_string();
-
-    let items = chat.configured_status_line_items();
-
-    assert!(items.iter().any(|item| item == "remote-usage"));
-}
-
-#[tokio::test]
 async fn remote_usage_status_line_value_renders_summary() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.on_provider_usage_snapshot(Some(
@@ -10962,31 +10952,21 @@ async fn remote_usage_status_line_footer_snapshot() {
 }
 
 #[tokio::test]
-async fn legacy_remote_usage_ids_map_to_remote_usage() {
+async fn configured_status_line_items_only_dedupes_exact_ids() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.tui_status_line = Some(vec![
+        "remote-usage".to_string(),
+        "remote-usage".to_string(),
         "provider-usage-remaining".to_string(),
-        "provider-usage-used".to_string(),
-        "su8-remaining".to_string(),
-        "su8-today-used".to_string(),
     ]);
 
     assert_eq!(
         chat.configured_status_line_items(),
-        vec![StatusLineItem::RemoteUsage.to_string()]
+        vec![
+            "remote-usage".to_string(),
+            "provider-usage-remaining".to_string(),
+        ]
     );
-}
-
-#[tokio::test]
-async fn legacy_remote_usage_ids_keep_provider_usage_poller_enabled() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.model_provider_id = "su8".to_string();
-    chat.config.tui_status_line = Some(vec!["su8-remaining".to_string()]);
-
-    chat.prefetch_provider_usage();
-
-    assert!(chat.provider_usage_poller.is_some());
-    chat.stop_provider_usage_poller();
 }
 
 #[tokio::test]

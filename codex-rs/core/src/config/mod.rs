@@ -57,6 +57,8 @@ use crate::protocol::AskForApproval;
 use crate::protocol::ReadOnlyAccess;
 use crate::protocol::SandboxPolicy;
 use crate::provider_credentials::store_provider_api_key;
+use crate::provider_id::validate_model_provider_id;
+use crate::provider_id::validate_model_provider_reference;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
@@ -917,9 +919,12 @@ pub(crate) fn deserialize_config_toml_with_base(
     // This guard ensures that any relative paths that is deserialized into an
     // [AbsolutePathBuf] is resolved against `config_base_dir`.
     let _guard = AbsolutePathBufGuard::new(config_base_dir);
-    root_value
+    let cfg: ConfigToml = root_value
         .try_into()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    validate_model_provider_configuration(&cfg)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(cfg)
 }
 
 fn load_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> {
@@ -1989,6 +1994,51 @@ Built-in providers cannot be overridden. Rename your custom provider (for exampl
     }
 }
 
+fn validate_model_provider_ids(
+    model_providers: &HashMap<String, ModelProviderInfo>,
+) -> Result<(), String> {
+    let mut invalid = model_providers
+        .keys()
+        .filter_map(|id| {
+            validate_model_provider_id(id)
+                .err()
+                .map(|err| format!("`{id}` ({err})"))
+        })
+        .collect::<Vec<_>>();
+    invalid.sort_unstable();
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "model_providers contains invalid provider IDs: {}",
+            invalid.join(", ")
+        ))
+    }
+}
+
+fn validate_model_provider_references(cfg: &ConfigToml) -> Result<(), String> {
+    if let Some(model_provider) = cfg.model_provider.as_deref() {
+        validate_model_provider_reference(model_provider)
+            .map_err(|err| format!("model_provider is invalid: {err}"))?;
+    }
+
+    for (profile_name, profile) in &cfg.profiles {
+        if let Some(model_provider) = profile.model_provider.as_deref() {
+            validate_model_provider_reference(model_provider).map_err(|err| {
+                format!("profiles.{profile_name}.model_provider is invalid: {err}")
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_model_provider_configuration(cfg: &ConfigToml) -> Result<(), String> {
+    validate_model_provider_ids(&cfg.model_providers)?;
+    validate_reserved_model_provider_ids(&cfg.model_providers)?;
+    validate_model_provider_references(cfg)
+}
+
 fn deserialize_model_providers<'de, D>(
     deserializer: D,
 ) -> Result<HashMap<String, ModelProviderInfo>, D::Error>
@@ -1996,6 +2046,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let model_providers = HashMap::<String, ModelProviderInfo>::deserialize(deserializer)?;
+    validate_model_provider_ids(&model_providers).map_err(serde::de::Error::custom)?;
     validate_reserved_model_provider_ids(&model_providers).map_err(serde::de::Error::custom)?;
     Ok(model_providers)
 }
@@ -2121,7 +2172,7 @@ impl Config {
         codex_home: PathBuf,
         config_layer_stack: ConfigLayerStack,
     ) -> std::io::Result<Self> {
-        validate_reserved_model_provider_ids(&cfg.model_providers)
+        validate_model_provider_configuration(&cfg)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
         // Ensure that every field of ConfigRequirements is applied to the final
         // Config.
