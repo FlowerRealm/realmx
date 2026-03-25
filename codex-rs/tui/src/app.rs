@@ -133,7 +133,6 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
-use toml_edit::Item as TomlItem;
 #[cfg(test)]
 use wiremock::MockServer;
 
@@ -1184,16 +1183,20 @@ impl App {
         else {
             return edits;
         };
+        let Some(provider_id_value) =
+            toml_value_to_item(&TomlValue::String(new_id.to_string())).ok()
+        else {
+            return edits;
+        };
 
         if user_config
             .get("model_provider")
             .and_then(TomlValue::as_str)
             == Some(original_id)
         {
-            let value = TomlItem::Value(toml_edit::Value::from(new_id));
             edits.push(ConfigEdit::SetPath {
                 segments: vec!["model_provider".to_string()],
-                value,
+                value: provider_id_value.clone(),
             });
         }
 
@@ -1208,14 +1211,13 @@ impl App {
                 .and_then(TomlValue::as_str)
                 == Some(original_id)
             {
-                let value = TomlItem::Value(toml_edit::Value::from(new_id));
                 edits.push(ConfigEdit::SetPath {
                     segments: vec![
                         "profiles".to_string(),
                         profile.to_string(),
                         "model_provider".to_string(),
                     ],
-                    value,
+                    value: provider_id_value.clone(),
                 });
             }
         }
