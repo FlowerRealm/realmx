@@ -1022,10 +1022,15 @@ impl App {
             &self.config,
             scope.normalized(self.active_profile.as_deref()),
         );
-        validate_provider_id(&provider_id, &data.rows, None)
+        validate_provider_id(&provider_id, &data.rows, /*current_id*/ None)
             .map_err(|err| color_eyre::eyre::eyre!(err))?;
-        self.persist_model_provider(None, provider_id.clone(), provider, api_key_input)
-            .await?;
+        self.persist_model_provider(
+            /*original_id*/ None,
+            provider_id.clone(),
+            provider,
+            api_key_input,
+        )
+        .await?;
         self.chat_widget.clear_provider_create_draft();
         self.open_provider_flow_after_refresh(
             source,
@@ -3935,7 +3940,7 @@ impl App {
                                 "Saved usage script for provider {provider_id} to {}",
                                 path.display()
                             ),
-                            None,
+                            /*hint*/ None,
                         );
                     }
                 }
@@ -3974,7 +3979,7 @@ impl App {
                                     "Removed usage script override for provider {provider_id} from {}",
                                     path.display()
                                 ),
-                                None,
+                                /*hint*/ None,
                             );
                         }
                     }

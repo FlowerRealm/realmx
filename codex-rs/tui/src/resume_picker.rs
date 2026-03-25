@@ -163,7 +163,7 @@ async fn run_session_picker(
                 request.cursor.as_ref(),
                 request.sort_key,
                 INTERACTIVE_SESSION_SOURCES,
-                None,
+                /*model_providers*/ None,
                 request.default_provider.as_str(),
                 /*search_term*/ None,
             )

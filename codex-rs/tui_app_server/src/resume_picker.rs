@@ -104,8 +104,7 @@ struct PageLoadRequest {
     cursor: Option<PageCursor>,
     request_token: usize,
     search_token: Option<usize>,
-    provider_filter: Option<String>,
-    fallback_provider: String,
+    provider_state: ProviderState,
     sort_key: ThreadSortKey,
 }
 
@@ -131,6 +130,12 @@ struct PickerPage {
     next_cursor: Option<PageCursor>,
     num_scanned_files: usize,
     reached_scan_cap: bool,
+}
+
+#[derive(Clone)]
+struct ProviderState {
+    filter: Option<String>,
+    fallback: String,
 }
 
 /// Interactive session picker that lists recorded rollout files with simple
@@ -227,8 +232,10 @@ async fn run_session_picker_with_loader(
     bg_rx: mpsc::UnboundedReceiver<BackgroundEvent>,
 ) -> Result<SessionSelection> {
     let alt = AltScreenGuard::enter(tui);
-    let provider_filter = None;
-    let fallback_provider = config.model_provider_id.to_string();
+    let provider_state = ProviderState {
+        filter: None,
+        fallback: config.model_provider_id.to_string(),
+    };
     let codex_home = config.codex_home.as_path();
     let filter_cwd = if show_all || is_remote {
         // Remote sessions live in the server's filesystem namespace, so the client
@@ -243,8 +250,7 @@ async fn run_session_picker_with_loader(
         codex_home.to_path_buf(),
         alt.tui.frame_requester(),
         page_loader,
-        provider_filter,
-        fallback_provider,
+        provider_state,
         show_all,
         filter_cwd,
         action,
@@ -312,7 +318,7 @@ fn spawn_rollout_page_loader(
                 request.sort_key,
                 INTERACTIVE_SESSION_SOURCES,
                 /*model_providers*/ None,
-                request.fallback_provider.as_str(),
+                request.provider_state.fallback.as_str(),
                 /*search_term*/ None,
             )
             .await
@@ -343,7 +349,7 @@ fn spawn_app_server_page_loader(
             let page = load_app_server_page(
                 &mut app_server,
                 cursor,
-                request.provider_filter,
+                request.provider_state.filter,
                 request.sort_key,
             )
             .await;
@@ -404,8 +410,7 @@ struct PickerState {
     next_search_token: usize,
     page_loader: PageLoader,
     view_rows: Option<usize>,
-    provider_filter: Option<String>,
-    fallback_provider: String,
+    provider_state: ProviderState,
     show_all: bool,
     filter_cwd: Option<PathBuf>,
     action: SessionPickerAction,
@@ -535,8 +540,7 @@ impl PickerState {
         codex_home: PathBuf,
         requester: FrameRequester,
         page_loader: PageLoader,
-        provider_filter: Option<String>,
-        fallback_provider: String,
+        provider_state: ProviderState,
         show_all: bool,
         filter_cwd: Option<PathBuf>,
         action: SessionPickerAction,
@@ -561,8 +565,7 @@ impl PickerState {
             next_search_token: 0,
             page_loader,
             view_rows: None,
-            provider_filter,
-            fallback_provider,
+            provider_state,
             show_all,
             filter_cwd,
             action,
@@ -703,8 +706,7 @@ impl PickerState {
             cursor: None,
             request_token,
             search_token,
-            provider_filter: self.provider_filter.clone(),
-            fallback_provider: self.fallback_provider.clone(),
+            provider_state: self.provider_state.clone(),
             sort_key: self.sort_key,
         });
     }
@@ -980,8 +982,7 @@ impl PickerState {
             cursor: Some(cursor),
             request_token,
             search_token,
-            provider_filter: self.provider_filter.clone(),
-            fallback_provider: self.fallback_provider.clone(),
+            provider_state: self.provider_state.clone(),
             sort_key: self.sort_key,
         });
     }
@@ -1844,8 +1845,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            None,
-            String::from("openai"),
+            ProviderState {
+                filter: None,
+                fallback: String::from("openai"),
+            },
             false,
             None,
             SessionPickerAction::Resume,
@@ -1876,8 +1879,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -1955,8 +1960,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2192,8 +2199,10 @@ mod tests {
             tempdir.path().to_path_buf(),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2260,8 +2269,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2330,8 +2341,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2412,8 +2425,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2443,8 +2458,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2489,8 +2506,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2530,8 +2549,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2600,8 +2621,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,
@@ -2646,8 +2669,10 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            Some(String::from("openai")),
-            String::from("openai"),
+            ProviderState {
+                filter: Some(String::from("openai")),
+                fallback: String::from("openai"),
+            },
             true,
             None,
             SessionPickerAction::Resume,

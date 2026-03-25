@@ -166,7 +166,7 @@ impl KeyboardHandler for AuthModeWidget {
                 self.select_option_by_index(/*index*/ 2);
             }
             KeyCode::Char('4') => {
-                self.select_option_by_index(3);
+                self.select_option_by_index(/*index*/ 3);
             }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
@@ -990,7 +990,7 @@ impl AuthModeWidget {
                 provider.env_http_headers.clone(),
                 &scopes,
                 oauth_resource.as_deref(),
-                None,
+                /*timeout_secs*/ None,
                 callback_port,
                 callback_uri.as_deref(),
             )

@@ -466,7 +466,10 @@ fn trusted_project_root(config: &Config) -> Option<PathBuf> {
         resolve_root_git_project_for_trust(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let project_root = config
         .config_layer_stack
-        .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
+        .get_layers(
+            ConfigLayerStackOrdering::LowestPrecedenceFirst,
+            /*include_disabled*/ true,
+        )
         .iter()
         .find_map(|layer| match &layer.name {
             ConfigLayerSource::Project { dot_codex_folder } => {

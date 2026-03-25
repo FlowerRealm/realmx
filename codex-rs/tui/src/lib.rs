@@ -790,7 +790,7 @@ async fn run_ratatui_app(
                 /*cursor*/ None,
                 ThreadSortKey::UpdatedAt,
                 INTERACTIVE_SESSION_SOURCES,
-                None,
+                /*model_providers*/ None,
                 &config.model_provider_id,
                 /*search_term*/ None,
             )
@@ -889,7 +889,7 @@ async fn run_ratatui_app(
             /*cursor*/ None,
             ThreadSortKey::UpdatedAt,
             INTERACTIVE_SESSION_SOURCES,
-            None,
+            /*model_providers*/ None,
             &config.model_provider_id,
             filter_cwd,
         )

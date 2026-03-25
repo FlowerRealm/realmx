@@ -860,13 +860,13 @@ fn provider_field_placeholder(field: ProviderField) -> String {
             "",
             &crate::provider_edit::default_create_provider(),
             field,
-            false,
+            /*has_secure_api_key*/ false,
         )),
         ProviderField::ExperimentalBearerToken => Some(provider_field_value(
             "",
             &crate::provider_edit::default_create_provider(),
             field,
-            false,
+            /*has_secure_api_key*/ false,
         )),
         _ => None,
     };
