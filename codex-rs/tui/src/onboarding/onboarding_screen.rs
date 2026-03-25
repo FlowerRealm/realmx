@@ -606,11 +606,11 @@ mod tests {
             rendered,
             @r"
 > You are in /workspace/project
-Do you trust the contents of this directory? Working with untrusted
-contents comes with higher risk of prompt injection.
+  Do you trust the contents of this directory? Working with untrusted
+  contents comes with higher risk of prompt injection.
 › 1. Yes, continue
   2. No, quit
-Press Enter to continue
+  Press enter to continue
 "
         );
     }

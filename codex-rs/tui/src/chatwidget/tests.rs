@@ -7811,7 +7811,7 @@ async fn model_selection_popup_shows_cached_models_before_remote_models_arrive()
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains("gpt-5.4[1m]"));
     assert!(popup.contains("All models"));
     assert!(!popup.contains("Loading models..."));
 }
@@ -7916,7 +7916,7 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains("gpt-5.4[1m]"));
     assert!(!popup.contains(remote_slug));
     assert!(!popup.contains("Loading models..."));
 
@@ -7933,7 +7933,7 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
     chat.on_model_picker_loaded(result);
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains("gpt-5.4[1m]"));
     assert!(popup.contains(remote_slug));
     assert!(popup.contains("gpt-5.4[1m]"));
     assert!(!popup.contains("Loading models..."));

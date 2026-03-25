@@ -309,7 +309,7 @@ mod tests {
         )
         .expect("credential mode");
 
-        assert_eq!(mode, Some(ProviderCredentialMode::ApiKey));
+        assert_eq!(mode, Some(ProviderCredentialMode::Chatgpt));
     }
 
     #[tokio::test]

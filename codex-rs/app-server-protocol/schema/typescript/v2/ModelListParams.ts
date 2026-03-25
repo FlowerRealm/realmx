@@ -14,4 +14,8 @@ limit?: number | null,
 /**
  * When true, include models that are hidden from the default picker list.
  */
-includeHidden?: boolean | null, };
+includeHidden?: boolean | null, 
+/**
+ * Controls whether the server should refresh remote models before listing.
+ */
+forceRefresh?: boolean | null, };

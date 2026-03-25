@@ -22,7 +22,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::UserInput;
-use core_test_support::responses::ev_apply_patch_function_call;
+use core_test_support::responses::ev_apply_patch_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -31,6 +31,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
+use core_test_support::test_codex::ApplyPatchModelOutput;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -191,7 +192,10 @@ impl ActionKind {
                 let (path, patch_path) = target.resolve_for_patch(test);
                 let _ = fs::remove_file(&path);
                 let patch = build_add_file_patch(&patch_path, content);
-                Ok((ev_apply_patch_function_call(call_id, &patch), None))
+                Ok((
+                    ev_apply_patch_call(call_id, &patch, ApplyPatchModelOutput::Freeform),
+                    None,
+                ))
             }
             ActionKind::ApplyPatchShell { target, content } => {
                 let (path, patch_path) = target.resolve_for_patch(test);
@@ -1737,7 +1741,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         &server,
         sse(vec![
             ev_response_created("resp-1"),
-            ev_apply_patch_function_call(call_id_1, &patch_add),
+            ev_apply_patch_call(call_id_1, &patch_add, ApplyPatchModelOutput::Freeform),
             ev_completed("resp-1"),
         ]),
     )
@@ -1772,7 +1776,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         &server,
         sse(vec![
             ev_response_created("resp-3"),
-            ev_apply_patch_function_call(call_id_2, &patch_update),
+            ev_apply_patch_call(call_id_2, &patch_update, ApplyPatchModelOutput::Freeform),
             ev_completed("resp-3"),
         ]),
     )
