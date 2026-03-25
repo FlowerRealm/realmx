@@ -578,7 +578,7 @@ fn clear_path(root: &mut TomlValue, segments: &[String]) -> Result<bool, MergeEr
 
 fn validate_config(value: &TomlValue) -> Result<(), toml::de::Error> {
     let cfg: ConfigToml = value.clone().try_into()?;
-    crate::config::validate_model_provider_configuration(&cfg).map_err(toml::de::Error::custom)?;
+    crate::config::validate_model_provider_configuration(&cfg).map_err(serde::de::Error::custom)?;
     Ok(())
 }
 
