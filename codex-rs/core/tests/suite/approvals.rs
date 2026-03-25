@@ -607,6 +607,13 @@ fn parse_result(item: &Value) -> CommandResult {
     }
 }
 
+fn result_output_item(
+    request: &core_test_support::responses::ResponsesRequest,
+    call_id: &str,
+) -> Value {
+    request.any_tool_call_output(call_id)
+}
+
 async fn expect_exec_approval(
     test: &TestCodex,
     expected_command: &str,
@@ -1694,7 +1701,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
         }
     }
 
-    let output_item = results_mock.single_request().function_call_output(call_id);
+    let output_item = result_output_item(&results_mock.single_request(), call_id);
     let result = parse_result(&output_item);
     scenario.expectation.verify(&test, &result)?;
 
@@ -1722,6 +1729,11 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
+            config.include_apply_patch_tool = true;
+            config
+                .features
+                .enable(Feature::ApplyPatchFreeform)
+                .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
 
@@ -1911,11 +1923,10 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
         "unexpected policy contents: {policy_contents}"
     );
 
-    let first_output = parse_result(
-        &first_results
-            .single_request()
-            .function_call_output(call_id_first),
-    );
+    let first_output = parse_result(&result_output_item(
+        &first_results.single_request(),
+        call_id_first,
+    ));
     assert_eq!(first_output.exit_code.unwrap_or(0), 0);
     assert!(
         first_output.stdout.is_empty(),
@@ -1969,11 +1980,10 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
 
     wait_for_completion_without_approval(&test).await;
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id_second),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id_second,
+    ));
     assert_eq!(second_output.exit_code.unwrap_or(0), 0);
     assert!(
         second_output.stdout.is_empty(),
@@ -2053,7 +2063,7 @@ async fn matched_prefix_rule_runs_unsandboxed_under_zsh_fork() -> Result<()> {
 
     wait_for_completion_without_approval(&test).await;
 
-    let result = parse_result(&results.single_request().function_call_output(call_id));
+    let result = parse_result(&result_output_item(&results.single_request(), call_id));
     assert_eq!(result.exit_code.unwrap_or(0), 0);
     assert!(
         outside_path.exists(),
@@ -2214,11 +2224,10 @@ async fn approving_fallback_rule_for_compound_command_works() -> Result<()> {
 
     wait_for_completion_without_approval(&test).await;
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id,
+    ));
     assert_eq!(second_output.exit_code.unwrap_or(0), 0);
     assert!(
         second_output.stdout.is_empty(),
@@ -2433,11 +2442,10 @@ allow_local_binding = true
         "unexpected policy contents: {policy_contents}"
     );
 
-    let first_output = parse_result(
-        &first_results
-            .single_request()
-            .function_call_output(call_id_first),
-    );
+    let first_output = parse_result(&result_output_item(
+        &first_results.single_request(),
+        call_id_first,
+    ));
     Expectation::CommandFailure {
         output_contains: "",
     }
@@ -2516,11 +2524,10 @@ allow_local_binding = true
         }
     }
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id_second),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id_second,
+    ));
     Expectation::CommandFailure {
         output_contains: "",
     }

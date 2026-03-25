@@ -2658,7 +2658,7 @@ async fn snapshot_request_shape_mid_turn_continuation_compaction() {
 
     let function_call_output = auto_compact_mock
         .single_request()
-        .function_call_output(DUMMY_CALL_ID);
+        .any_tool_call_output(DUMMY_CALL_ID);
     let output_text = function_call_output
         .get("output")
         .and_then(|value| value.as_str())

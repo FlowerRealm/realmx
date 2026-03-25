@@ -495,14 +495,14 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     assert!(
         compact_request.has_function_call(retained_call_id)
             && compact_request
-                .function_call_output_text(retained_call_id)
+                .any_tool_call_output_text(retained_call_id)
                 .is_some(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
         !compact_request.has_function_call(trimmed_call_id)
             && compact_request
-                .function_call_output_text(trimmed_call_id)
+                .any_tool_call_output_text(trimmed_call_id)
                 .is_none(),
         "expected compact request to drop the trailing function call/result pair past the boundary"
     );
@@ -513,9 +513,12 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
         "expected exactly one function call after trimming"
     );
     assert_eq!(
-        compact_request.inputs_of_type("function_call_output").len(),
+        compact_request.inputs_of_type("function_call_output").len()
+            + compact_request
+                .inputs_of_type("custom_tool_call_output")
+                .len(),
         1,
-        "expected exactly one function call output after trimming"
+        "expected exactly one tool call output after trimming"
     );
 
     Ok(())
@@ -628,14 +631,14 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     assert!(
         compact_request.has_function_call(retained_call_id)
             && compact_request
-                .function_call_output_text(retained_call_id)
+                .any_tool_call_output_text(retained_call_id)
                 .is_some(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
         !compact_request.has_function_call(trimmed_call_id)
             && compact_request
-                .function_call_output_text(trimmed_call_id)
+                .any_tool_call_output_text(trimmed_call_id)
                 .is_none(),
         "expected compact request to drop the trailing function call/result pair past the boundary"
     );
@@ -646,9 +649,12 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
         "expected exactly one function call after trimming"
     );
     assert_eq!(
-        compact_request.inputs_of_type("function_call_output").len(),
+        compact_request.inputs_of_type("function_call_output").len()
+            + compact_request
+                .inputs_of_type("custom_tool_call_output")
+                .len(),
         1,
-        "expected exactly one function call output after trimming"
+        "expected exactly one tool call output after trimming"
     );
 
     Ok(())
