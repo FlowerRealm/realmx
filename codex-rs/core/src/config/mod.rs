@@ -807,7 +807,7 @@ async fn maybe_migrate_inline_model_provider_api_keys(codex_home: &Path) -> std:
         }
         edits.push(ConfigEdit::SetModelProvider {
             id: id.clone(),
-            provider: migrated,
+            provider: Box::new(migrated),
         });
     }
 

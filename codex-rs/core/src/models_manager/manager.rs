@@ -199,7 +199,7 @@ impl ModelsManager {
             model_catalog,
             collaboration_modes_config,
             OPENAI_PROVIDER_ID.to_string(),
-            ModelProviderInfo::create_openai_provider(/* base_url */ None),
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             OAuthCredentialsStoreMode::default(),
         )
     }

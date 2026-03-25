@@ -1091,7 +1091,7 @@ impl App {
     ) -> Result<()> {
         let mut edits = vec![ConfigEdit::SetModelProvider {
             id: id.clone(),
-            provider: provider.clone(),
+            provider: Box::new(provider.clone()),
         }];
         if let Some(original_id) = original_id.as_deref()
             && original_id != id

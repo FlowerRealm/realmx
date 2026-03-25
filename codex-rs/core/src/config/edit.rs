@@ -65,7 +65,7 @@ pub enum ConfigEdit {
     /// Set or replace a provider entry under `[model_providers.<id>]`.
     SetModelProvider {
         id: String,
-        provider: ModelProviderInfo,
+        provider: Box<ModelProviderInfo>,
     },
     /// Remove a provider entry under `[model_providers.<id>]`.
     RemoveModelProvider { id: String },
@@ -392,7 +392,7 @@ impl ConfigDocument {
             ConfigEdit::ClearPath { segments } => Ok(self.clear_owned(segments)),
             ConfigEdit::SetModelProvider { id, provider } => {
                 validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
-                let item = model_provider_to_item(provider)?;
+                let item = model_provider_to_item(provider.as_ref())?;
                 Ok(self.insert(&["model_providers".to_string(), id.clone()], item))
             }
             ConfigEdit::RemoveModelProvider { id } => {
@@ -997,7 +997,7 @@ impl ConfigEditsBuilder {
     pub fn set_model_provider(mut self, id: &str, provider: &ModelProviderInfo) -> Self {
         self.edits.push(ConfigEdit::SetModelProvider {
             id: id.to_string(),
-            provider: provider.clone(),
+            provider: Box::new(provider.clone()),
         });
         self
     }
