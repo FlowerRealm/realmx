@@ -311,7 +311,7 @@ fn spawn_rollout_page_loader(
                 cursor,
                 request.sort_key,
                 INTERACTIVE_SESSION_SOURCES,
-                None,
+                /*model_providers*/ None,
                 request.fallback_provider.as_str(),
                 /*search_term*/ None,
             )

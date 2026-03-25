@@ -839,7 +839,7 @@ impl App {
         &mut self,
         app_server: &mut AppServerSession,
     ) -> Result<()> {
-        let available_models = app_server.list_models(/* include_hidden */ true).await?;
+        let available_models = app_server.list_models(/*include_hidden*/ true).await?;
         self.model_catalog.replace_models(available_models);
         self.chat_widget.refresh_model_catalog();
         Ok(())
@@ -2511,7 +2511,7 @@ impl App {
             let app_event_tx = app.app_event_tx.clone();
             tokio::spawn(async move {
                 let result = startup_refresh_client
-                    .list_models(/* include_hidden */ true, /* force_refresh */ true)
+                    .list_models(/*include_hidden*/ true, /*force_refresh*/ true)
                     .await
                     .map_err(|err| {
                         format!(
