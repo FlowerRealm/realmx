@@ -1325,7 +1325,7 @@ impl CodexMessageProcessor {
             provider.env_http_headers.clone(),
             &oauth_scopes,
             oauth_resource.as_deref(),
-            None,
+            /*timeout_secs*/ None,
             self.config.mcp_oauth_callback_port,
             self.config.mcp_oauth_callback_url.as_deref(),
         )
@@ -1418,15 +1418,15 @@ impl CodexMessageProcessor {
         login_id: Uuid,
     ) -> std::result::Result<CanceledLoginKind, CancelLoginError> {
         let mut guard = self.active_login.lock().await;
-        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
-            if let Some(active) = guard.take() {
-                let kind = match &active.kind {
-                    ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
-                    ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
-                };
-                drop(active);
-                return Ok(kind);
-            }
+        if guard.as_ref().map(|l| l.login_id) == Some(login_id)
+            && let Some(active) = guard.take()
+        {
+            let kind = match &active.kind {
+                ActiveLoginKind::Chatgpt { .. } => CanceledLoginKind::Chatgpt,
+                ActiveLoginKind::OAuth { .. } => CanceledLoginKind::OAuth,
+            };
+            drop(active);
+            return Ok(kind);
         }
         Err(CancelLoginError::NotFound)
     }
@@ -4531,16 +4531,7 @@ impl CodexMessageProcessor {
         let mut items = Vec::with_capacity(requested_page_size);
         let mut next_cursor: Option<String> = None;
 
-        let model_provider_filter = match model_providers {
-            Some(providers) => {
-                if providers.is_empty() {
-                    None
-                } else {
-                    Some(providers)
-                }
-            }
-            None => None,
-        };
+        let model_provider_filter = model_providers.filter(|providers| !providers.is_empty());
         let fallback_provider = self.config.model_provider_id.clone();
         let (allowed_sources_vec, source_kind_filter) = compute_source_filters(source_kinds);
         let allowed_sources = allowed_sources_vec.as_slice();
