@@ -229,7 +229,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
     let ServerNotification::AccountUpdated(payload) = parsed else {
         bail!("unexpected notification: {parsed:?}");
     };
-    assert_eq!(payload.auth_mode, Some(AuthMode::ChatgptAuthTokens));
+    assert_eq!(payload.auth_mode, Some(AuthMode::Chatgpt));
     assert_eq!(payload.plan_type, Some(AccountPlanType::Pro));
 
     let get_id = mcp
