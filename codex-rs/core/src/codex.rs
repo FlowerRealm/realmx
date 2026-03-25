@@ -5,6 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use crate::AuthManager;
 use crate::CodexAuth;
@@ -763,6 +764,7 @@ pub(crate) struct Session {
     /// session.
     features: ManagedFeatures,
     pending_mcp_server_refresh_config: Mutex<Option<McpServerRefreshConfig>>,
+    tool_inventory_generation: AtomicU64,
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
@@ -1849,6 +1851,7 @@ impl Session {
             state: Mutex::new(state),
             features: config.features.clone(),
             pending_mcp_server_refresh_config: Mutex::new(None),
+            tool_inventory_generation: AtomicU64::new(0),
             conversation: Arc::new(RealtimeConversationManager::new()),
             active_turn: Mutex::new(None),
             guardian_review_session: GuardianReviewSessionManager::default(),
@@ -2089,6 +2092,16 @@ impl Session {
     pub(crate) async fn get_connector_selection(&self) -> HashSet<String> {
         let state = self.state.lock().await;
         state.get_connector_selection()
+    }
+
+    pub(crate) fn bump_tool_inventory_generation(&self) -> u64 {
+        self.tool_inventory_generation
+            .fetch_add(1, Ordering::Relaxed)
+            + 1
+    }
+
+    fn tool_inventory_generation(&self) -> u64 {
+        self.tool_inventory_generation.load(Ordering::Relaxed)
     }
 
     // Clears connector IDs that were accumulated for explicit selection.
@@ -2498,12 +2511,14 @@ impl Session {
             .new_default_turn_with_sub_id(INITIAL_SUBMIT_ID.to_owned())
             .await;
         let startup_cancellation_token = CancellationToken::new();
+        let mut startup_tool_cache = TurnToolCache::default();
         let startup_router = built_tools(
             self,
             startup_turn_context.as_ref(),
             &[],
             &HashSet::new(),
             /*skills_outcome*/ None,
+            &mut startup_tool_cache,
             &startup_cancellation_token,
         )
         .await?;
@@ -4117,6 +4132,7 @@ impl Session {
 
         let mut manager = self.services.mcp_connection_manager.write().await;
         *manager = refreshed_manager;
+        self.bump_tool_inventory_generation();
     }
 
     async fn refresh_mcp_servers_if_requested(&self, turn_context: &TurnContext) {
@@ -5749,6 +5765,7 @@ pub(crate) async fn run_turn(
     // one instance across retries within this turn.
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
+    let mut turn_tool_cache = TurnToolCache::default();
 
     loop {
         if let Some(session_start_source) = sess.take_pending_session_start_source().await {
@@ -5830,6 +5847,21 @@ pub(crate) async fn run_turn(
             }
         }
 
+        let estimated_token_count = sess.get_estimated_token_count(turn_context.as_ref()).await;
+        let should_pre_request_compact =
+            estimated_token_count.is_some_and(|token_count| token_count >= auto_compact_limit);
+        if should_pre_request_compact
+            && run_auto_compact(
+                &sess,
+                &turn_context,
+                InitialContextInjection::BeforeLastUserMessage,
+            )
+            .await
+            .is_err()
+        {
+            return None;
+        }
+
         // Construct the input that we will send to the model.
         let sampling_request_input: Vec<ResponseItem> = {
             sess.clone_history()
@@ -5855,6 +5887,7 @@ pub(crate) async fn run_turn(
             sampling_request_input,
             &turn_enabled_connectors,
             skills_outcome,
+            &mut turn_tool_cache,
             &mut server_model_warning_emitted_for_turn,
             cancellation_token.child_token(),
         )
@@ -5867,7 +5900,6 @@ pub(crate) async fn run_turn(
                 } = sampling_request_output;
                 let total_usage_tokens = sess.get_total_token_usage().await;
                 let token_limit_reached = total_usage_tokens >= auto_compact_limit;
-
                 let estimated_token_count =
                     sess.get_estimated_token_count(turn_context.as_ref()).await;
 
@@ -6298,6 +6330,90 @@ fn codex_apps_connector_id(tool: &crate::mcp_connection_manager::ToolInfo) -> Op
     tool.connector_id.as_deref()
 }
 
+fn build_turn_tool_router_cache_key(
+    input: &[ResponseItem],
+    effective_enabled_connectors: &HashSet<String>,
+    tool_inventory_generation: u64,
+) -> TurnToolRouterCacheKey {
+    let mut effective_enabled_connectors = effective_enabled_connectors
+        .iter()
+        .cloned()
+        .collect::<Vec<String>>();
+    effective_enabled_connectors.sort();
+    TurnToolRouterCacheKey {
+        user_messages: collect_user_messages(input),
+        effective_enabled_connectors,
+        tool_inventory_generation,
+    }
+}
+
+async fn load_turn_tool_inventory(
+    sess: &Session,
+    turn_context: &TurnContext,
+    cancellation_token: &CancellationToken,
+) -> CodexResult<TurnToolInventory> {
+    let mcp_connection_manager = sess.services.mcp_connection_manager.read().await;
+    let has_mcp_servers = mcp_connection_manager.has_servers();
+    let mcp_tools = mcp_connection_manager
+        .list_all_tools()
+        .or_cancel(cancellation_token)
+        .await?;
+    drop(mcp_connection_manager);
+
+    let available_connectors = if turn_context.apps_enabled() {
+        let loaded_plugins = sess
+            .services
+            .plugins_manager
+            .plugins_for_config(&turn_context.config);
+        let connectors = connectors::merge_plugin_apps_with_accessible(
+            loaded_plugins.effective_apps(),
+            connectors::accessible_connectors_from_mcp_tools(&mcp_tools),
+        );
+        Some(connectors::with_app_enabled_state(
+            connectors,
+            &turn_context.config,
+        ))
+    } else {
+        None
+    };
+
+    let discoverable_tools = if turn_context.apps_enabled()
+        && turn_context.tools_config.search_tool
+        && turn_context.tools_config.tool_suggest
+    {
+        let auth = sess.services.auth_manager.auth().await;
+        if let Some(available_connectors) = available_connectors.as_ref() {
+            match connectors::list_tool_suggest_discoverable_tools_with_auth(
+                &turn_context.config,
+                auth.as_ref(),
+                available_connectors.as_slice(),
+            )
+            .await
+            {
+                Ok(connectors) if connectors.is_empty() => None,
+                Ok(connectors) => {
+                    Some(connectors.into_iter().map(DiscoverableTool::from).collect())
+                }
+                Err(err) => {
+                    warn!("failed to load discoverable tool suggestions: {err:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(TurnToolInventory {
+        has_mcp_servers,
+        mcp_tools,
+        available_connectors,
+        discoverable_tools,
+    })
+}
+
 fn build_prompt(
     input: Vec<ResponseItem>,
     router: &ToolRouter,
@@ -6327,6 +6443,7 @@ fn build_prompt(
         base_instructions,
         personality: turn_context.personality,
         output_schema: turn_context.final_output_json_schema.clone(),
+        ..Default::default()
     }
 }
 #[allow(clippy::too_many_arguments)]
@@ -6347,6 +6464,7 @@ async fn run_sampling_request(
     input: Vec<ResponseItem>,
     explicitly_enabled_connectors: &HashSet<String>,
     skills_outcome: Option<&SkillLoadOutcome>,
+    tool_cache: &mut TurnToolCache,
     server_model_warning_emitted_for_turn: &mut bool,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
@@ -6356,6 +6474,7 @@ async fn run_sampling_request(
         &input,
         explicitly_enabled_connectors,
         skills_outcome,
+        tool_cache,
         &cancellation_token,
     )
     .await?;
@@ -6482,70 +6601,47 @@ pub(crate) async fn built_tools(
     input: &[ResponseItem],
     explicitly_enabled_connectors: &HashSet<String>,
     skills_outcome: Option<&SkillLoadOutcome>,
+    tool_cache: &mut TurnToolCache,
     cancellation_token: &CancellationToken,
 ) -> CodexResult<Arc<ToolRouter>> {
-    let mcp_connection_manager = sess.services.mcp_connection_manager.read().await;
-    let has_mcp_servers = mcp_connection_manager.has_servers();
-    let mut mcp_tools = mcp_connection_manager
-        .list_all_tools()
-        .or_cancel(cancellation_token)
-        .await?;
-    drop(mcp_connection_manager);
-    let loaded_plugins = sess
-        .services
-        .plugins_manager
-        .plugins_for_config(&turn_context.config);
-
     let mut effective_explicitly_enabled_connectors = explicitly_enabled_connectors.clone();
     effective_explicitly_enabled_connectors.extend(sess.get_connector_selection().await);
+    let tool_inventory_generation = sess.tool_inventory_generation();
+    let router_cache_key = build_turn_tool_router_cache_key(
+        input,
+        &effective_explicitly_enabled_connectors,
+        tool_inventory_generation,
+    );
+    if tool_cache
+        .router_cache_key
+        .as_ref()
+        .is_some_and(|key| key == &router_cache_key)
+        && let Some(router) = tool_cache.router.as_ref()
+    {
+        return Ok(Arc::clone(router));
+    }
+
+    if tool_cache.inventory_generation != Some(tool_inventory_generation) {
+        tool_cache.inventory = None;
+        tool_cache.inventory_generation = Some(tool_inventory_generation);
+    }
+
+    if tool_cache.inventory.is_none() {
+        tool_cache.inventory =
+            Some(load_turn_tool_inventory(sess, turn_context, cancellation_token).await?);
+    }
+
+    let Some(inventory) = tool_cache.inventory.as_ref() else {
+        unreachable!("turn tool inventory should be initialized");
+    };
+    let has_mcp_servers = inventory.has_mcp_servers;
+    let mut mcp_tools = inventory.mcp_tools.clone();
 
     let apps_enabled = turn_context.apps_enabled();
-    let accessible_connectors =
-        apps_enabled.then(|| connectors::accessible_connectors_from_mcp_tools(&mcp_tools));
-    let accessible_connectors_with_enabled_state =
-        accessible_connectors.as_ref().map(|connectors| {
-            connectors::with_app_enabled_state(connectors.clone(), &turn_context.config)
-        });
-    let connectors = if apps_enabled {
-        let connectors = connectors::merge_plugin_apps_with_accessible(
-            loaded_plugins.effective_apps(),
-            accessible_connectors.clone().unwrap_or_default(),
-        );
-        Some(connectors::with_app_enabled_state(
-            connectors,
-            &turn_context.config,
-        ))
-    } else {
-        None
-    };
-    let auth = sess.services.auth_manager.auth().await;
-    let discoverable_tools = if apps_enabled
-        && turn_context.tools_config.search_tool
-        && turn_context.tools_config.tool_suggest
-    {
-        if let Some(accessible_connectors) = accessible_connectors_with_enabled_state.as_ref() {
-            match connectors::list_tool_suggest_discoverable_tools_with_auth(
-                &turn_context.config,
-                auth.as_ref(),
-                accessible_connectors.as_slice(),
-            )
-            .await
-            {
-                Ok(connectors) if connectors.is_empty() => None,
-                Ok(connectors) => {
-                    Some(connectors.into_iter().map(DiscoverableTool::from).collect())
-                }
-                Err(err) => {
-                    warn!("failed to load discoverable tool suggestions: {err:#}");
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let connectors = apps_enabled
+        .then(|| inventory.available_connectors.clone())
+        .flatten();
+    let discoverable_tools = inventory.discoverable_tools.clone();
 
     let app_tools = connectors.as_ref().map(|connectors| {
         filter_codex_apps_mcp_tools(&mcp_tools, connectors, &turn_context.config)
@@ -6588,7 +6684,7 @@ pub(crate) async fn built_tools(
         app_tools
     };
 
-    Ok(Arc::new(ToolRouter::from_config(
+    let router = Arc::new(ToolRouter::from_config(
         &turn_context.tools_config,
         ToolRouterParams {
             mcp_tools: has_mcp_servers.then(|| {
@@ -6601,13 +6697,39 @@ pub(crate) async fn built_tools(
             discoverable_tools,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
         },
-    )))
+    ));
+    tool_cache.router_cache_key = Some(router_cache_key);
+    tool_cache.router = Some(Arc::clone(&router));
+    Ok(router)
 }
 
 #[derive(Debug)]
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TurnToolInventory {
+    has_mcp_servers: bool,
+    mcp_tools: HashMap<String, crate::mcp_connection_manager::ToolInfo>,
+    available_connectors: Option<Vec<connectors::AppInfo>>,
+    discoverable_tools: Option<Vec<DiscoverableTool>>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct TurnToolRouterCacheKey {
+    user_messages: Vec<String>,
+    effective_enabled_connectors: Vec<String>,
+    tool_inventory_generation: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct TurnToolCache {
+    inventory: Option<TurnToolInventory>,
+    inventory_generation: Option<u64>,
+    router_cache_key: Option<TurnToolRouterCacheKey>,
+    router: Option<Arc<ToolRouter>>,
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.

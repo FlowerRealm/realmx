@@ -4,7 +4,6 @@ use codex_core::ModelProviderInfo;
 use codex_core::WireApi;
 use codex_core::config::Config;
 use codex_core::provider_login_capabilities;
-use codex_core::validate_model_provider_id;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -109,7 +108,7 @@ impl ProviderDraft {
         ModelProviderInfo {
             name: self.name.trim().to_string(),
             base_url: Some(self.base_url.trim().to_string()).filter(|value| !value.is_empty()),
-            auth_strategy: codex_core::ModelProviderAuthStrategy::None,
+            auth_strategy: codex_core::ModelProviderAuthStrategy::ApiKey,
             oauth: None,
             api_key: None,
             env_key: None,
@@ -122,7 +121,7 @@ impl ProviderDraft {
             request_max_retries: None,
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
-            requires_openai_auth: true,
+            requires_openai_auth: false,
             supports_websockets: false,
         }
     }
@@ -226,8 +225,16 @@ impl ProviderWidget {
         Self::sync_draft_from_textarea(create);
 
         let provider_id = create.draft.id.trim().to_string();
-        if let Err(err) = validate_model_provider_id(&provider_id) {
-            self.error = Some(err);
+        if provider_id.is_empty() {
+            self.error = Some("Provider ID is required.".to_string());
+            return;
+        }
+        if !provider_id
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+        {
+            self.error =
+                Some("Provider ID must use lowercase letters, digits, '-' or '_'.".to_string());
             return;
         }
         if self.providers.iter().any(|entry| entry.id == provider_id) {
@@ -549,8 +556,8 @@ mod tests {
         };
 
         insta::assert_snapshot!(
-                                                                                                                                                            render(&widget, 70, 24),
-                                                                                                                                                            @r"
+                                                                                                                                                                                            render(&widget, 70, 24),
+                                                                                                                                                                                            @r"
 Create custom provider
 < Back to provider list (Esc)
 Tab switches fields. Enter saves.
@@ -558,7 +565,7 @@ Tab switches fields. Enter saves.
   Display name
   Base URL
 "
-                                                                                                                                                        );
+                                                                                                                                                                                        );
     }
 
     #[test]

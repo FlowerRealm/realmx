@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::Prompt;
 use crate::codex::Session;
 use crate::codex::TurnContext;
+use crate::codex::TurnToolCache;
 use crate::codex::built_tools;
 use crate::compact::InitialContextInjection;
 use crate::compact::insert_initial_context_before_last_real_user_or_summary;
@@ -96,12 +97,14 @@ async fn run_remote_compact_task_inner_impl(
         .collect();
 
     let prompt_input = history.for_prompt(&turn_context.model_info.input_modalities);
+    let mut tool_cache = TurnToolCache::default();
     let tool_router = built_tools(
         sess.as_ref(),
         turn_context.as_ref(),
         &prompt_input,
         &HashSet::new(),
         /*skills_outcome*/ None,
+        &mut tool_cache,
         &CancellationToken::new(),
     )
     .await?;
@@ -112,6 +115,7 @@ async fn run_remote_compact_task_inner_impl(
         base_instructions,
         personality: turn_context.personality,
         output_schema: None,
+        ..Default::default()
     };
 
     let mut new_history = sess

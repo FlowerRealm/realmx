@@ -175,6 +175,7 @@ impl ToolHandler for ToolSuggestHandler {
                         auth.as_ref(),
                         &mcp_tools,
                     );
+                    session.bump_tool_inventory_generation();
                     verified_connector_suggestion_completed(
                         args.action_type,
                         connector.id.as_str(),

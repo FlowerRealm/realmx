@@ -1,15 +1,18 @@
 use crate::client_common::tools::ToolSpec;
 use crate::config::types::Personality;
 use crate::error::Result;
+use crate::tools::spec::create_tools_json_for_responses_api;
 pub use codex_api::common::ResponseEvent;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseItem;
 use futures::Stream;
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::pin::Pin;
+use std::sync::OnceLock;
 use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
@@ -23,7 +26,7 @@ pub const REVIEW_EXIT_INTERRUPTED_TMPL: &str =
     include_str!("../templates/review/exit_interrupted.xml");
 
 /// API request payload for a single model turn
-#[derive(Default, Debug, Clone)]
+#[derive(Debug)]
 pub struct Prompt {
     /// Conversation context input items.
     pub input: Vec<ResponseItem>,
@@ -42,25 +45,71 @@ pub struct Prompt {
 
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
+
+    pub(crate) formatted_input: OnceLock<Vec<ResponseItem>>,
+    pub(crate) tools_json: OnceLock<Vec<JsonValue>>,
 }
 
 impl Prompt {
-    pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
-        let mut input = self.input.clone();
+    pub(crate) fn get_formatted_input(&self) -> &[ResponseItem] {
+        self.formatted_input.get_or_init(|| {
+            let mut input = self.input.clone();
 
-        // when using the *Freeform* apply_patch tool specifically, tool outputs
-        // should be structured text, not json. Do NOT reserialize when using
-        // the Function tool - note that this differs from the check above for
-        // instructions. We declare the result as a named variable for clarity.
-        let is_freeform_apply_patch_tool_present = self.tools.iter().any(|tool| match tool {
-            ToolSpec::Freeform(f) => f.name == "apply_patch",
-            _ => false,
-        });
-        if is_freeform_apply_patch_tool_present {
-            reserialize_shell_outputs(&mut input);
+            // when using the *Freeform* apply_patch tool specifically, tool outputs
+            // should be structured text, not json. Do NOT reserialize when using
+            // the Function tool - note that this differs from the check above for
+            // instructions. We declare the result as a named variable for clarity.
+            let is_freeform_apply_patch_tool_present = self.tools.iter().any(|tool| match tool {
+                ToolSpec::Freeform(f) => f.name == "apply_patch",
+                _ => false,
+            });
+            if is_freeform_apply_patch_tool_present {
+                reserialize_shell_outputs(&mut input);
+            }
+
+            input
+        })
+    }
+
+    pub(crate) fn get_tools_json(&self) -> Result<&[JsonValue]> {
+        if self.tools_json.get().is_none() {
+            let tools = create_tools_json_for_responses_api(&self.tools)?;
+            let _ = self.tools_json.set(tools);
         }
 
-        input
+        Ok(self.tools_json.get().map(Vec::as_slice).unwrap_or(&[]))
+    }
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Self {
+            input: Vec::new(),
+            tools: Vec::new(),
+            parallel_tool_calls: false,
+            base_instructions: BaseInstructions {
+                text: String::new(),
+            },
+            personality: None,
+            output_schema: None,
+            formatted_input: OnceLock::new(),
+            tools_json: OnceLock::new(),
+        }
+    }
+}
+
+impl Clone for Prompt {
+    fn clone(&self) -> Self {
+        Self {
+            input: self.input.clone(),
+            tools: self.tools.clone(),
+            parallel_tool_calls: self.parallel_tool_calls,
+            base_instructions: self.base_instructions.clone(),
+            personality: self.personality,
+            output_schema: self.output_schema.clone(),
+            formatted_input: OnceLock::new(),
+            tools_json: OnceLock::new(),
+        }
     }
 }
 
