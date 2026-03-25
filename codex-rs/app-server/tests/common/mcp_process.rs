@@ -116,6 +116,10 @@ impl McpProcess {
         cmd.stderr(Stdio::piped());
         cmd.current_dir(codex_home);
         cmd.env("CODEX_HOME", codex_home);
+        cmd.env(
+            "CODEX_TEST_SECRETS_KEYRING",
+            codex_home.join(".codex-test-keyring"),
+        );
         cmd.env("RUST_LOG", "info");
         cmd.env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
 

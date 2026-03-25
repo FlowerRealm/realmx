@@ -57,11 +57,9 @@ fn preset_to_info(preset: &ModelPreset, priority: i32) -> ModelInfo {
 /// The cache will be treated as fresh (within TTL) and used instead of fetching from the network.
 /// Uses bundled-catalog-derived presets, converted to ModelInfo format.
 pub fn write_models_cache(codex_home: &Path) -> std::io::Result<()> {
-    // Get a stable bundled-catalog-derived preset list and filter for picker-visible entries.
-    let presets: Vec<&ModelPreset> = all_model_presets()
-        .iter()
-        .filter(|preset| preset.show_in_picker)
-        .collect();
+    // Get a stable bundled-catalog-derived preset list including hidden entries so
+    // include_hidden tests exercise the same runtime catalog shape.
+    let presets: Vec<&ModelPreset> = all_model_presets().iter().collect();
     // Convert presets to ModelInfo, assigning priorities (lower = earlier in list).
     // Priority is used for sorting, so the first model gets the lowest priority.
     let models: Vec<ModelInfo> = presets

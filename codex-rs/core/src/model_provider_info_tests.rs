@@ -2,6 +2,40 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn auth_strategy_deserializes_openai_aliases() {
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"openai\"").expect("parse openai"),
+        ModelProviderAuthStrategy::OpenAi
+    );
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"open_ai\"").expect("parse open_ai alias"),
+        ModelProviderAuthStrategy::OpenAi
+    );
+}
+
+#[test]
+fn auth_strategy_deserializes_oauth_aliases() {
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"oauth\"").expect("parse oauth"),
+        ModelProviderAuthStrategy::OAuth
+    );
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"o_auth\"").expect("parse o_auth alias"),
+        ModelProviderAuthStrategy::OAuth
+    );
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"oauth_or_api_key\"")
+            .expect("parse oauth_or_api_key"),
+        ModelProviderAuthStrategy::OAuthOrApiKey
+    );
+    assert_eq!(
+        toml::from_str::<ModelProviderAuthStrategy>("\"o_auth_or_api_key\"")
+            .expect("parse o_auth_or_api_key alias"),
+        ModelProviderAuthStrategy::OAuthOrApiKey
+    );
+}
+
+#[test]
 fn test_deserialize_ollama_model_provider_toml() {
     let azure_provider_toml = r#"
 name = "Ollama"

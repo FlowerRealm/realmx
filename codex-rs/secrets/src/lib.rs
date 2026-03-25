@@ -107,6 +107,7 @@ impl SecretsManager {
             SecretsBackendKind::Local => {
                 let keyring_store: Arc<dyn KeyringStore> =
                     test_support::current_test_keyring_store(&codex_home)
+                        .or_else(test_support::current_env_test_keyring_store)
                         .unwrap_or_else(|| Arc::new(DefaultKeyringStore));
                 Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
             }
@@ -204,6 +205,8 @@ pub(crate) fn keyring_service() -> &'static str {
 pub mod test_support {
     use super::*;
 
+    const TEST_KEYRING_ENV_VAR: &str = "CODEX_TEST_SECRETS_KEYRING";
+
     static TEST_KEYRING_STORES: OnceLock<Mutex<HashMap<PathBuf, Arc<dyn KeyringStore>>>> =
         OnceLock::new();
 
@@ -242,6 +245,75 @@ pub mod test_support {
             codex_home,
             previous,
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct EnvMockKeyringStore;
+
+    impl KeyringStore for EnvMockKeyringStore {
+        fn load(
+            &self,
+            _service: &str,
+            account: &str,
+        ) -> Result<Option<String>, codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            match std::fs::read_to_string(&path) {
+                Ok(value) => Ok(Some(value)),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Ok(None),
+            }
+        }
+
+        fn save(
+            &self,
+            _service: &str,
+            account: &str,
+            value: &str,
+        ) -> Result<(), codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, value);
+            Ok(())
+        }
+
+        fn delete(
+            &self,
+            _service: &str,
+            account: &str,
+        ) -> Result<bool, codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(true),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(_) => Ok(false),
+            }
+        }
+    }
+
+    fn env_keyring_root() -> Option<PathBuf> {
+        std::env::var_os(TEST_KEYRING_ENV_VAR).map(PathBuf::from)
+    }
+
+    fn env_keyring_entry_path(account: &str) -> PathBuf {
+        let sanitized_account: String = account
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        env_keyring_root()
+            .unwrap_or_default()
+            .join(format!("{sanitized_account}.secret"))
+    }
+
+    pub(crate) fn current_env_test_keyring_store() -> Option<Arc<dyn KeyringStore>> {
+        env_keyring_root().map(|_| Arc::new(EnvMockKeyringStore) as Arc<dyn KeyringStore>)
     }
 
     pub(crate) fn current_test_keyring_store(codex_home: &Path) -> Option<Arc<dyn KeyringStore>> {

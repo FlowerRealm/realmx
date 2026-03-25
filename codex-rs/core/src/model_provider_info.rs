@@ -38,10 +38,31 @@ pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no
 pub enum ModelProviderAuthStrategy {
     #[default]
     None,
+    #[serde(rename = "openai", alias = "open_ai")]
     OpenAi,
     ApiKey,
+    #[serde(rename = "oauth", alias = "o_auth")]
     OAuth,
+    #[serde(rename = "oauth_or_api_key", alias = "o_auth_or_api_key")]
     OAuthOrApiKey,
+}
+
+impl ModelProviderAuthStrategy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::OpenAi => "openai",
+            Self::ApiKey => "api_key",
+            Self::OAuth => "oauth",
+            Self::OAuthOrApiKey => "oauth_or_api_key",
+        }
+    }
+}
+
+impl fmt::Display for ModelProviderAuthStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
