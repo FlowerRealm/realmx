@@ -57,6 +57,14 @@ fn preset_to_info(preset: &ModelPreset, priority: i32) -> ModelInfo {
 /// The cache will be treated as fresh (within TTL) and used instead of fetching from the network.
 /// Uses bundled-catalog-derived presets, converted to ModelInfo format.
 pub fn write_models_cache(codex_home: &Path) -> std::io::Result<()> {
+    write_models_cache_for_provider(codex_home, "openai")
+}
+
+/// Write bundled-catalog models for a specific provider.
+pub fn write_models_cache_for_provider(
+    codex_home: &Path,
+    provider_id: &str,
+) -> std::io::Result<()> {
     // Get a stable bundled-catalog-derived preset list including hidden entries so
     // include_hidden tests exercise the same runtime catalog shape.
     let presets: Vec<&ModelPreset> = all_model_presets().iter().collect();
@@ -72,7 +80,7 @@ pub fn write_models_cache(codex_home: &Path) -> std::io::Result<()> {
         })
         .collect();
 
-    write_models_cache_with_models_for_provider(codex_home, "openai", models)
+    write_models_cache_with_models_for_provider(codex_home, provider_id, models)
 }
 
 /// Write a models_cache.json file with specific models.

@@ -2201,7 +2201,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
         format_labeled_requests_snapshot(
             "Remote pre-turn compaction during model switch currently excludes incoming user input, strips incoming <model_switch> from the compact request payload, and restores it in the post-compaction follow-up request.",
             &[
-                ("Initial Request (Previous Model)", &initial_turn_request),
+                ("Initial Request (Previous Model)", initial_turn_request),
                 ("Remote Compaction Request", &compact_request),
                 (
                     "Remote Post-Compaction History Layout",

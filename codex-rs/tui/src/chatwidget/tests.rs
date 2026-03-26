@@ -7813,7 +7813,7 @@ async fn model_selection_popup_shows_cached_models_before_remote_models_arrive()
     let popup = render_bottom_popup(&chat, 80);
     assert!(popup.contains("Select Model and Effort"));
     assert!(popup.contains("gpt-5.3-codex"));
-    assert!(popup.contains("gpt-5.4"));
+    assert!(popup.contains("GPT 5.4"));
     assert!(!popup.contains("Loading models..."));
 }
 
@@ -7918,7 +7918,7 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(popup.contains("gpt-5.3-codex"));
-    assert!(popup.contains("gpt-5.4"));
+    assert!(popup.contains("GPT 5.4"));
     assert!(!popup.contains(remote_slug));
     assert!(!popup.contains("Loading models..."));
 
