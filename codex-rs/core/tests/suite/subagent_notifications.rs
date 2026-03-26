@@ -1,9 +1,8 @@
 use anyhow::Result;
-use codex_core::ThreadConfigSnapshot;
 use codex_core::config::AgentRoleConfig;
 use codex_core::features::Feature;
-use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort;
+use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -101,23 +100,6 @@ fn role_block(description: &str, role_name: &str) -> Option<String> {
     Some(block.join("\n"))
 }
 
-async fn wait_for_spawned_thread_id(test: &TestCodex) -> Result<String> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let ids = test.thread_manager.list_thread_ids().await;
-        if let Some(spawned_id) = ids
-            .iter()
-            .find(|id| **id != test.session_configured.session_id)
-        {
-            return Ok(spawned_id.to_string());
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("timed out waiting for spawned thread id");
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
-}
-
 async fn wait_for_requests(
     mock: &core_test_support::responses::ResponseMock,
 ) -> Result<Vec<ResponsesRequest>> {
@@ -137,7 +119,7 @@ async fn wait_for_requests(
 async fn setup_turn_one_with_spawned_child(
     server: &MockServer,
     child_response_delay: Option<Duration>,
-) -> Result<(TestCodex, String)> {
+) -> Result<(TestCodex, ResponseMock)> {
     setup_turn_one_with_custom_spawned_child(
         server,
         json!({
@@ -158,7 +140,7 @@ async fn setup_turn_one_with_custom_spawned_child(
     configure_test: impl FnOnce(
         core_test_support::test_codex::TestCodexBuilder,
     ) -> core_test_support::test_codex::TestCodexBuilder,
-) -> Result<(TestCodex, String)> {
+) -> Result<(TestCodex, ResponseMock)> {
     let spawn_args = serde_json::to_string(&spawn_args)?;
 
     mount_sse_once_match(
@@ -241,28 +223,21 @@ async fn setup_turn_one_with_custom_spawned_child(
             sleep(Duration::from_millis(10)).await;
         }
     }
-    let spawned_id = wait_for_spawned_thread_id(&test).await?;
-
-    Ok((test, spawned_id))
+    Ok((test, child_request_log))
 }
 
-async fn spawn_child_and_capture_snapshot(
+async fn spawn_child_and_capture_request_body(
     server: &MockServer,
     spawn_args: serde_json::Value,
     configure_test: impl FnOnce(
         core_test_support::test_codex::TestCodexBuilder,
     ) -> core_test_support::test_codex::TestCodexBuilder,
-) -> Result<ThreadConfigSnapshot> {
-    let (test, spawned_id) =
+) -> Result<serde_json::Value> {
+    let (_test, child_request_log) =
         setup_turn_one_with_custom_spawned_child(server, spawn_args, None, false, configure_test)
             .await?;
-    let thread_id = ThreadId::from_string(&spawned_id)?;
-    Ok(test
-        .thread_manager
-        .get_thread(thread_id)
-        .await?
-        .config_snapshot()
-        .await)
+    let _ = wait_for_requests(&child_request_log).await?;
+    Ok(child_request_log.single_request().body_json())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -412,7 +387,7 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let child_snapshot = spawn_child_and_capture_snapshot(
+    let child_request = spawn_child_and_capture_request_body(
         &server,
         json!({
             "message": CHILD_PROMPT,
@@ -423,10 +398,13 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
     )
     .await?;
 
-    assert_eq!(child_snapshot.model, REQUESTED_MODEL);
+    assert_eq!(child_request["model"].as_str(), Some(REQUESTED_MODEL));
     assert_eq!(
-        child_snapshot.reasoning_effort,
-        Some(REQUESTED_REASONING_EFFORT)
+        child_request
+            .get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(|value| value.as_str()),
+        Some("low")
     );
 
     Ok(())
@@ -437,7 +415,7 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let child_snapshot = spawn_child_and_capture_snapshot(
+    let child_request = spawn_child_and_capture_request_body(
         &server,
         json!({
             "message": CHILD_PROMPT,
@@ -468,8 +446,14 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     )
     .await?;
 
-    assert_eq!(child_snapshot.model, ROLE_MODEL);
-    assert_eq!(child_snapshot.reasoning_effort, Some(ROLE_REASONING_EFFORT));
+    assert_eq!(child_request["model"].as_str(), Some(ROLE_MODEL));
+    assert_eq!(
+        child_request
+            .get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(|value| value.as_str()),
+        Some("high")
+    );
 
     Ok(())
 }

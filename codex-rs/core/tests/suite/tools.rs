@@ -234,20 +234,11 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         )
         .await?;
 
-    let output_text = mock
-        .function_call_output_text(call_id)
+    let item = mock.any_tool_call_output(call_id);
+    let (body_opt, success) = mock
+        .any_tool_call_output_content_and_success(call_id)
         .context("shell output present")?;
-    let exit_code_line = output_text
-        .lines()
-        .next()
-        .context("exit code line present")?;
-    let exit_code = exit_code_line
-        .strip_prefix("Exit code: ")
-        .context("exit code prefix present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
-    let body = output_text;
+    let body = body_opt.context("shell output text present")?;
 
     let body_lower = body.to_lowercase();
     // Required for multi-OS.
@@ -273,9 +264,10 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         !body_lower.contains("failed in sandbox"),
         "expected original tool output, found fallback message: {body}"
     );
-    assert_ne!(
-        exit_code, 0,
-        "sandbox denial should surface a non-zero exit code"
+    assert_eq!(
+        success,
+        Some(false),
+        "sandbox denial should be reported as a failed tool output: {item:?}"
     );
 
     Ok(())

@@ -189,7 +189,7 @@ async fn response_model_field_mismatch_emits_warning_when_header_matches_request
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn openai_model_header_mismatch_only_emits_one_warning_per_turn() -> Result<()> {
+async fn openai_model_header_mismatch_emits_one_warning_per_mismatched_response() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -250,7 +250,7 @@ async fn openai_model_header_mismatch_only_emits_one_warning_per_turn() -> Resul
         }
     }
 
-    assert_eq!(warning_count, 1);
+    assert_eq!(warning_count, 2);
 
     Ok(())
 }

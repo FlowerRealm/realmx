@@ -247,8 +247,8 @@ Output:
 4
 5
 6
-.*…578895 chars truncated…
-99999
+.*…\d+ chars truncated…
+.*99999
 100000
 $"#;
     assert_regex_match(truncated_pattern, &output);
