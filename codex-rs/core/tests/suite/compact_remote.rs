@@ -193,17 +193,6 @@ fn assert_request_contains_realtime_end(request: &responses::ResponsesRequest) {
     );
 }
 
-fn request_has_call_item(request: &responses::ResponsesRequest, call_id: &str) -> bool {
-    ["function_call", "local_shell_call"]
-        .into_iter()
-        .flat_map(|item_type| request.inputs_of_type(item_type))
-        .any(|item| item.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id))
-}
-
-fn request_call_item_count(request: &responses::ResponsesRequest) -> usize {
-    request.inputs_of_type("function_call").len() + request.inputs_of_type("local_shell_call").len()
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_compact_replaces_history_for_followups() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -504,32 +493,29 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     );
 
     assert!(
-        request_has_call_item(&compact_request, retained_call_id)
+        compact_request.has_function_call(retained_call_id)
             && compact_request
-                .any_tool_call_output(retained_call_id)
-                .is_object(),
+                .function_call_output_text(retained_call_id)
+                .is_some(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
-        !request_has_call_item(&compact_request, trimmed_call_id)
+        !compact_request.has_function_call(trimmed_call_id)
             && compact_request
-                .any_tool_call_output_text(trimmed_call_id)
+                .function_call_output_text(trimmed_call_id)
                 .is_none(),
         "expected compact request to drop the trailing function call/result pair past the boundary"
     );
 
     assert_eq!(
-        request_call_item_count(&compact_request),
+        compact_request.inputs_of_type("function_call").len(),
         1,
         "expected exactly one function call after trimming"
     );
     assert_eq!(
-        compact_request.inputs_of_type("function_call_output").len()
-            + compact_request
-                .inputs_of_type("custom_tool_call_output")
-                .len(),
+        compact_request.inputs_of_type("function_call_output").len(),
         1,
-        "expected exactly one tool call output after trimming"
+        "expected exactly one function call output after trimming"
     );
 
     Ok(())
@@ -640,32 +626,29 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     );
 
     assert!(
-        request_has_call_item(&compact_request, retained_call_id)
+        compact_request.has_function_call(retained_call_id)
             && compact_request
-                .any_tool_call_output(retained_call_id)
-                .is_object(),
+                .function_call_output_text(retained_call_id)
+                .is_some(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
-        !request_has_call_item(&compact_request, trimmed_call_id)
+        !compact_request.has_function_call(trimmed_call_id)
             && compact_request
-                .any_tool_call_output_text(trimmed_call_id)
+                .function_call_output_text(trimmed_call_id)
                 .is_none(),
         "expected compact request to drop the trailing function call/result pair past the boundary"
     );
 
     assert_eq!(
-        request_call_item_count(&compact_request),
+        compact_request.inputs_of_type("function_call").len(),
         1,
         "expected exactly one function call after trimming"
     );
     assert_eq!(
-        compact_request.inputs_of_type("function_call_output").len()
-            + compact_request
-                .inputs_of_type("custom_tool_call_output")
-                .len(),
+        compact_request.inputs_of_type("function_call_output").len(),
         1,
-        "expected exactly one tool call output after trimming"
+        "expected exactly one function call output after trimming"
     );
 
     Ok(())
@@ -852,11 +835,11 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
 
     let baseline_compact_request = baseline_compact_mock.single_request();
     assert!(
-        request_has_call_item(&baseline_compact_request, baseline_retained_call_id),
+        baseline_compact_request.has_function_call(baseline_retained_call_id),
         "expected baseline compact request to retain older function call history"
     );
     assert!(
-        request_has_call_item(&baseline_compact_request, baseline_trailing_call_id),
+        baseline_compact_request.has_function_call(baseline_trailing_call_id),
         "expected baseline compact request to retain trailing function call history"
     );
 
@@ -955,11 +938,11 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
         override_base_instructions
     );
     assert!(
-        request_has_call_item(&override_compact_request, override_retained_call_id),
+        override_compact_request.has_function_call(override_retained_call_id),
         "expected remote compact request to preserve older function call history"
     );
     assert!(
-        !request_has_call_item(&override_compact_request, override_trailing_call_id),
+        !override_compact_request.has_function_call(override_trailing_call_id),
         "expected remote compact request to trim trailing function call history with override instructions"
     );
 
