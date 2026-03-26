@@ -292,6 +292,7 @@ async fn spawn_child_and_capture_snapshot(
     let deadline = Instant::now() + Duration::from_secs(10);
     let child_snapshot = loop {
         let thread_ids = test.thread_manager.list_thread_ids().await;
+        let mut child_snapshot = None;
         for thread_id in thread_ids {
             let snapshot = test
                 .thread_manager
@@ -303,8 +304,12 @@ async fn spawn_child_and_capture_snapshot(
                 snapshot.session_source,
                 SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
             ) {
-                break snapshot;
+                child_snapshot = Some(snapshot);
+                break;
             }
+        }
+        if let Some(snapshot) = child_snapshot {
+            break snapshot;
         }
         if Instant::now() >= deadline {
             anyhow::bail!("timed out waiting for spawned child thread snapshot");
