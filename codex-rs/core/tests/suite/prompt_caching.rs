@@ -174,7 +174,6 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
     expected_tools_names.extend([
         "update_plan",
         "request_user_input",
-        "apply_patch",
         "web_search",
         "view_image",
         "spawn_agent",
@@ -541,7 +540,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
         body.get("reasoning")
             .and_then(|reasoning| reasoning.get("effort"))
             .and_then(|value| value.as_str()),
-        Some("high")
+        None
     );
     let input = body["input"]
         .as_array()

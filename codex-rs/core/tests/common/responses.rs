@@ -219,7 +219,7 @@ impl ResponsesRequest {
 
     pub fn call_output(&self, call_id: &str, call_type: &str) -> Value {
         self.call_output_optional(call_id, call_type)
-            .unwrap_or_else(|| panic!("function call output {call_id} item not found in request"))
+            .unwrap_or_else(|| panic!("{call_type} {call_id} item not found in request"))
     }
 
     fn call_output_optional(&self, call_id: &str, call_type: &str) -> Option<Value> {
@@ -289,7 +289,7 @@ impl ResponsesRequest {
         call_type: &str,
     ) -> Option<(Option<String>, Option<bool>)> {
         let output = self
-            .call_output(call_id, call_type)
+            .call_output_optional(call_id, call_type)?
             .get("output")
             .cloned()
             .unwrap_or(Value::Null);
@@ -423,6 +423,10 @@ mod tests {
             custom_only.any_tool_call_output_text("call-1"),
             Some("hello".to_string())
         );
+        assert_eq!(
+            custom_only.any_tool_call_output_content_and_success("call-1"),
+            Some((Some("hello".to_string()), None))
+        );
 
         let both = request_with_input(serde_json::json!([
             {
@@ -443,6 +447,10 @@ mod tests {
         assert_eq!(
             both.any_tool_call_output_text("call-2"),
             Some("function".to_string())
+        );
+        assert_eq!(
+            both.any_tool_call_output_content_and_success("call-2"),
+            Some((Some("function".to_string()), None))
         );
     }
 }

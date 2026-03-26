@@ -112,6 +112,10 @@ const DEFAULT_UNIFIED_EXEC_JUSTIFICATION: &str =
     "Requires escalated permissions to bypass the sandbox in tests.";
 
 impl ActionKind {
+    const fn requires_apply_patch_tool(&self) -> bool {
+        matches!(self, Self::ApplyPatchFunction { .. })
+    }
+
     async fn prepare(
         &self,
         test: &TestCodex,
@@ -1602,12 +1606,20 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let approval_policy = scenario.approval_policy;
     let sandbox_policy = scenario.sandbox_policy.clone();
     let features = scenario.features.clone();
+    let include_apply_patch_tool = scenario.action.requires_apply_patch_tool();
     let model_override = scenario.model_override;
     let model = model_override.unwrap_or("gpt-5.1");
 
     let mut builder = test_codex().with_model(model).with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy.clone());
+        config.include_apply_patch_tool = include_apply_patch_tool;
+        if include_apply_patch_tool {
+            config
+                .features
+                .enable(Feature::ApplyPatchFreeform)
+                .expect("test config should allow feature update");
+        }
         for feature in features {
             config
                 .features
