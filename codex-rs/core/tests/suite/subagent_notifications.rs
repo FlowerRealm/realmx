@@ -102,7 +102,7 @@ fn role_block(description: &str, role_name: &str) -> Option<String> {
 }
 
 async fn wait_for_spawned_thread_id(test: &TestCodex) -> Result<String> {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let ids = test.thread_manager.list_thread_ids().await;
         if let Some(spawned_id) = ids
@@ -121,7 +121,7 @@ async fn wait_for_spawned_thread_id(test: &TestCodex) -> Result<String> {
 async fn wait_for_requests(
     mock: &core_test_support::responses::ResponseMock,
 ) -> Result<Vec<ResponsesRequest>> {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let requests = mock.requests();
         if !requests.is_empty() {

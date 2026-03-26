@@ -80,6 +80,8 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
     mount_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
+        .arg("-m")
+        .arg("gpt-5.1-codex")
         .arg("-c")
         .arg("include_apply_patch_tool=true")
         .arg("--skip-git-repo-check")
@@ -133,6 +135,8 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
     mount_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
+        .arg("-m")
+        .arg("gpt-5.1-codex")
         .arg("-c")
         .arg("include_apply_patch_tool=true")
         .arg("--skip-git-repo-check")

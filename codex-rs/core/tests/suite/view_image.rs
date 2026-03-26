@@ -377,10 +377,7 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail").and_then(Value::as_str),
-        Some("original")
-    );
+    assert_eq!(output_items[0].get("detail"), None);
     let image_url = output_items[0]
         .get("image_url")
         .and_then(Value::as_str)

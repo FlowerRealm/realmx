@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-
-use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use codex_core::features::Feature;
 use codex_core::shell::Shell;
 use codex_core::shell::default_user_shell;
@@ -174,6 +172,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
     expected_tools_names.extend([
         "update_plan",
         "request_user_input",
+        "apply_patch",
         "web_search",
         "view_image",
         "spawn_agent",
@@ -184,23 +183,11 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
     ]);
     let body0 = req1.single_request().body_json();
 
-    let expected_instructions = if expected_tools_names.contains(&"apply_patch") {
-        base_instructions
-    } else {
-        [base_instructions, APPLY_PATCH_TOOL_INSTRUCTIONS.to_string()].join("\n")
-    };
-
-    assert_eq!(
-        body0["instructions"],
-        serde_json::json!(expected_instructions),
-    );
+    assert_eq!(body0["instructions"], serde_json::json!(base_instructions),);
     assert_tool_names(&body0, &expected_tools_names);
 
     let body1 = req2.single_request().body_json();
-    assert_eq!(
-        body1["instructions"],
-        serde_json::json!(expected_instructions),
-    );
+    assert_eq!(body1["instructions"], serde_json::json!(base_instructions),);
     assert_tool_names(&body1, &expected_tools_names);
 
     Ok(())
