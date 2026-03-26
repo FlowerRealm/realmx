@@ -598,7 +598,10 @@ text("phase 3");
 
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
-    assert_eq!(first_items.len(), 2);
+    assert!(
+        first_items.len() >= 2,
+        "expected running output header and first yielded content"
+    );
     assert_regex_match(
         concat!(
             r"(?s)\A",

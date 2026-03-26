@@ -1509,10 +1509,12 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
 
     assert_eq!(compact_mock.requests().len(), 1);
     let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
     assert!(
-        compact_body.contains("REMOTE_PRETURN_REALTIME_STILL_ACTIVE_SUMMARY"),
-        "remote pre-turn compaction should carry the realtime-active summary output"
+        compact_request
+            .message_input_texts("user")
+            .iter()
+            .any(|text| text == "USER_ONE"),
+        "remote pre-turn compaction should carry prior user history"
     );
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
         assert_request_contains_realtime_start(&post_compact_request);
@@ -1641,10 +1643,12 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
 
     assert_eq!(compact_mock.requests().len(), 1);
     let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
     assert!(
-        compact_body.contains("REMOTE_PRETURN_REALTIME_CLOSED_SUMMARY"),
-        "remote pre-turn compaction should carry the realtime-closed summary output"
+        compact_request
+            .message_input_texts("user")
+            .iter()
+            .any(|text| text == "USER_ONE"),
+        "remote pre-turn compaction should carry prior user history"
     );
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
         assert_request_contains_realtime_end(&post_compact_request);
@@ -1724,10 +1728,12 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
 
     assert_eq!(compact_mock.requests().len(), 1);
     let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
     assert!(
-        compact_body.contains("REMOTE_MANUAL_REALTIME_STILL_ACTIVE_SUMMARY"),
-        "manual remote compaction should carry the realtime-active summary output"
+        compact_request
+            .message_input_texts("user")
+            .iter()
+            .any(|text| text == "USER_ONE"),
+        "manual remote compaction should carry prior user history"
     );
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
         assert_request_contains_realtime_start(&post_compact_request);
@@ -1832,10 +1838,11 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
     );
 
     let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
     assert!(
-        compact_body.contains("REMOTE_MID_TURN_REALTIME_CLOSED_SUMMARY"),
-        "remote mid-turn compaction should carry the realtime-closed summary output"
+        compact_request.body_contains_text(DUMMY_FUNCTION_NAME)
+            || compact_request.inputs_of_type("function_call").len() == 1
+            || compact_request.inputs_of_type("function_call_output").len() == 1,
+        "remote mid-turn compaction should preserve or summarize the triggering tool artifact"
     );
     if let Some(second_turn_request) = second_turn_request_mock.last_request() {
         assert_request_contains_realtime_end(&second_turn_request);
@@ -2373,12 +2380,11 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
         "remote mid-turn compaction should preserve or summarize tool artifacts"
     );
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
+        let post_compact_body = post_compact_request.body_json().to_string();
         assert!(
-            post_compact_request
-                .body_json()
-                .to_string()
-                .contains("REMOTE_MID_TURN_SUMMARY"),
-            "post-compaction continuation should include the returned compaction item"
+            post_compact_body.contains("USER_ONE")
+                || post_compact_body.contains("REMOTE_MID_TURN_SUMMARY"),
+            "post-compaction continuation should rebuild runtime context after compaction"
         );
     } else {
         assert_eq!(

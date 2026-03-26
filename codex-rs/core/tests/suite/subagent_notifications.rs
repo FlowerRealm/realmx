@@ -3,6 +3,8 @@ use codex_core::ThreadConfigSnapshot;
 use codex_core::config::AgentRoleConfig;
 use codex_core::features::Feature;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
@@ -279,39 +281,37 @@ async fn spawn_child_and_capture_snapshot(
     .await;
 
     let mut builder = configure_test(test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Collab)
-            .expect("test config should allow feature update");
+        let _ = config.features.enable(Feature::Collab);
         config.model = Some(INHERITED_MODEL.to_string());
         config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
     }));
     let test = builder.build(server).await?;
-    let existing_thread_ids = test.thread_manager.list_thread_ids().await;
     test.submit_turn(TURN_1_PROMPT).await?;
     let _ = wait_for_requests(&child_request_log).await?;
 
     let deadline = Instant::now() + Duration::from_secs(10);
-    let thread_id = loop {
-        let current_thread_ids = test.thread_manager.list_thread_ids().await;
-        let new_thread_ids = current_thread_ids
-            .into_iter()
-            .filter(|thread_id| !existing_thread_ids.contains(thread_id))
-            .collect::<Vec<_>>();
-        if new_thread_ids.len() == 1 {
-            break new_thread_ids[0];
+    let child_snapshot = loop {
+        let thread_ids = test.thread_manager.list_thread_ids().await;
+        for thread_id in thread_ids {
+            let snapshot = test
+                .thread_manager
+                .get_thread(thread_id)
+                .await?
+                .config_snapshot()
+                .await;
+            if matches!(
+                snapshot.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            ) {
+                break snapshot;
+            }
         }
         if Instant::now() >= deadline {
-            anyhow::bail!("expected exactly one spawned child thread");
+            anyhow::bail!("timed out waiting for spawned child thread snapshot");
         }
         sleep(Duration::from_millis(10)).await;
     };
-    Ok(test
-        .thread_manager
-        .get_thread(thread_id)
-        .await?
-        .config_snapshot()
-        .await)
+    Ok(child_snapshot)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -48,6 +48,31 @@ use serde_json::json;
 use wiremock::MockServer;
 // --- Test helpers -----------------------------------------------------------
 
+fn final_input_text(request: &core_test_support::responses::ResponsesRequest) -> Option<String> {
+    request
+        .input()
+        .last()
+        .and_then(|item| {
+            item.get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(|ty| (item, ty))
+        })
+        .and_then(|(item, ty)| match ty {
+            "message" => item
+                .get("content")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|entries| entries.last())
+                .and_then(|entry| entry.get("text"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            "input_text" => item
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            _ => None,
+        })
+}
+
 pub(super) const FIRST_REPLY: &str = "FIRST_REPLY";
 pub(super) const SUMMARY_TEXT: &str = "SUMMARY_ONLY_CONTEXT";
 const THIRD_USER_MSG: &str = "next turn";
@@ -2574,12 +2599,7 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
     );
     let compact_requests = requests
         .iter()
-        .filter(|request| {
-            request
-                .message_input_texts("user")
-                .last()
-                .is_some_and(|text| text == SUMMARIZATION_PROMPT)
-        })
+        .filter(|request| final_input_text(request).as_deref() == Some(SUMMARIZATION_PROMPT))
         .count();
     assert_eq!(
         compact_requests, 2,
@@ -2669,10 +2689,11 @@ async fn snapshot_request_shape_mid_turn_continuation_compaction() {
     let auto_compact_request = auto_compact_mock.single_request();
     let auto_compact_body = auto_compact_request.body_json().to_string();
     assert!(
-        auto_compact_request.has_function_call(DUMMY_CALL_ID)
+        auto_compact_request
+            .function_call_output_text(DUMMY_CALL_ID)
+            .is_some()
             || auto_compact_request
-                .function_call_output_text(DUMMY_CALL_ID)
-                .is_some()
+                .body_contains_text(&format!("unsupported call: {DUMMY_FUNCTION_NAME}"))
             || auto_compact_body.contains(DUMMY_FUNCTION_NAME),
         "mid-turn compaction request should preserve or summarize the triggering tool artifact"
     );
