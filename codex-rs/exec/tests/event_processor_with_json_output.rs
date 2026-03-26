@@ -17,6 +17,8 @@ use codex_exec::exec_events::McpToolCallItemResult;
 use codex_exec::exec_events::McpToolCallStatus;
 use codex_exec::exec_events::PatchApplyStatus;
 use codex_exec::exec_events::PatchChangeKind;
+use codex_exec::exec_events::PlanProgressItem;
+use codex_exec::exec_events::PlanProgressRow;
 use codex_exec::exec_events::ReasoningItem;
 use codex_exec::exec_events::SkillUsedItem;
 use codex_exec::exec_events::ThreadErrorEvent;
@@ -367,6 +369,184 @@ fn plan_update_emits_todo_list_started_updated_and_completed() {
                             ExecTodoItem {
                                 text: "step two".to_string(),
                                 completed: false
+                            },
+                        ],
+                    }),
+                },
+            }),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+            }),
+        ]
+    );
+}
+
+#[test]
+fn plan_update_emits_plan_progress_started_updated_and_completed() {
+    let mut ep = EventProcessorWithJsonOutput::new_with_plan_progress_csv(None, true);
+    let first_args = UpdatePlanArgs {
+        explanation: Some("structured".to_string()),
+        plan: vec![
+            PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Inspect workspace".to_string(),
+                status: StepStatus::InProgress,
+                path: Some("codex-rs/core/src/tools/handlers/plan.rs".to_string()),
+                details: Some("persist CSV-backed progress".to_string()),
+                inputs: Some(vec!["tool args".to_string()]),
+                outputs: Some(vec!["active plan".to_string()]),
+                depends_on: None,
+                acceptance: Some("active plan stored".to_string()),
+            },
+            PlanItemArg {
+                id: Some("plan-02".to_string()),
+                step: "Refresh UI".to_string(),
+                status: StepStatus::Pending,
+                path: Some("codex-rs/tui/src/history_cell.rs".to_string()),
+                details: Some("show structured rows".to_string()),
+                inputs: Some(vec!["active plan".to_string()]),
+                outputs: Some(vec!["plan progress cell".to_string()]),
+                depends_on: Some(vec!["plan-01".to_string()]),
+                acceptance: Some("history shows metadata".to_string()),
+            },
+        ],
+    };
+    let first = event("p1", EventMsg::PlanUpdate(first_args.clone()));
+    let out_first = ep.collect_thread_events(&first);
+    let expected_first_item = ThreadItem {
+        id: "item_0".to_string(),
+        details: ThreadItemDetails::PlanProgress(PlanProgressItem {
+            raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,persist CSV-backed progress,tool args,active plan,,active plan stored
+plan-02,pending,Refresh UI,codex-rs/tui/src/history_cell.rs,show structured rows,active plan,plan progress cell,plan-01,history shows metadata
+"
+            .to_string(),
+            rows: vec![
+                PlanProgressRow {
+                    id: "plan-01".to_string(),
+                    step: "Inspect workspace".to_string(),
+                    status: StepStatus::InProgress,
+                    path: "codex-rs/core/src/tools/handlers/plan.rs".to_string(),
+                    details: "persist CSV-backed progress".to_string(),
+                    inputs: vec!["tool args".to_string()],
+                    outputs: vec!["active plan".to_string()],
+                    depends_on: Vec::new(),
+                    acceptance: Some("active plan stored".to_string()),
+                },
+                PlanProgressRow {
+                    id: "plan-02".to_string(),
+                    step: "Refresh UI".to_string(),
+                    status: StepStatus::Pending,
+                    path: "codex-rs/tui/src/history_cell.rs".to_string(),
+                    details: "show structured rows".to_string(),
+                    inputs: vec!["active plan".to_string()],
+                    outputs: vec!["plan progress cell".to_string()],
+                    depends_on: vec!["plan-01".to_string()],
+                    acceptance: Some("history shows metadata".to_string()),
+                },
+            ],
+        }),
+    };
+    assert_eq!(
+        out_first,
+        vec![ThreadEvent::ItemStarted(ItemStartedEvent {
+            item: expected_first_item.clone(),
+        })]
+    );
+
+    let second = event(
+        "p2",
+        EventMsg::PlanUpdate(UpdatePlanArgs {
+            explanation: Some("structured".to_string()),
+            plan: vec![
+                PlanItemArg {
+                    status: StepStatus::Completed,
+                    ..first_args.plan[0].clone()
+                },
+                PlanItemArg {
+                    status: StepStatus::InProgress,
+                    ..first_args.plan[1].clone()
+                },
+            ],
+        }),
+    );
+    let out_second = ep.collect_thread_events(&second);
+    assert_eq!(
+        out_second,
+        vec![ThreadEvent::ItemUpdated(ItemUpdatedEvent {
+            item: ThreadItem {
+                id: "item_0".to_string(),
+                details: ThreadItemDetails::PlanProgress(PlanProgressItem {
+                    raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,completed,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,persist CSV-backed progress,tool args,active plan,,active plan stored
+plan-02,in_progress,Refresh UI,codex-rs/tui/src/history_cell.rs,show structured rows,active plan,plan progress cell,plan-01,history shows metadata
+"
+                    .to_string(),
+                    rows: vec![
+                        PlanProgressRow {
+                            status: StepStatus::Completed,
+                            ..match &expected_first_item.details {
+                                ThreadItemDetails::PlanProgress(item) => item.rows[0].clone(),
+                                other => panic!("unexpected item details: {other:?}"),
+                            }
+                        },
+                        PlanProgressRow {
+                            status: StepStatus::InProgress,
+                            ..match &expected_first_item.details {
+                                ThreadItemDetails::PlanProgress(item) => item.rows[1].clone(),
+                                other => panic!("unexpected item details: {other:?}"),
+                            }
+                        },
+                    ],
+                }),
+            },
+        })]
+    );
+
+    let out_complete = ep.collect_thread_events(&event(
+        "p3",
+        EventMsg::TurnComplete(codex_protocol::protocol::TurnCompleteEvent {
+            turn_id: "turn-1".to_string(),
+            last_agent_message: None,
+        }),
+    ));
+    assert_eq!(
+        out_complete,
+        vec![
+            ThreadEvent::ItemCompleted(ItemCompletedEvent {
+                item: ThreadItem {
+                    id: "item_0".to_string(),
+                    details: ThreadItemDetails::PlanProgress(PlanProgressItem {
+                        raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,completed,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,persist CSV-backed progress,tool args,active plan,,active plan stored
+plan-02,in_progress,Refresh UI,codex-rs/tui/src/history_cell.rs,show structured rows,active plan,plan progress cell,plan-01,history shows metadata
+"
+                        .to_string(),
+                        rows: vec![
+                            PlanProgressRow {
+                                id: "plan-01".to_string(),
+                                step: "Inspect workspace".to_string(),
+                                status: StepStatus::Completed,
+                                path: "codex-rs/core/src/tools/handlers/plan.rs".to_string(),
+                                details: "persist CSV-backed progress".to_string(),
+                                inputs: vec!["tool args".to_string()],
+                                outputs: vec!["active plan".to_string()],
+                                depends_on: Vec::new(),
+                                acceptance: Some("active plan stored".to_string()),
+                            },
+                            PlanProgressRow {
+                                id: "plan-02".to_string(),
+                                step: "Refresh UI".to_string(),
+                                status: StepStatus::InProgress,
+                                path: "codex-rs/tui/src/history_cell.rs".to_string(),
+                                details: "show structured rows".to_string(),
+                                inputs: vec!["active plan".to_string()],
+                                outputs: vec!["plan progress cell".to_string()],
+                                depends_on: vec!["plan-01".to_string()],
+                                acceptance: Some("history shows metadata".to_string()),
                             },
                         ],
                     }),

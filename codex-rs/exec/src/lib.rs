@@ -56,6 +56,7 @@ use codex_core::config::resolve_oss_provider;
 use codex_core::config_loader::ConfigLoadError;
 use codex_core::config_loader::LoaderOverrides;
 use codex_core::config_loader::format_config_error_with_source;
+use codex_core::features::Feature;
 use codex_core::format_exec_policy_error_with_source;
 use codex_core::git_info::get_git_repo_root;
 use codex_feedback::CodexFeedback;
@@ -486,7 +487,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     } = args;
 
     let mut event_processor: Box<dyn EventProcessor> = match json_mode {
-        true => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
+        true => Box::new(EventProcessorWithJsonOutput::new_with_plan_progress_csv(
+            last_message_file.clone(),
+            config.features.enabled(Feature::PlanProgressCsv),
+        )),
         _ => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stderr_with_ansi,
             cursor_ansi,
@@ -1897,6 +1901,8 @@ mod tests {
                 git_info: None,
                 name: Some("thread".to_string()),
                 turns: vec![],
+                active_plan: None,
+                draft_plan: None,
             },
             model: "gpt-5.4".to_string(),
             model_provider: "openai".to_string(),

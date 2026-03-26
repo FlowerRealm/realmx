@@ -2226,7 +2226,7 @@ fn split_request_user_input_answer(
     (options, note)
 }
 
-/// Render a user‑friendly plan update styled like a checkbox todo list.
+/// Render a user-friendly plan progress update with structured row metadata.
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     let UpdatePlanArgs { explanation, plan } = update;
     PlanUpdateCell { explanation, plan }
@@ -2317,22 +2317,40 @@ impl HistoryCell for PlanUpdateCell {
             out
         };
 
+        let render_metadata = |label: &str, value: &str| -> Vec<Line<'static>> {
+            let wrap_width = width.saturating_sub(6).max(1) as usize;
+            let line = Line::from(format!("{label}: {value}").dim());
+            let wrapped = adaptive_wrap_line(
+                &line,
+                RtOptions::new(wrap_width)
+                    .initial_indent("  ".into())
+                    .subsequent_indent("    ".into()),
+            );
+            let mut out = Vec::new();
+            push_owned_lines(&wrapped, &mut out);
+            out
+        };
+
         let render_step = |item: &PlanItemArg| -> Vec<Line<'static>> {
             let PlanItemArg {
                 step,
                 status,
                 path,
                 details,
+                inputs,
+                outputs,
+                depends_on,
+                acceptance,
                 ..
             } = item;
-            let (box_str, step_style) = match status {
-                StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
-                StepStatus::InProgress => ("□ ", Style::default().cyan().bold()),
-                StepStatus::Pending => ("□ ", Style::default().dim()),
+            let (marker, step_style) = match status {
+                StepStatus::Completed => ("✔ ".green(), Style::default().crossed_out().dim()),
+                StepStatus::InProgress => ("◐ ".cyan().bold(), Style::default().cyan().bold()),
+                StepStatus::Pending => ("○ ".dim(), Style::default().dim()),
             };
 
             let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
-                .initial_indent(box_str.into())
+                .initial_indent(Line::from(vec![marker]))
                 .subsequent_indent("  ".into());
             let mut text = step.clone();
             if let Some(path) = path.as_ref().filter(|path| !path.trim().is_empty()) {
@@ -2344,18 +2362,34 @@ impl HistoryCell for PlanUpdateCell {
                 .as_ref()
                 .filter(|details| !details.trim().is_empty())
             {
-                text.push_str(": ");
+                text.push_str(" - ");
                 text.push_str(details);
             }
-            let line = Line::from(text.set_style(step_style));
+            let line = Line::from(Span::from(text).set_style(step_style));
             let wrapped = adaptive_wrap_line(&line, opts);
             let mut out = Vec::new();
             push_owned_lines(&wrapped, &mut out);
+            if let Some(inputs) = inputs.as_ref().filter(|values| !values.is_empty()) {
+                out.extend(render_metadata("inputs", &inputs.join(", ")));
+            }
+            if let Some(outputs) = outputs.as_ref().filter(|values| !values.is_empty()) {
+                out.extend(render_metadata("outputs", &outputs.join(", ")));
+            }
+            if let Some(depends_on) = depends_on.as_ref().filter(|values| !values.is_empty()) {
+                out.extend(render_metadata("depends_on", &depends_on.join(", ")));
+            }
+            if let Some(acceptance) = acceptance
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                out.extend(render_metadata("acceptance", acceptance));
+            }
             out
         };
 
         let mut lines: Vec<Line<'static>> = vec![];
-        lines.push(vec!["• ".dim(), "Updated Plan".bold()].into());
+        lines.push(vec!["• ".dim(), "Plan Progress".bold()].into());
 
         let mut indented_lines = vec![];
         let note = self
@@ -4152,37 +4186,37 @@ mod tests {
             ),
             plan: vec![
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-01".into()),
                     step: "Investigate existing error paths and logging around HTTP timeouts".into(),
                     status: StepStatus::Completed,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
+                    path: Some("codex-rs/core/src/client.rs".into()),
+                    details: Some("trace retryable transport failures".into()),
+                    inputs: Some(vec!["timeout logs".into()]),
+                    outputs: Some(vec!["failure taxonomy".into()]),
                     depends_on: None,
-                    acceptance: None,
+                    acceptance: Some("retryable failures identified".into()),
                 },
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-02".into()),
                     step: "Harden Grafana client error handling with retry/backoff and user‑friendly messages".into(),
                     status: StepStatus::InProgress,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
+                    path: Some("codex-rs/tui/src/history_cell.rs".into()),
+                    details: Some("render structured progress for retries".into()),
+                    inputs: Some(vec!["failure taxonomy".into(), "existing copy".into()]),
+                    outputs: Some(vec!["plan progress cell".into()]),
+                    depends_on: Some(vec!["plan-01".into()]),
+                    acceptance: Some("retries and copy are visible".into()),
                 },
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-03".into()),
                     step: "Add tests for transient failure scenarios and surfacing to the UI".into(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
+                    path: Some("codex-rs/tui/src/history_cell.rs".into()),
+                    details: Some("capture wrapped metadata lines".into()),
+                    inputs: Some(vec!["plan progress cell".into()]),
+                    outputs: Some(vec!["snapshots".into()]),
+                    depends_on: Some(vec!["plan-02".into()]),
+                    acceptance: Some("snapshots show plan metadata".into()),
                 },
             ],
         };
@@ -4200,26 +4234,26 @@ mod tests {
             explanation: None,
             plan: vec![
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-01".into()),
                     step: "Define error taxonomy".into(),
                     status: StepStatus::InProgress,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
+                    path: Some("codex-rs/core/src/error.rs".into()),
+                    details: Some("separate retryable vs fatal paths".into()),
+                    inputs: Some(vec!["transport failures".into()]),
+                    outputs: Some(vec!["error categories".into()]),
                     depends_on: None,
-                    acceptance: None,
+                    acceptance: Some("categories map to UX copy".into()),
                 },
                 PlanItemArg {
-                    id: None,
+                    id: Some("plan-02".into()),
                     step: "Implement mapping to user messages".into(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
+                    path: Some("codex-rs/tui/src/history_cell.rs".into()),
+                    details: Some("show explicit remediation hints".into()),
+                    inputs: Some(vec!["error categories".into()]),
+                    outputs: Some(vec!["user-facing copy".into()]),
+                    depends_on: Some(vec!["plan-01".into()]),
+                    acceptance: Some("copy is visible in history".into()),
                 },
             ],
         };

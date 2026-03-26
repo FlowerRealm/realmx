@@ -111,6 +111,8 @@ pub use provider_login_capabilities::ProviderLoginCapabilities;
 pub use provider_login_capabilities::provider_login_capabilities;
 pub use provider_login_capabilities::provider_oauth_url;
 mod event_mapping;
+pub use plan_csv::CanonicalPlanCsv;
+pub use plan_csv::canonical_plan_csv_from_update_plan_args;
 mod response_debug_context;
 pub mod review_format;
 pub mod review_prompts;

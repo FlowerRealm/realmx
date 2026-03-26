@@ -25,6 +25,8 @@ use crate::exec_events::McpToolCallItemResult;
 use crate::exec_events::McpToolCallStatus;
 use crate::exec_events::PatchApplyStatus;
 use crate::exec_events::PatchChangeKind;
+use crate::exec_events::PlanProgressItem;
+use crate::exec_events::PlanProgressRow;
 use crate::exec_events::ReasoningItem;
 use crate::exec_events::SkillUsedItem;
 use crate::exec_events::ThreadErrorEvent;
@@ -39,6 +41,7 @@ use crate::exec_events::TurnFailedEvent;
 use crate::exec_events::TurnStartedEvent;
 use crate::exec_events::Usage;
 use crate::exec_events::WebSearchItem;
+use codex_core::canonical_plan_csv_from_update_plan_args;
 use codex_core::config::Config;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::plan_tool::StepStatus;
@@ -61,11 +64,12 @@ pub struct EventProcessorWithJsonOutput {
     last_message_path: Option<PathBuf>,
     last_proposed_plan: Option<String>,
     next_event_id: AtomicU64,
+    plan_progress_csv_enabled: bool,
     // Tracks running commands by call_id, including the associated item id.
     running_commands: HashMap<String, RunningCommand>,
     running_patch_applies: HashMap<String, protocol::PatchApplyBeginEvent>,
-    // Tracks the todo list for the current turn (at most one per turn).
-    running_todo_list: Option<RunningTodoList>,
+    // Tracks the running plan-progress item for the current turn (at most one per turn).
+    running_plan_progress: Option<RunningPlanProgress>,
     last_total_token_usage: Option<codex_protocol::protocol::TokenUsage>,
     running_mcp_tool_calls: HashMap<String, RunningMcpToolCall>,
     running_collab_tool_calls: HashMap<String, RunningCollabToolCall>,
@@ -81,9 +85,16 @@ struct RunningCommand {
 }
 
 #[derive(Debug, Clone)]
-struct RunningTodoList {
-    item_id: String,
-    items: Vec<TodoItem>,
+enum RunningPlanProgress {
+    Csv {
+        item_id: String,
+        raw_csv: String,
+        rows: Vec<PlanProgressRow>,
+    },
+    LegacyTodo {
+        item_id: String,
+        items: Vec<TodoItem>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -102,13 +113,21 @@ struct RunningCollabToolCall {
 
 impl EventProcessorWithJsonOutput {
     pub fn new(last_message_path: Option<PathBuf>) -> Self {
+        Self::new_with_plan_progress_csv(last_message_path, false)
+    }
+
+    pub fn new_with_plan_progress_csv(
+        last_message_path: Option<PathBuf>,
+        plan_progress_csv_enabled: bool,
+    ) -> Self {
         Self {
             last_message_path,
             last_proposed_plan: None,
             next_event_id: AtomicU64::new(0),
+            plan_progress_csv_enabled,
             running_commands: HashMap::new(),
             running_patch_applies: HashMap::new(),
-            running_todo_list: None,
+            running_plan_progress: None,
             last_total_token_usage: None,
             running_mcp_tool_calls: HashMap::new(),
             running_collab_tool_calls: HashMap::new(),
@@ -731,20 +750,84 @@ impl EventProcessorWithJsonOutput {
             .collect()
     }
 
-    fn handle_plan_update(&mut self, args: &UpdatePlanArgs) -> Vec<ThreadEvent> {
-        let items = self.todo_items_from_plan(args);
+    fn plan_progress_item_from_plan(&self, args: &UpdatePlanArgs) -> Option<PlanProgressItem> {
+        let canonical_plan = canonical_plan_csv_from_update_plan_args(args).ok()?;
+        Some(PlanProgressItem {
+            raw_csv: canonical_plan.raw_csv,
+            rows: canonical_plan
+                .rows
+                .into_iter()
+                .map(|row| PlanProgressRow {
+                    id: row.row_id,
+                    step: row.step,
+                    status: match row.status.as_str() {
+                        "pending" => StepStatus::Pending,
+                        "in_progress" => StepStatus::InProgress,
+                        "completed" => StepStatus::Completed,
+                        other => {
+                            warn!("unexpected thread plan item status in exec event processor: {other}");
+                            StepStatus::Pending
+                        }
+                    },
+                    path: row.path,
+                    details: row.details,
+                    inputs: row.inputs,
+                    outputs: row.outputs,
+                    depends_on: row.depends_on,
+                    acceptance: row.acceptance,
+                })
+                .collect(),
+        })
+    }
 
-        if let Some(running) = &mut self.running_todo_list {
-            running.items = items.clone();
+    fn handle_plan_update(&mut self, args: &UpdatePlanArgs) -> Vec<ThreadEvent> {
+        if self.plan_progress_csv_enabled
+            && let Some(plan_progress) = self.plan_progress_item_from_plan(args)
+        {
+            if let Some(RunningPlanProgress::Csv {
+                item_id,
+                raw_csv,
+                rows,
+            }) = &mut self.running_plan_progress
+            {
+                *raw_csv = plan_progress.raw_csv.clone();
+                *rows = plan_progress.rows.clone();
+                let item = ThreadItem {
+                    id: item_id.clone(),
+                    details: ThreadItemDetails::PlanProgress(plan_progress),
+                };
+                return vec![ThreadEvent::ItemUpdated(ItemUpdatedEvent { item })];
+            }
+
+            let item_id = self.get_next_item_id();
+            self.running_plan_progress = Some(RunningPlanProgress::Csv {
+                item_id: item_id.clone(),
+                raw_csv: plan_progress.raw_csv.clone(),
+                rows: plan_progress.rows.clone(),
+            });
             let item = ThreadItem {
-                id: running.item_id.clone(),
+                id: item_id,
+                details: ThreadItemDetails::PlanProgress(plan_progress),
+            };
+            return vec![ThreadEvent::ItemStarted(ItemStartedEvent { item })];
+        }
+
+        let items = self.todo_items_from_plan(args);
+        if let Some(RunningPlanProgress::LegacyTodo {
+            item_id,
+            items: running_items,
+        }) = &mut self.running_plan_progress
+        {
+            *running_items = items.clone();
+            let item = ThreadItem {
+                id: item_id.clone(),
                 details: ThreadItemDetails::TodoList(TodoListItem { items }),
             };
             return vec![ThreadEvent::ItemUpdated(ItemUpdatedEvent { item })];
         }
 
         let item_id = self.get_next_item_id();
-        self.running_todo_list = Some(RunningTodoList {
+        self.running_plan_progress = Some(RunningPlanProgress::LegacyTodo {
             item_id: item_id.clone(),
             items: items.clone(),
         });
@@ -773,12 +856,20 @@ impl EventProcessorWithJsonOutput {
 
         let mut items = Vec::new();
 
-        if let Some(running) = self.running_todo_list.take() {
-            let item = ThreadItem {
-                id: running.item_id,
-                details: ThreadItemDetails::TodoList(TodoListItem {
-                    items: running.items,
-                }),
+        if let Some(running) = self.running_plan_progress.take() {
+            let item = match running {
+                RunningPlanProgress::Csv {
+                    item_id,
+                    raw_csv,
+                    rows,
+                } => ThreadItem {
+                    id: item_id,
+                    details: ThreadItemDetails::PlanProgress(PlanProgressItem { raw_csv, rows }),
+                },
+                RunningPlanProgress::LegacyTodo { item_id, items } => ThreadItem {
+                    id: item_id,
+                    details: ThreadItemDetails::TodoList(TodoListItem { items }),
+                },
             };
             items.push(ThreadEvent::ItemCompleted(ItemCompletedEvent { item }));
         }

@@ -2,7 +2,9 @@ use crate::client_common::tools::ResponsesApiTool;
 use crate::client_common::tools::ToolSpec;
 use crate::codex::Session;
 use crate::codex::TurnContext;
+use crate::features::Feature;
 use crate::function_tool::FunctionCallError;
+use crate::plan_csv::canonical_plan_csv_from_update_plan_args;
 use crate::plan_csv::update_plan_from_thread_plan_items;
 use crate::plan_workspace::PlanWorkspace;
 use crate::tools::context::FunctionToolOutput;
@@ -12,10 +14,13 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::spec::JsonSchema;
 use async_trait::async_trait;
+use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
+use codex_state::ThreadPlanSnapshotCreateParams;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
+use uuid::Uuid;
 
 pub struct PlanHandler;
 
@@ -95,6 +100,7 @@ pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
         description: r#"Updates the task plan.
 Provide an optional explanation and a list of plan items.
 Each item must include step and status, and may also include id/path/details/inputs/outputs/depends_on/acceptance.
+When creating or replacing a plan, prefer file-level rows with path/details and reuse existing ids for follow-up status updates.
 At most one step can be in_progress at a time.
 "#
         .to_string(),
@@ -149,7 +155,7 @@ pub(crate) async fn handle_update_plan(
     session: &Session,
     turn_context: &TurnContext,
     arguments: String,
-    _call_id: String,
+    call_id: String,
 ) -> Result<String, FunctionCallError> {
     if turn_context.collaboration_mode.mode.is_plan_output_mode() {
         return Err(FunctionCallError::RespondToModel(
@@ -158,7 +164,7 @@ pub(crate) async fn handle_update_plan(
         ));
     }
     let mut args = parse_update_plan_arguments(&arguments)?;
-    if try_update_active_thread_plan(session, turn_context, &mut args).await? {
+    if try_sync_active_thread_plan(session, turn_context, &mut args, call_id.as_str()).await? {
         session
             .send_event(turn_context, EventMsg::PlanUpdate(args))
             .await;
@@ -215,17 +221,7 @@ async fn try_update_active_thread_plan(
             .update_active_thread_plan_item_status(
                 thread_id.as_str(),
                 row_id,
-                match item.status {
-                    codex_protocol::plan_tool::StepStatus::Pending => {
-                        codex_state::ThreadPlanItemStatus::Pending
-                    }
-                    codex_protocol::plan_tool::StepStatus::InProgress => {
-                        codex_state::ThreadPlanItemStatus::InProgress
-                    }
-                    codex_protocol::plan_tool::StepStatus::Completed => {
-                        codex_state::ThreadPlanItemStatus::Completed
-                    }
-                },
+                step_status_to_thread_plan_status(item.status.clone()),
             )
             .await
             .map_err(|err| {
@@ -303,4 +299,176 @@ async fn try_update_active_thread_plan(
         }
     }
     Ok(true)
+}
+
+async fn try_sync_active_thread_plan(
+    session: &Session,
+    turn_context: &TurnContext,
+    args: &mut UpdatePlanArgs,
+    call_id: &str,
+) -> Result<bool, FunctionCallError> {
+    if !session.enabled(Feature::PlanProgressCsv) {
+        return try_update_active_thread_plan(session, turn_context, args).await;
+    }
+
+    let Some(state_db) = session.state_db() else {
+        return Ok(false);
+    };
+    let thread_id = session.conversation_id.to_string();
+    let active_plan = state_db
+        .get_active_thread_plan(thread_id.as_str())
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("failed to load active thread plan: {err}"))
+        })?;
+
+    if let Some(active_plan) = active_plan.filter(|plan| update_plan_is_status_patch(plan, args)) {
+        update_existing_active_thread_plan(
+            session,
+            turn_context,
+            args,
+            thread_id.as_str(),
+            active_plan,
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    replace_active_thread_plan(session, turn_context, args, thread_id.as_str(), call_id).await?;
+    Ok(true)
+}
+
+fn update_plan_is_status_patch(
+    active_plan: &codex_state::ActiveThreadPlan,
+    args: &UpdatePlanArgs,
+) -> bool {
+    !args.plan.is_empty()
+        && args.plan.iter().all(|item| {
+            item.id
+                .as_deref()
+                .is_some_and(|row_id| active_plan.items.iter().any(|row| row.row_id == row_id))
+        })
+}
+
+async fn update_existing_active_thread_plan(
+    session: &Session,
+    turn_context: &TurnContext,
+    args: &mut UpdatePlanArgs,
+    thread_id: &str,
+    active_plan: codex_state::ActiveThreadPlan,
+) -> Result<(), FunctionCallError> {
+    let state_db = session
+        .state_db()
+        .ok_or_else(|| FunctionCallError::RespondToModel("state db unavailable".to_string()))?;
+    for item in &args.plan {
+        let row_id = item.id.as_deref().ok_or_else(|| {
+            FunctionCallError::RespondToModel("expected row id for active plan update".to_string())
+        })?;
+        state_db
+            .update_active_thread_plan_item_status(
+                thread_id,
+                row_id,
+                step_status_to_thread_plan_status(item.status.clone()),
+            )
+            .await
+            .map_err(|err| {
+                FunctionCallError::RespondToModel(format!(
+                    "failed to update active thread plan row {row_id}: {err}"
+                ))
+            })?;
+    }
+
+    let refreshed = state_db
+        .get_active_thread_plan(thread_id)
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to refresh active thread plan: {err}"
+            ))
+        })?
+        .unwrap_or(active_plan);
+    persist_active_plan_to_workspace(session, turn_context, thread_id, refreshed.items.as_slice())
+        .await?;
+    *args =
+        update_plan_from_thread_plan_items(refreshed.items.as_slice(), args.explanation.clone());
+    Ok(())
+}
+
+async fn replace_active_thread_plan(
+    session: &Session,
+    turn_context: &TurnContext,
+    args: &mut UpdatePlanArgs,
+    thread_id: &str,
+    call_id: &str,
+) -> Result<(), FunctionCallError> {
+    let canonical_plan = canonical_plan_csv_from_update_plan_args(args).map_err(|err| {
+        FunctionCallError::RespondToModel(format!("failed to canonicalize plan update: {err}"))
+    })?;
+    let state_db = session
+        .state_db()
+        .ok_or_else(|| FunctionCallError::RespondToModel("state db unavailable".to_string()))?;
+    let active_plan = state_db
+        .replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+            id: Uuid::new_v4().to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: turn_context.sub_id.clone(),
+            source_item_id: call_id.to_string(),
+            raw_csv: canonical_plan.raw_csv,
+        })
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to replace active thread plan: {err}"
+            ))
+        })?;
+    persist_active_plan_to_workspace(
+        session,
+        turn_context,
+        thread_id,
+        active_plan.items.as_slice(),
+    )
+    .await?;
+    *args =
+        update_plan_from_thread_plan_items(active_plan.items.as_slice(), args.explanation.clone());
+    Ok(())
+}
+
+async fn persist_active_plan_to_workspace(
+    session: &Session,
+    turn_context: &TurnContext,
+    thread_id: &str,
+    items: &[codex_state::ThreadPlanItem],
+) -> Result<(), FunctionCallError> {
+    let refreshed_args = update_plan_from_thread_plan_items(items, None);
+    let refreshed_csv = canonical_plan_csv_from_update_plan_args(&refreshed_args)
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to render refreshed active thread plan csv: {err}"
+            ))
+        })?
+        .raw_csv;
+    let codex_home = session.codex_home().await;
+    let workspace = PlanWorkspace::new(codex_home.as_path(), turn_context.cwd.as_path(), thread_id);
+    let update_public_draft = workspace.draft_matches_active().await.map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "failed to compare plan workspace draft and active plan: {err}"
+        ))
+    })?;
+    workspace
+        .persist_active_plan(refreshed_csv.as_str(), update_public_draft)
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to sync refreshed active thread plan to workspace: {err}"
+            ))
+        })?;
+    Ok(())
+}
+
+fn step_status_to_thread_plan_status(status: StepStatus) -> codex_state::ThreadPlanItemStatus {
+    match status {
+        StepStatus::Pending => codex_state::ThreadPlanItemStatus::Pending,
+        StepStatus::InProgress => codex_state::ThreadPlanItemStatus::InProgress,
+        StepStatus::Completed => codex_state::ThreadPlanItemStatus::Completed,
+    }
 }

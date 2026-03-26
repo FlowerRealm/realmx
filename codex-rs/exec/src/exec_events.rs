@@ -1,4 +1,5 @@
 use codex_protocol::models::WebSearchAction;
+use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::protocol::SkillInvocationType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -123,8 +124,14 @@ pub enum ThreadItemDetails {
     WebSearch(WebSearchItem),
     /// Records that a skill was used during the turn.
     SkillUsed(SkillUsedItem),
+    /// Tracks the agent's running CSV-backed plan progress. It starts when the
+    /// plan is first issued, updates as rows change state, and completes when
+    /// the turn ends.
+    PlanProgress(PlanProgressItem),
     /// Tracks the agent's running to-do list. It starts when the plan is first
     /// issued, updates as steps change state, and completes when the turn ends.
+    /// This is retained for legacy clients when CSV-backed plan progress is
+    /// disabled.
     TodoList(TodoListItem),
     /// Describes a non-fatal error surfaced as an item.
     Error(ErrorItem),
@@ -303,19 +310,41 @@ pub struct SkillUsedItem {
     pub invocation_type: SkillInvocationType,
 }
 
+/// A structured plan row derived from canonical CSV-backed plan progress.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+pub struct PlanProgressRow {
+    pub id: String,
+    pub step: String,
+    pub status: StepStatus,
+    pub path: String,
+    pub details: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub depends_on: Vec<String>,
+    pub acceptance: Option<String>,
+}
+
+/// The agent's running canonical plan progress.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+pub struct PlanProgressItem {
+    pub raw_csv: String,
+    pub rows: Vec<PlanProgressRow>,
+}
+
 /// An error notification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct ErrorItem {
     pub message: String,
 }
 
-/// An item in agent's to-do list.
+/// An item in the legacy agent to-do list.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TodoItem {
     pub text: String,
     pub completed: bool,
 }
 
+/// Legacy agent to-do list payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TodoListItem {
     pub items: Vec<TodoItem>,

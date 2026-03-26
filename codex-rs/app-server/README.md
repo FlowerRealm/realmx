@@ -815,7 +815,7 @@ The app-server streams JSON-RPC notifications while a turn is running. Each turn
 - `turn/started` — `{ turn }` with the turn id, empty `items`, and `status: "inProgress"`.
 - `turn/completed` — `{ turn }` where `turn.status` is `completed`, `interrupted`, or `failed`; failures carry `{ error: { message, codexErrorInfo?, additionalDetails? } }`.
 - `turn/diff/updated` — `{ threadId, turnId, diff }` represents the up-to-date snapshot of the turn-level unified diff, emitted after every FileChange item. `diff` is the latest aggregated unified diff across every file change in the turn. UIs can render this to show the full "what changed" view without stitching individual `fileChange` items.
-- `turn/plan/updated` — `{ turnId, explanation?, plan }` whenever the agent shares or changes its plan; each `plan` entry is `{ id?, step, status, path?, details?, inputs?, outputs?, dependsOn?, acceptance? }` with `status` in `pending`, `inProgress`, or `completed`.
+- `turn/plan/updated` — `{ turnId, explanation?, rawCsv, plan }` whenever the agent shares or changes its plan; `rawCsv` is the canonical plan CSV when the update is fully structured, otherwise `null`. Each `plan` entry is `{ id?, step, status, path?, details?, inputs?, outputs?, dependsOn?, acceptance? }` with `status` in `pending`, `inProgress`, or `completed`.
 - `model/rerouted` — `{ threadId, turnId, fromModel, toModel, reason }` when the backend reroutes a request to a different model (for example, due to high-risk cyber safety checks).
 
 Today both notifications carry an empty `items` array even when item events were streamed; rely on `item/*` notifications for the canonical item list until this is fixed.

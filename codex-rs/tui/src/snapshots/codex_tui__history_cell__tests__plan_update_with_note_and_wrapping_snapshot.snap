@@ -2,7 +2,7 @@
 source: tui/src/history_cell.rs
 expression: rendered
 ---
-• Updated Plan
+• Plan Progress
   └ I’ll update Grafana call
     error handling by adding
     retries and clearer messages
@@ -10,11 +10,39 @@ expression: rendered
     unreachable.
     ✔ Investigate existing error
       paths and logging around
-      HTTP timeouts
-    □ Harden Grafana client
+      HTTP timeouts (codex-rs/
+      core/src/client.rs) -
+      trace retryable transport
+      failures
+      inputs: timeout logs
+      outputs: failure
+        taxonomy
+      acceptance: retryable
+        failures identified
+    ◐ Harden Grafana client
       error handling with retry/
       backoff and user‑friendly
-      messages
-    □ Add tests for transient
+      messages (codex-rs/tui/
+      src/history_cell.rs) -
+      render structured progress
+      for retries
+      inputs: failure
+        taxonomy, existing
+        copy
+      outputs: plan progress
+        cell
+      depends_on: plan-01
+      acceptance: retries and
+        copy are visible
+    ○ Add tests for transient
       failure scenarios and
       surfacing to the UI
+      (codex-rs/tui/src/
+      history_cell.rs) - capture
+      wrapped metadata lines
+      inputs: plan progress
+        cell
+      outputs: snapshots
+      depends_on: plan-02
+      acceptance: snapshots
+        show plan metadata

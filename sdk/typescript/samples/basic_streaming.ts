@@ -35,6 +35,13 @@ const handleItemCompleted = (item: ThreadItem): void => {
 
 const handleItemUpdated = (item: ThreadItem): void => {
   switch (item.type) {
+    case "plan_progress": {
+      console.log(`Plan Progress:`);
+      for (const row of item.rows) {
+        console.log(`\t ${row.status} ${row.step} (${row.path})`);
+      }
+      break;
+    }
     case "todo_list": {
       console.log(`Todo:`);
       for (const todo of item.items) {

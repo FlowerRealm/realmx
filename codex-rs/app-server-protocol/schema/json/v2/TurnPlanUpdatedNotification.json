@@ -89,6 +89,13 @@
       },
       "type": "array"
     },
+    "rawCsv": {
+      "description": "Canonical plan CSV when the update is fully structured, otherwise null.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "threadId": {
       "type": "string"
     },

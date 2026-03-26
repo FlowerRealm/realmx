@@ -4768,6 +4768,8 @@ pub struct TurnPlanUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub explanation: Option<String>,
+    /// Canonical plan CSV when the update is fully structured, otherwise null.
+    pub raw_csv: Option<String>,
     pub plan: Vec<TurnPlanStep>,
 }
 

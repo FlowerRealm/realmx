@@ -4,7 +4,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 // Types for the TODO tool arguments matching codex-vscode/todo-mcp/src/main.rs
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
     Pending,

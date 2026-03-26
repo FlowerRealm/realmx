@@ -7,13 +7,14 @@ use codex_state::ThreadPlanItemCreateParams;
 use codex_state::ThreadPlanItemStatus;
 use codex_state::canonicalize_thread_plan_csv;
 use codex_state::parse_thread_plan_csv;
+use codex_state::render_thread_plan_csv;
 use std::fmt::Write;
 
 const CSV_OPEN_FENCE: &str = "```csv";
 const CSV_CLOSE_FENCE: &str = "```";
 
-#[derive(Debug)]
-pub(crate) struct CanonicalPlanCsv {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalPlanCsv {
     pub raw_csv: String,
     pub rows: Vec<ThreadPlanItemCreateParams>,
 }
@@ -22,6 +23,21 @@ pub(crate) fn canonical_plan_csv_from_proposed_plan(
     markdown: &str,
 ) -> anyhow::Result<CanonicalPlanCsv> {
     let raw_csv = extract_csv_block(markdown)?;
+    let raw_csv = canonicalize_thread_plan_csv(raw_csv.as_str())?;
+    let rows = parse_thread_plan_csv(raw_csv.as_str())?;
+    Ok(CanonicalPlanCsv { raw_csv, rows })
+}
+
+pub fn canonical_plan_csv_from_update_plan_args(
+    args: &UpdatePlanArgs,
+) -> anyhow::Result<CanonicalPlanCsv> {
+    let rows = args
+        .plan
+        .iter()
+        .enumerate()
+        .map(|(index, item)| thread_plan_row_from_plan_item(index, item))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let raw_csv = render_thread_plan_csv(rows.as_slice())?;
     let raw_csv = canonicalize_thread_plan_csv(raw_csv.as_str())?;
     let rows = parse_thread_plan_csv(raw_csv.as_str())?;
     Ok(CanonicalPlanCsv { raw_csv, rows })
@@ -107,6 +123,58 @@ fn append_plan_metadata_line(out: &mut String, label: &str, values: &[String]) {
     let _ = writeln!(out, "  {label}: {}", values.join(", "));
 }
 
+fn thread_plan_row_from_plan_item(
+    index: usize,
+    item: &PlanItemArg,
+) -> anyhow::Result<ThreadPlanItemCreateParams> {
+    let row_number = index + 1;
+    let row_id = item
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("plan-{row_number:02}"));
+    let path = item
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("plan update row {row_id} is missing path"))?;
+    Ok(ThreadPlanItemCreateParams {
+        row_id,
+        row_index: index as i64,
+        status: step_status_to_thread_plan_status(item.status.clone()),
+        step: item.step.trim().to_string(),
+        path,
+        details: item
+            .details
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string(),
+        inputs: normalize_plan_values(item.inputs.as_deref().unwrap_or_default()),
+        outputs: normalize_plan_values(item.outputs.as_deref().unwrap_or_default()),
+        depends_on: normalize_plan_values(item.depends_on.as_deref().unwrap_or_default()),
+        acceptance: item
+            .acceptance
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+    })
+}
+
+fn normalize_plan_values(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn thread_plan_status_to_step_status(status: ThreadPlanItemStatus) -> StepStatus {
     match status {
         ThreadPlanItemStatus::Pending => StepStatus::Pending,
@@ -115,10 +183,22 @@ fn thread_plan_status_to_step_status(status: ThreadPlanItemStatus) -> StepStatus
     }
 }
 
+fn step_status_to_thread_plan_status(status: StepStatus) -> ThreadPlanItemStatus {
+    match status {
+        StepStatus::Pending => ThreadPlanItemStatus::Pending,
+        StepStatus::InProgress => ThreadPlanItemStatus::InProgress,
+        StepStatus::Completed => ThreadPlanItemStatus::Completed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::canonical_plan_csv_from_proposed_plan;
+    use super::canonical_plan_csv_from_update_plan_args;
     use super::render_plan_text;
+    use codex_protocol::plan_tool::PlanItemArg;
+    use codex_protocol::plan_tool::StepStatus;
+    use codex_protocol::plan_tool::UpdatePlanArgs;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -187,5 +267,69 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows,plan ma
   acceptance: rows persist
 "
         );
+    }
+
+    #[test]
+    fn canonicalizes_update_plan_args() {
+        let args = UpdatePlanArgs {
+            explanation: Some("structured".to_string()),
+            plan: vec![
+                PlanItemArg {
+                    id: None,
+                    step: "Touch state".to_string(),
+                    status: StepStatus::InProgress,
+                    path: Some("codex-rs/state/src/runtime/thread_plans.rs".to_string()),
+                    details: Some("persist canonical rows".to_string()),
+                    inputs: Some(vec![" update args ".to_string(), "".to_string()]),
+                    outputs: Some(vec![" active plan ".to_string()]),
+                    depends_on: None,
+                    acceptance: Some(" active plan stored ".to_string()),
+                },
+                PlanItemArg {
+                    id: Some("plan-custom".to_string()),
+                    step: "Refresh UI".to_string(),
+                    status: StepStatus::Pending,
+                    path: Some("codex-rs/tui/src/history_cell.rs".to_string()),
+                    details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: Some(vec!["plan-01".to_string()]),
+                    acceptance: None,
+                },
+            ],
+        };
+
+        let plan = canonical_plan_csv_from_update_plan_args(&args).expect("csv should parse");
+        assert_eq!(
+            plan.raw_csv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Touch state,codex-rs/state/src/runtime/thread_plans.rs,persist canonical rows,update args,active plan,,active plan stored
+plan-custom,pending,Refresh UI,codex-rs/tui/src/history_cell.rs,,,,plan-01,
+"
+        );
+        assert_eq!(plan.rows[0].row_id, "plan-01");
+        assert_eq!(plan.rows[1].row_id, "plan-custom");
+    }
+
+    #[test]
+    fn rejects_update_plan_args_without_path() {
+        let args = UpdatePlanArgs {
+            explanation: None,
+            plan: vec![PlanItemArg {
+                id: None,
+                step: "Touch state".to_string(),
+                status: StepStatus::InProgress,
+                path: None,
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        };
+
+        let err = canonical_plan_csv_from_update_plan_args(&args).expect_err("path should fail");
+        assert_eq!(err.to_string(), "plan update row plan-01 is missing path");
     }
 }

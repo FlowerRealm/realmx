@@ -125,6 +125,12 @@ fn plan_mode_subagent_review_is_under_development() {
 }
 
 #[test]
+fn plan_progress_csv_is_under_development() {
+    assert_eq!(Feature::PlanProgressCsv.stage(), Stage::UnderDevelopment);
+    assert_eq!(Feature::PlanProgressCsv.default_enabled(), false);
+}
+
+#[test]
 fn tool_suggest_is_under_development() {
     assert_eq!(Feature::ToolSuggest.stage(), Stage::UnderDevelopment);
     assert_eq!(Feature::ToolSuggest.default_enabled(), false);

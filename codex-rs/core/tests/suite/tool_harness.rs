@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use codex_core::features::Feature;
+use codex_core::plan_workspace::PlanWorkspace;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -305,6 +306,340 @@ plan-1,pending,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,sync s
     assert_eq!(active_plan.items.len(), 1);
     assert_eq!(active_plan.items[0].row_id, "plan-1");
     assert_eq!(active_plan.items[0].status, ThreadPlanItemStatus::Completed);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_plan_tool_with_feature_persists_canonical_active_plan() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+
+    let mut builder = test_codex().with_home(home.clone()).with_config(|config| {
+        let _ = config.features.enable(Feature::PlanProgressCsv);
+    });
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let call_id = "plan-tool-structured";
+    let plan_args = json!({
+        "explanation": "Structured plan",
+        "plan": [
+            {
+                "step": "Inspect workspace",
+                "status": "in_progress",
+                "path": "codex-rs/core/src/tools/handlers/plan.rs",
+                "details": "persist canonical csv rows",
+                "inputs": ["tool args"],
+                "outputs": ["active plan"],
+                "acceptance": "active plan stored"
+            },
+            {
+                "step": "Refresh UI",
+                "status": "pending",
+                "path": "codex-rs/tui/src/history_cell.rs",
+                "details": "show metadata in history",
+                "inputs": ["active plan"],
+                "outputs": ["plan progress cell"],
+                "depends_on": ["plan-01"],
+                "acceptance": "history shows structured rows"
+            }
+        ]
+    })
+    .to_string();
+
+    let first_response = sse(vec![
+        ev_response_created("resp-1"),
+        ev_function_call(call_id, "update_plan", &plan_args),
+        ev_completed("resp-1"),
+    ]);
+    responses::mount_sse_once(&server, first_response).await;
+
+    let second_response = sse(vec![
+        ev_assistant_message("msg-1", "plan acknowledged"),
+        ev_completed("resp-2"),
+    ]);
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "please persist the plan".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_configured.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        })
+        .await?;
+
+    let mut saw_plan_update = false;
+    wait_for_event(&codex, |event| match event {
+        EventMsg::PlanUpdate(update) => {
+            saw_plan_update = true;
+            assert_eq!(update.explanation.as_deref(), Some("Structured plan"));
+            assert_eq!(update.plan.len(), 2);
+            assert_eq!(update.plan[0].id.as_deref(), Some("plan-01"));
+            assert_eq!(
+                update.plan[0].path.as_deref(),
+                Some("codex-rs/core/src/tools/handlers/plan.rs")
+            );
+            assert_eq!(
+                update.plan[1].depends_on.as_deref(),
+                Some(["plan-01".to_string()].as_slice())
+            );
+            false
+        }
+        EventMsg::TurnComplete(_) => true,
+        _ => false,
+    })
+    .await;
+
+    assert!(saw_plan_update, "expected PlanUpdate event");
+
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = call_output(&req, call_id);
+    assert_eq!(output_text, "Plan updated");
+
+    let db = codex.state_db().expect("state db");
+    let active_plan = db
+        .get_active_thread_plan(session_configured.session_id.to_string().as_str())
+        .await?
+        .expect("active plan should exist");
+    assert_eq!(active_plan.items.len(), 2);
+    assert_eq!(active_plan.items[0].row_id, "plan-01");
+    assert_eq!(active_plan.items[1].row_id, "plan-02");
+    assert_eq!(
+        active_plan.snapshot.raw_csv,
+        "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,persist canonical csv rows,tool args,active plan,,active plan stored
+plan-02,pending,Refresh UI,codex-rs/tui/src/history_cell.rs,show metadata in history,active plan,plan progress cell,plan-01,history shows structured rows
+"
+    );
+
+    let workspace = PlanWorkspace::new(
+        home.path(),
+        cwd.path(),
+        session_configured.session_id.to_string().as_str(),
+    );
+    let snapshot = workspace.snapshot().await?;
+    assert_eq!(
+        snapshot.active_tasks_csv.as_deref(),
+        Some(active_plan.snapshot.raw_csv.as_str())
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_plan_tool_with_feature_expands_status_patch_to_full_plan() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+
+    let mut builder = test_codex().with_home(home).with_config(|config| {
+        let _ = config.features.enable(Feature::PlanProgressCsv);
+    });
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let db = codex.state_db().expect("state db");
+    db.replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+        id: "snapshot-1".to_string(),
+        thread_id: session_configured.session_id.to_string(),
+        source_turn_id: "turn-1".to_string(),
+        source_item_id: "item-1".to_string(),
+        raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-1,pending,Inspect workspace,codex-rs/core/src/tools/handlers/plan.rs,sync state,,,,
+plan-2,pending,Refresh UI,codex-rs/tui/src/history_cell.rs,render plan,,,,history cell updated
+"
+        .to_string(),
+    })
+    .await?;
+
+    let call_id = "plan-tool-status-patch";
+    let plan_args = json!({
+        "explanation": "Status update",
+        "plan": [
+            {"id": "plan-1", "step": "Inspect workspace", "status": "completed"}
+        ],
+    })
+    .to_string();
+
+    let first_response = sse(vec![
+        ev_response_created("resp-1"),
+        ev_function_call(call_id, "update_plan", &plan_args),
+        ev_completed("resp-1"),
+    ]);
+    responses::mount_sse_once(&server, first_response).await;
+
+    let second_response = sse(vec![
+        ev_assistant_message("msg-1", "status patch applied"),
+        ev_completed("resp-2"),
+    ]);
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "please patch the plan status".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_configured.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        })
+        .await?;
+
+    let mut saw_plan_update = false;
+    wait_for_event(&codex, |event| match event {
+        EventMsg::PlanUpdate(update) => {
+            saw_plan_update = true;
+            assert_eq!(update.explanation.as_deref(), Some("Status update"));
+            assert_eq!(update.plan.len(), 2);
+            assert_eq!(update.plan[0].id.as_deref(), Some("plan-1"));
+            assert_matches!(update.plan[0].status, StepStatus::Completed);
+            assert_eq!(
+                update.plan[0].path.as_deref(),
+                Some("codex-rs/core/src/tools/handlers/plan.rs")
+            );
+            assert_eq!(update.plan[1].id.as_deref(), Some("plan-2"));
+            assert_matches!(update.plan[1].status, StepStatus::Pending);
+            false
+        }
+        EventMsg::TurnComplete(_) => true,
+        _ => false,
+    })
+    .await;
+
+    assert!(saw_plan_update, "expected canonicalized PlanUpdate event");
+
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = call_output(&req, call_id);
+    assert_eq!(output_text, "Plan updated");
+
+    let active_plan = db
+        .get_active_thread_plan(session_configured.session_id.to_string().as_str())
+        .await?
+        .expect("active plan should remain stored");
+    assert_eq!(active_plan.items.len(), 2);
+    assert_eq!(active_plan.items[0].status, ThreadPlanItemStatus::Completed);
+    assert_eq!(active_plan.items[1].status, ThreadPlanItemStatus::Pending);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_plan_tool_with_feature_rejects_unstructured_new_plan() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+
+    let mut builder = test_codex().with_home(home).with_config(|config| {
+        let _ = config.features.enable(Feature::PlanProgressCsv);
+    });
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let call_id = "plan-tool-unstructured";
+    let invalid_args = json!({
+        "explanation": "Missing path",
+        "plan": [
+            {"step": "Inspect workspace", "status": "in_progress"}
+        ]
+    })
+    .to_string();
+
+    let first_response = sse(vec![
+        ev_response_created("resp-1"),
+        ev_function_call(call_id, "update_plan", &invalid_args),
+        ev_completed("resp-1"),
+    ]);
+    responses::mount_sse_once(&server, first_response).await;
+
+    let second_response = sse(vec![
+        ev_assistant_message("msg-1", "bad plan rejected"),
+        ev_completed("resp-2"),
+    ]);
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "please persist the plan".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_configured.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        })
+        .await?;
+
+    let mut saw_plan_update = false;
+    wait_for_event(&codex, |event| match event {
+        EventMsg::PlanUpdate(_) => {
+            saw_plan_update = true;
+            false
+        }
+        EventMsg::TurnComplete(_) => true,
+        _ => false,
+    })
+    .await;
+
+    assert!(
+        !saw_plan_update,
+        "did not expect PlanUpdate event for unstructured payload"
+    );
+
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = call_output(&req, call_id);
+    assert!(output_text.contains("failed to canonicalize plan update"));
+    assert!(output_text.contains("plan update row plan-01 is missing path"));
+
+    let db = codex.state_db().expect("state db");
+    let active_plan = db
+        .get_active_thread_plan(session_configured.session_id.to_string().as_str())
+        .await?;
+    assert_eq!(active_plan, None);
 
     Ok(())
 }

@@ -38,6 +38,7 @@ Treat the task as a sequence of concrete steps that add up to a complete deliver
 ## Reporting progress
 In this phase you show progress on your task and appraise the user of your progress using plan tool.
 - Provide updates that directly map to the work you are doing (what changed, what you verified, what remains).
+- When you create or replace a plan, prefer file-level rows with explicit `path` and concise implementation details instead of vague checklist bullets.
 - If something fails, report what failed, what you tried, and what you will do next.
 - When you finish, summarize what you delivered and how the user can validate it.
 

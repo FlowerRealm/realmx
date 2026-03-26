@@ -105,9 +105,35 @@ export type TodoItem = {
   completed: boolean;
 };
 
+/** A structured row in the agent's canonical plan progress. */
+export type PlanProgressRow = {
+  id: string;
+  step: string;
+  status: "pending" | "in_progress" | "completed";
+  path: string;
+  details: string;
+  inputs: string[];
+  outputs: string[];
+  depends_on: string[];
+  acceptance: string | null;
+};
+
+/**
+ * Tracks the agent's running canonical CSV-backed plan progress. Starts when
+ * the plan is issued, updates as rows change, and completes when the turn
+ * ends.
+ */
+export type PlanProgressItem = {
+  id: string;
+  type: "plan_progress";
+  raw_csv: string;
+  rows: PlanProgressRow[];
+};
+
 /**
  * Tracks the agent's running to-do list. Starts when the plan is issued, updates as steps change,
- * and completes when the turn ends.
+ * and completes when the turn ends. This is retained for legacy clients when
+ * CSV-backed plan progress is disabled.
  */
 export type TodoListItem = {
   id: string;
@@ -123,5 +149,6 @@ export type ThreadItem =
   | FileChangeItem
   | McpToolCallItem
   | WebSearchItem
+  | PlanProgressItem
   | TodoListItem
   | ErrorItem;

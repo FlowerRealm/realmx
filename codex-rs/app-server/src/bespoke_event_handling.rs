@@ -110,6 +110,7 @@ use codex_app_server_protocol::build_turns_from_rollout_items;
 use codex_app_server_protocol::convert_patch_changes;
 use codex_core::CodexThread;
 use codex_core::ThreadManager;
+use codex_core::canonical_plan_csv_from_update_plan_args;
 use codex_core::find_thread_name_by_id;
 use codex_core::review_format::format_review_findings_block;
 use codex_core::review_prompts;
@@ -1909,10 +1910,14 @@ async fn handle_turn_plan_update(
 ) {
     // `update_plan` is a todo/checklist tool; it is not related to plan-mode updates
     if let ApiVersion::V2 = api_version {
+        let raw_csv = canonical_plan_csv_from_update_plan_args(&plan_update_event)
+            .ok()
+            .map(|plan| plan.raw_csv);
         let notification = TurnPlanUpdatedNotification {
             thread_id: conversation_id.to_string(),
             turn_id: event_turn_id.to_string(),
             explanation: plan_update_event.explanation,
+            raw_csv,
             plan: plan_update_event
                 .plan
                 .into_iter()
@@ -3372,8 +3377,8 @@ mod tests {
                     id: Some("plan-01".to_string()),
                     step: "first".to_string(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
+                    path: Some("codex-rs/core/src/tools/handlers/plan.rs".to_string()),
+                    details: Some("explain first step".to_string()),
                     inputs: Some(vec!["prompt".to_string()]),
                     outputs: Some(vec!["draft plan".to_string()]),
                     depends_on: None,
@@ -3383,7 +3388,7 @@ mod tests {
                     id: Some("plan-02".to_string()),
                     step: "second".to_string(),
                     status: StepStatus::Completed,
-                    path: None,
+                    path: Some("codex-rs/tui/src/history_cell.rs".to_string()),
                     details: None,
                     inputs: Some(vec!["draft plan".to_string()]),
                     outputs: Some(vec!["final plan".to_string()]),
@@ -3410,6 +3415,16 @@ mod tests {
                 assert_eq!(n.thread_id, conversation_id.to_string());
                 assert_eq!(n.turn_id, "turn-123");
                 assert_eq!(n.explanation.as_deref(), Some("need plan"));
+                assert_eq!(
+                    n.raw_csv.as_deref(),
+                    Some(
+                        "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,first,codex-rs/core/src/tools/handlers/plan.rs,explain first step,prompt,draft plan,,draft exists
+plan-02,completed,second,codex-rs/tui/src/history_cell.rs,,draft plan,final plan,plan-01,final plan emitted
+"
+                    )
+                );
                 assert_eq!(n.plan.len(), 2);
                 assert_eq!(n.plan[0].step, "first");
                 assert_eq!(n.plan[0].status, TurnPlanStepStatus::Pending);

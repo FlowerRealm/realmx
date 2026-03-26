@@ -169,6 +169,8 @@ pub enum Feature {
     PlanModeWorkspace,
     /// Run a plan review pass before accepting a final plan-mode plan.
     PlanModeSubagentReview,
+    /// Store default-mode plan progress as canonical CSV-backed active plans.
+    PlanProgressCsv,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
@@ -798,6 +800,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::PlanModeSubagentReview,
         key: "plan_mode_subagent_review",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::PlanProgressCsv,
+        key: "plan_progress_csv",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

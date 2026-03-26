@@ -19,6 +19,8 @@ export type {
   FileChangeItem,
   McpToolCallItem,
   WebSearchItem,
+  PlanProgressItem,
+  PlanProgressRow,
   TodoListItem,
   ErrorItem,
 } from "./items";
