@@ -55,6 +55,9 @@ impl ApplyPatchRuntime {
 
     fn child_env() -> HashMap<String, String> {
         const REQUIRED_ENV_KEYS: &[&str] = &[
+            // Preserve PATH because Bazel may resolve current_exe() to a launcher
+            // script whose shebang uses `/usr/bin/env bash`.
+            "PATH",
             "RUNFILES_DIR",
             "RUNFILES_MANIFEST_FILE",
             "RUNFILES_MANIFEST_ONLY",
