@@ -67,6 +67,7 @@ coverage/
 
 # personal files
 personal/
+.worktrees/
 
 # os
 .DS_Store
@@ -90,4 +91,3 @@ CHANGELOG.ignore.md
 # Python bytecode files
 __pycache__/
 *.pyc
-
