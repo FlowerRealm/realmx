@@ -193,16 +193,6 @@ fn assert_request_contains_realtime_end(request: &responses::ResponsesRequest) {
     );
 }
 
-async fn wait_for_non_auto_compact_turn_complete(codex: &codex_core::CodexThread) {
-    loop {
-        let event = codex.next_event().await.expect("expected turn event");
-        if matches!(event.msg, EventMsg::TurnComplete(_)) && !event.id.starts_with("auto-compact-")
-        {
-            break;
-        }
-    }
-}
-
 fn request_has_call_item(request: &responses::ResponsesRequest, call_id: &str) -> bool {
     ["function_call", "local_shell_call"]
         .into_iter()
@@ -627,7 +617,7 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_non_auto_compact_turn_complete(&codex).await;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     assert_eq!(
         compact_mock.requests().len(),
         1,
@@ -1536,7 +1526,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
+    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1671,7 +1661,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
+    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1757,7 +1747,7 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
+    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -2058,7 +2048,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
                 final_output_json_schema: None,
             })
             .await?;
-        wait_for_non_auto_compact_turn_complete(&codex).await;
+        wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     }
 
     assert_eq!(compact_mock.requests().len(), 1);
@@ -2376,7 +2366,7 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_non_auto_compact_turn_complete(&codex).await;
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
