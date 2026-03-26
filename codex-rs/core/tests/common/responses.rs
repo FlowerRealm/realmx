@@ -226,7 +226,8 @@ impl ResponsesRequest {
         self.input()
             .iter()
             .find(|item| {
-                item.get("type").unwrap() == call_type && item.get("call_id").unwrap() == call_id
+                item.get("type").and_then(Value::as_str) == Some(call_type)
+                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
             })
             .cloned()
     }
@@ -409,6 +410,11 @@ mod tests {
     #[test]
     fn any_tool_call_output_prefers_function_then_custom() {
         let custom_only = request_with_input(serde_json::json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "hello" }]
+            },
             {
                 "type": "custom_tool_call_output",
                 "call_id": "call-1",
