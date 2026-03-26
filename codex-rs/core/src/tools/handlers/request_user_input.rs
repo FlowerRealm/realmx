@@ -6,6 +6,7 @@ use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::request_user_input::RequestUserInputArgs;
@@ -30,6 +31,14 @@ fn format_allowed_modes(default_mode_request_user_input: bool) -> String {
     }
 }
 
+fn request_user_input_is_available_for_collaboration_mode(
+    collaboration_mode: &CollaborationMode,
+    default_mode_request_user_input: bool,
+) -> bool {
+    collaboration_mode.is_plan_output_mode()
+        || (default_mode_request_user_input && collaboration_mode.mode == ModeKind::Default)
+}
+
 pub(crate) fn request_user_input_unavailable_message(
     mode: ModeKind,
     default_mode_request_user_input: bool,
@@ -41,6 +50,25 @@ pub(crate) fn request_user_input_unavailable_message(
         Some(format!(
             "request_user_input is unavailable in {mode_name} mode"
         ))
+    }
+}
+
+pub(crate) fn request_user_input_unavailable_message_for_collaboration_mode(
+    collaboration_mode: &CollaborationMode,
+    default_mode_request_user_input: bool,
+) -> Option<String> {
+    if request_user_input_is_available_for_collaboration_mode(
+        collaboration_mode,
+        default_mode_request_user_input,
+    ) {
+        None
+    } else if collaboration_mode.is_plan_execution_mode() {
+        Some("request_user_input is unavailable in Plan execution phase".to_string())
+    } else {
+        request_user_input_unavailable_message(
+            collaboration_mode.mode,
+            default_mode_request_user_input,
+        )
     }
 }
 
@@ -81,10 +109,11 @@ impl ToolHandler for RequestUserInputHandler {
             }
         };
 
-        let mode = session.collaboration_mode().await.mode;
-        if let Some(message) =
-            request_user_input_unavailable_message(mode, self.default_mode_request_user_input)
-        {
+        let collaboration_mode = session.collaboration_mode().await;
+        if let Some(message) = request_user_input_unavailable_message_for_collaboration_mode(
+            &collaboration_mode,
+            self.default_mode_request_user_input,
+        ) {
             return Err(FunctionCallError::RespondToModel(message));
         }
 

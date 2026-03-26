@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use codex_protocol::protocol::COLLABORATION_MODE_CLOSE_TAG;
 use codex_protocol::protocol::COLLABORATION_MODE_OPEN_TAG;
@@ -28,6 +29,7 @@ fn collab_mode_with_mode_and_instructions(
 ) -> CollaborationMode {
     CollaborationMode {
         mode,
+        plan_phase: mode.is_plan_mode().then_some(PlanModePhase::Planning),
         settings: Settings {
             model: "gpt-5.1".to_string(),
             reasoning_effort: None,
@@ -865,6 +867,7 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Default,
+                plan_phase: None,
                 settings: Settings {
                     model: current_model,
                     reasoning_effort: None,
@@ -958,6 +961,7 @@ async fn clearing_collaboration_instructions_removes_stale_prompt() -> Result<()
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Default,
+                plan_phase: None,
                 settings: Settings {
                     model: current_model,
                     reasoning_effort: None,
@@ -1035,6 +1039,7 @@ plan-02,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,gate updat
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Execute,
+                plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: test.session_configured.model.clone(),
                     reasoning_effort: None,

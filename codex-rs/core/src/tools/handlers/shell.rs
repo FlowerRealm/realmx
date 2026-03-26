@@ -335,7 +335,7 @@ impl ShellHandler {
         let mut exec_params = exec_params;
         reject_plan_mode_target_repo_mutation(
             session.as_ref(),
-            turn.collaboration_mode.mode,
+            &turn.collaboration_mode,
             turn.cwd.as_path(),
             &exec_params.cwd,
             !is_known_safe_command(&exec_params.command),

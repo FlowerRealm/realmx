@@ -196,7 +196,7 @@ fn ensure_plan_workspace_available(
             "plan workspace tools are disabled".to_string(),
         ));
     }
-    if !turn.collaboration_mode.mode.is_plan_output_mode() {
+    if !turn.collaboration_mode.is_plan_output_mode() {
         return Err(FunctionCallError::RespondToModel(
             "plan workspace tools are only available in Plan and Auto Plan modes".to_string(),
         ));

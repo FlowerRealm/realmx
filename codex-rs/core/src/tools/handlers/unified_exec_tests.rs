@@ -6,7 +6,10 @@ use crate::tools::handlers::parse_arguments_with_base_path;
 use crate::tools::handlers::reject_plan_mode_target_repo_mutation;
 use crate::tools::handlers::resolve_workdir_base_path;
 use crate::tools::spec::ZshForkConfig;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
+use codex_protocol::config_types::Settings;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -196,7 +199,15 @@ async fn plan_mode_mutating_exec_requires_scratch_dir() {
 
     let err = reject_plan_mode_target_repo_mutation(
         &session,
-        ModeKind::Plan,
+        &CollaborationMode {
+            mode: ModeKind::Plan,
+            plan_phase: Some(PlanModePhase::Planning),
+            settings: Settings {
+                model: "gpt-5".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        },
         repo.path(),
         repo.path(),
         true,

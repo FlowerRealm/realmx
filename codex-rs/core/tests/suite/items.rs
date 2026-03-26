@@ -4,6 +4,7 @@ use anyhow::Ok;
 use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
@@ -483,6 +484,7 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: session_configured.model.clone(),
             reasoning_effort: None,
@@ -576,6 +578,7 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: session_configured.model.clone(),
             reasoning_effort: None,
@@ -694,6 +697,7 @@ async fn plan_mode_streaming_citations_are_stripped_across_added_deltas_and_done
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: session_configured.model.clone(),
             reasoning_effort: None,
@@ -897,6 +901,7 @@ async fn plan_mode_streaming_proposed_plan_tag_split_across_added_and_delta_is_p
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: session_configured.model.clone(),
             reasoning_effort: None,
@@ -1025,6 +1030,7 @@ async fn plan_mode_handles_missing_plan_close_tag() -> anyhow::Result<()> {
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: session_configured.model.clone(),
             reasoning_effort: None,
@@ -1178,6 +1184,7 @@ fn plan_message(prefix: &str, step: &str, details: &str, suffix: &str) -> String
 fn plan_collaboration_mode(model: String) -> CollaborationMode {
     CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model,
             reasoning_effort: None,

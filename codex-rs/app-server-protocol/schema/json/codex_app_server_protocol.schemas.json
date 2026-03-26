@@ -5815,6 +5815,16 @@
           "mode": {
             "$ref": "#/definitions/v2/ModeKind"
           },
+          "plan_phase": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/PlanModePhase"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "settings": {
             "$ref": "#/definitions/v2/Settings"
           }
@@ -5846,6 +5856,16 @@
           },
           "name": {
             "type": "string"
+          },
+          "planPhase": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/PlanModePhase"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reasoning_effort": {
             "anyOf": [
@@ -9303,6 +9323,13 @@
         ],
         "title": "PlanDeltaNotification",
         "type": "object"
+      },
+      "PlanModePhase": {
+        "enum": [
+          "planning",
+          "executing"
+        ],
+        "type": "string"
       },
       "PlanReviewActivityNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",

@@ -1,5 +1,6 @@
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::openai_models::ReasoningEffort;
 
@@ -46,6 +47,7 @@ fn plan_preset(collaboration_modes_config: CollaborationModesConfig) -> Collabor
     CollaborationModeMask {
         name: ModeKind::Plan.display_name().to_string(),
         mode: Some(ModeKind::Plan),
+        plan_phase: Some(PlanModePhase::Planning),
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
         developer_instructions: Some(Some(plan_mode_instructions(
@@ -59,6 +61,7 @@ fn auto_plan_preset(collaboration_modes_config: CollaborationModesConfig) -> Col
     CollaborationModeMask {
         name: ModeKind::AutoPlan.display_name().to_string(),
         mode: Some(ModeKind::AutoPlan),
+        plan_phase: Some(PlanModePhase::Planning),
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
         developer_instructions: Some(Some(plan_mode_instructions(
@@ -72,6 +75,7 @@ fn default_preset(collaboration_modes_config: CollaborationModesConfig) -> Colla
     CollaborationModeMask {
         name: ModeKind::Default.display_name().to_string(),
         mode: Some(ModeKind::Default),
+        plan_phase: None,
         model: None,
         reasoning_effort: None,
         developer_instructions: Some(Some(default_mode_instructions(collaboration_modes_config))),
@@ -82,6 +86,7 @@ fn execute_preset(_collaboration_modes_config: CollaborationModesConfig) -> Coll
     CollaborationModeMask {
         name: ModeKind::Execute.display_name().to_string(),
         mode: Some(ModeKind::Execute),
+        plan_phase: Some(PlanModePhase::Executing),
         model: None,
         reasoning_effort: None,
         developer_instructions: Some(Some(COLLABORATION_MODE_EXECUTE.to_string())),

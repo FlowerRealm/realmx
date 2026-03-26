@@ -500,6 +500,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "gpt-5.1".to_string(),
             reasoning_effort: Some(ReasoningEffort::High),

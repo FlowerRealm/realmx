@@ -15,7 +15,6 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::spec::JsonSchema;
 use async_trait::async_trait;
-use codex_protocol::config_types::ModeKind;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
@@ -159,7 +158,7 @@ pub(crate) async fn handle_update_plan(
     arguments: String,
     call_id: String,
 ) -> Result<String, FunctionCallError> {
-    if turn_context.collaboration_mode.mode.is_plan_output_mode() {
+    if turn_context.collaboration_mode.is_plan_output_mode() {
         return Err(FunctionCallError::RespondToModel(
             "update_plan is a TODO/checklist tool and is not allowed in Plan output modes"
                 .to_string(),
@@ -189,7 +188,7 @@ async fn try_handle_execute_mode_active_plan_update(
     turn_context: &TurnContext,
     args: &mut UpdatePlanArgs,
 ) -> Result<bool, FunctionCallError> {
-    if turn_context.collaboration_mode.mode != ModeKind::Execute {
+    if !turn_context.collaboration_mode.is_plan_execution_mode() {
         return Ok(false);
     }
     let Some(state_db) = session.state_db() else {

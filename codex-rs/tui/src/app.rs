@@ -4752,6 +4752,7 @@ mod tests {
     use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::CollaborationModeMask;
     use codex_protocol::config_types::ModeKind;
+    use codex_protocol::config_types::PlanModePhase;
     use codex_protocol::config_types::Settings;
     use codex_protocol::openai_models::ModelAvailabilityNux;
     use codex_protocol::protocol::AgentMessageDeltaEvent;
@@ -5110,6 +5111,7 @@ mod tests {
             CollaborationModeMask {
                 name: "Default".to_string(),
                 mode: None,
+                plan_phase: None,
                 model: None,
                 reasoning_effort: None,
                 developer_instructions: None,
@@ -5185,6 +5187,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
         app.chat_widget.handle_codex_event(Event {
@@ -5267,6 +5270,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
         app.chat_widget.handle_codex_event(Event {
@@ -5348,6 +5352,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
         app.chat_widget.handle_codex_event(Event {
@@ -5423,6 +5428,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
         app.chat_widget.handle_codex_event(Event {
@@ -5463,6 +5469,7 @@ mod tests {
                             turn_id: "turn-1".to_string(),
                             model_context_window: None,
                             collaboration_mode_kind: Default::default(),
+                            plan_phase: None,
                         }),
                     },
                 ],
@@ -5607,6 +5614,7 @@ mod tests {
             .set_collaboration_mask(CollaborationModeMask {
                 name: "Plan".to_string(),
                 mode: Some(ModeKind::Plan),
+                plan_phase: None,
                 model: Some("gpt-restored".to_string()),
                 reasoning_effort: Some(Some(ReasoningEffortConfig::High)),
                 developer_instructions: None,
@@ -5628,6 +5636,7 @@ mod tests {
             .set_collaboration_mask(CollaborationModeMask {
                 name: "Default".to_string(),
                 mode: Some(ModeKind::Default),
+                plan_phase: None,
                 model: Some("gpt-replacement".to_string()),
                 reasoning_effort: Some(Some(ReasoningEffortConfig::Low)),
                 developer_instructions: None,
@@ -5666,6 +5675,7 @@ mod tests {
                     collaboration_mode,
                     Some(CollaborationMode {
                         mode: ModeKind::Plan,
+                        plan_phase: Some(PlanModePhase::Planning),
                         settings: Settings {
                             model: "gpt-restored".to_string(),
                             reasoning_effort: Some(ReasoningEffortConfig::High),
@@ -5711,6 +5721,7 @@ mod tests {
             .set_collaboration_mask(CollaborationModeMask {
                 name: "Plan".to_string(),
                 mode: Some(ModeKind::Plan),
+                plan_phase: None,
                 model: Some("gpt-restored".to_string()),
                 reasoning_effort: Some(Some(ReasoningEffortConfig::High)),
                 developer_instructions: None,
@@ -5730,6 +5741,7 @@ mod tests {
             .set_collaboration_mask(CollaborationModeMask {
                 name: "Default".to_string(),
                 mode: Some(ModeKind::Default),
+                plan_phase: None,
                 model: Some("gpt-replacement".to_string()),
                 reasoning_effort: Some(Some(ReasoningEffortConfig::Low)),
                 developer_instructions: None,
@@ -5788,6 +5800,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
         app.chat_widget.handle_codex_event(Event {
@@ -5851,6 +5864,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 model_context_window: Some(950_000),
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
         });
 

@@ -1,5 +1,6 @@
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 
 use crate::model_catalog::ModelCatalog;
 
@@ -53,10 +54,15 @@ pub(crate) fn next_mask(
     presets.get(next_index).cloned()
 }
 
-pub(crate) fn default_mode_mask(model_catalog: &ModelCatalog) -> Option<CollaborationModeMask> {
-    mask_for_kind(model_catalog, ModeKind::Default)
-}
-
 pub(crate) fn plan_mask(model_catalog: &ModelCatalog) -> Option<CollaborationModeMask> {
     mask_for_kind(model_catalog, ModeKind::Plan)
+}
+
+pub(crate) fn plan_phase_mask(
+    model_catalog: &ModelCatalog,
+    plan_phase: PlanModePhase,
+) -> Option<CollaborationModeMask> {
+    let mut mask = plan_mask(model_catalog)?;
+    mask.plan_phase = Some(plan_phase);
+    Some(mask)
 }

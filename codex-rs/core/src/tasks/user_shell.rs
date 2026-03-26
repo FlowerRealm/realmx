@@ -115,6 +115,7 @@ pub(crate) async fn execute_user_shell_command(
             turn_id: turn_context.sub_id.clone(),
             model_context_window: turn_context.model_context_window(),
             collaboration_mode_kind: turn_context.collaboration_mode.mode,
+            plan_phase: turn_context.collaboration_mode.plan_phase(),
         });
         session.send_event(turn_context.as_ref(), event).await;
     }

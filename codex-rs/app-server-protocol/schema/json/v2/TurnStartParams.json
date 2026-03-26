@@ -88,6 +88,16 @@
         "mode": {
           "$ref": "#/definitions/ModeKind"
         },
+        "plan_phase": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PlanModePhase"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "settings": {
           "$ref": "#/definitions/Settings"
         }
@@ -119,6 +129,13 @@
         "none",
         "friendly",
         "pragmatic"
+      ],
+      "type": "string"
+    },
+    "PlanModePhase": {
+      "enum": [
+        "planning",
+        "executing"
       ],
       "type": "string"
     },

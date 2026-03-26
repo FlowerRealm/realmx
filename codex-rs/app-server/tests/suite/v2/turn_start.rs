@@ -50,6 +50,7 @@ use codex_core::personality_migration::PERSONALITY_MIGRATION_FILENAME;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -547,6 +548,7 @@ async fn turn_start_accepts_collaboration_mode_override_v2() -> Result<()> {
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "mock-model-collab".to_string(),
             reasoning_effort: Some(ReasoningEffort::High),
@@ -634,6 +636,7 @@ async fn turn_start_uses_thread_feature_overrides_for_collaboration_mode_instruc
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "mock-model-collab".to_string(),
             reasoning_effort: Some(ReasoningEffort::High),
@@ -724,6 +727,7 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
 
     let plan_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: "mock-model-plan".to_string(),
             reasoning_effort: Some(ReasoningEffort::Medium),
@@ -732,6 +736,7 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
     };
     let default_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "mock-model-default".to_string(),
             reasoning_effort: Some(ReasoningEffort::High),

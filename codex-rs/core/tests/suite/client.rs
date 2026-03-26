@@ -1296,6 +1296,7 @@ async fn user_turn_collaboration_mode_overrides_model_and_effort() -> anyhow::Re
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "gpt-5.1".to_string(),
             reasoning_effort: Some(ReasoningEffort::High),

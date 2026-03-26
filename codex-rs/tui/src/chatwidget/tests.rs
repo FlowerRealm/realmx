@@ -46,6 +46,7 @@ use codex_protocol::account::PlanType;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::Settings;
 use codex_protocol::items::AgentMessageContent;
@@ -1760,6 +1761,7 @@ async fn turn_started_uses_runtime_context_window_before_first_token_count() {
             turn_id: "turn-1".to_string(),
             model_context_window: Some(950_000),
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -1914,6 +1916,7 @@ async fn make_chatwidget_manual_with_animation_mode(
     let reasoning_effort = None;
     let base_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: resolved_model.clone(),
             reasoning_effort,
@@ -2738,7 +2741,11 @@ async fn plan_implementation_popup_yes_emits_submit_message_event() {
         panic!("expected SubmitUserMessageWithMode, got {event:?}");
     };
     assert_eq!(text, PLAN_IMPLEMENTATION_CODING_MESSAGE);
-    assert_eq!(collaboration_mode.mode, Some(ModeKind::Default));
+    assert_eq!(collaboration_mode.mode, Some(ModeKind::Plan));
+    assert_eq!(
+        collaboration_mode.plan_phase,
+        Some(PlanModePhase::Executing)
+    );
 }
 
 #[tokio::test]
@@ -2747,22 +2754,26 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
 
-    let default_mode = collaboration_modes::default_mode_mask(chat.models_manager.as_ref())
-        .expect("expected default collaboration mode");
-    chat.submit_user_message_with_mode("Implement the plan.".to_string(), default_mode);
+    let plan_execution_mode = collaboration_modes::plan_phase_mask(
+        chat.models_manager.as_ref(),
+        PlanModePhase::Executing,
+    )
+    .expect("expected plan execution collaboration mode");
+    chat.submit_user_message_with_mode("Implement the plan.".to_string(), plan_execution_mode);
 
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
             collaboration_mode:
                 Some(CollaborationMode {
-                    mode: ModeKind::Default,
+                    mode: ModeKind::Plan,
+                    plan_phase: Some(PlanModePhase::Executing),
                     ..
                 }),
             personality: None,
             ..
         } => {}
         other => {
-            panic!("expected Op::UserTurn with default collab mode, got {other:?}")
+            panic!("expected Op::UserTurn with plan execution collab mode, got {other:?}")
         }
     }
 }
@@ -5404,6 +5415,7 @@ async fn unified_exec_wait_after_final_agent_message_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -5436,6 +5448,7 @@ async fn unified_exec_wait_before_streamed_agent_message_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -5819,7 +5832,13 @@ async fn collab_slash_command_opens_picker_and_updates_mode() {
 async fn plan_slash_command_switches_to_plan_mode() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let initial = chat.current_collaboration_mode().clone();
+    let execution_mask = collaboration_modes::plan_phase_mask(
+        chat.models_manager.as_ref(),
+        PlanModePhase::Executing,
+    )
+    .expect("expected plan execution collaboration mode");
+    chat.set_collaboration_mask(execution_mask);
+    let _ = drain_insert_history(&mut rx);
 
     chat.dispatch_command(SlashCommand::Plan);
 
@@ -5830,7 +5849,10 @@ async fn plan_slash_command_switches_to_plan_mode() {
         );
     }
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
-    assert_eq!(chat.current_collaboration_mode(), &initial);
+    assert_eq!(
+        chat.active_plan_phase_for_test(),
+        Some(PlanModePhase::Planning)
+    );
 }
 
 #[tokio::test]
@@ -6707,6 +6729,7 @@ async fn interrupted_turn_error_message_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -6744,6 +6767,7 @@ async fn interrupted_turn_pending_steers_message_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -9402,6 +9426,7 @@ async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -9495,6 +9520,7 @@ async fn ui_snapshots_small_heights_task_running() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     chat.handle_codex_event(Event {
@@ -9528,6 +9554,7 @@ async fn status_widget_and_approval_modal_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     // Provide a deterministic header for the status line.
@@ -9700,6 +9727,7 @@ async fn status_widget_active_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     // Provide a deterministic header via a bold reasoning chunk.
@@ -9751,6 +9779,7 @@ async fn mcp_startup_complete_does_not_clear_running_task() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -10413,6 +10442,7 @@ async fn replayed_turn_started_does_not_mark_task_running() {
         turn_id: "turn-1".to_string(),
         model_context_window: None,
         collaboration_mode_kind: ModeKind::Default,
+        plan_phase: None,
     })]);
 
     assert!(!chat.bottom_pane.is_task_running());
@@ -10429,6 +10459,7 @@ async fn thread_snapshot_replayed_turn_started_marks_task_running() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -10472,6 +10503,7 @@ async fn thread_snapshot_replayed_stream_recovery_restores_previous_status_heade
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     drain_insert_history(&mut rx);
@@ -10512,6 +10544,7 @@ async fn resume_replay_interrupted_reconnect_does_not_leave_stale_working_state(
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
         EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 1/5".to_string(),
@@ -10543,6 +10576,7 @@ async fn replayed_interrupted_reconnect_footer_row_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
         EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 2/5".to_string(),
@@ -10986,6 +11020,7 @@ async fn stream_recovery_restores_previous_status_header() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     drain_insert_history(&mut rx);
@@ -11112,6 +11147,7 @@ async fn multiple_agent_messages_in_single_turn_emit_multiple_headers() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
 
@@ -11363,6 +11399,7 @@ async fn chatwidget_exec_and_status_layout_vt100_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     chat.handle_codex_event(Event {
@@ -11412,6 +11449,7 @@ async fn chatwidget_markdown_code_blocks_vt100_snapshot() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     // Build a vt100 visual from the history insertions only (no UI overlay)
@@ -11504,6 +11542,7 @@ async fn chatwidget_tall() {
             turn_id: "turn-1".to_string(),
             model_context_window: None,
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     });
     for i in 0..30 {

@@ -376,6 +376,7 @@ pub(crate) async fn review_plan_candidate(
             final_output_json_schema: Some(plan_review_output_schema()),
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Default,
+                plan_phase: None,
                 settings: Settings {
                     model: review_model,
                     reasoning_effort: turn_context.reasoning_effort,

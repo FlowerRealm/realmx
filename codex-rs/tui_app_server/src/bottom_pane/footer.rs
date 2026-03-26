@@ -89,6 +89,7 @@ pub(crate) struct FooterProps {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CollaborationModeIndicator {
     Plan,
+    PlanExecuting,
     #[allow(dead_code)] // Hidden by current mode filtering; used for legacy auto-plan sessions.
     AutoPlan,
     #[allow(dead_code)] // Hidden by current mode filtering; kept for future UI re-enablement.
@@ -109,6 +110,9 @@ impl CollaborationModeIndicator {
         };
         match self {
             CollaborationModeIndicator::Plan => format!("Plan mode{suffix}"),
+            CollaborationModeIndicator::PlanExecuting => {
+                format!("Plan mode: executing{suffix}")
+            }
             CollaborationModeIndicator::AutoPlan => format!("Auto Plan mode{suffix}"),
             CollaborationModeIndicator::PairProgramming => {
                 format!("Pair Programming mode{suffix}")
@@ -121,6 +125,7 @@ impl CollaborationModeIndicator {
         let label = self.label(show_cycle_hint);
         match self {
             CollaborationModeIndicator::Plan => Span::from(label).magenta(),
+            CollaborationModeIndicator::PlanExecuting => Span::from(label).magenta().bold(),
             CollaborationModeIndicator::AutoPlan => Span::from(label).magenta().bold(),
             CollaborationModeIndicator::PairProgramming => Span::from(label).cyan(),
             CollaborationModeIndicator::Execute => Span::from(label).dim(),

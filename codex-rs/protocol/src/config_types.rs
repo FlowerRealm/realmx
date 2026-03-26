@@ -118,7 +118,18 @@ pub enum Personality {
 }
 
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS, Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    JsonSchema,
+    TS,
+    Default,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -337,6 +348,28 @@ pub enum ModeKind {
 
 pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 2] = [ModeKind::Default, ModeKind::Plan];
 
+#[derive(
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    JsonSchema,
+    TS,
+    Default,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PlanModePhase {
+    #[default]
+    Planning,
+    Executing,
+}
+
 impl ModeKind {
     pub const fn display_name(self) -> &'static str {
         match self {
@@ -356,6 +389,10 @@ impl ModeKind {
         matches!(self, Self::Plan | Self::AutoPlan)
     }
 
+    pub const fn is_plan_mode(self) -> bool {
+        matches!(self, Self::Plan | Self::AutoPlan)
+    }
+
     pub const fn allows_request_user_input(self) -> bool {
         matches!(self, Self::Plan)
     }
@@ -366,13 +403,46 @@ impl ModeKind {
 #[serde(rename_all = "lowercase")]
 pub struct CollaborationMode {
     pub mode: ModeKind,
+    #[ts(optional = false)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_phase: Option<PlanModePhase>,
     pub settings: Settings,
 }
 
 impl CollaborationMode {
+    fn normalize_mode(mode: ModeKind) -> ModeKind {
+        match mode {
+            ModeKind::Execute => ModeKind::Plan,
+            other => other,
+        }
+    }
+
+    fn normalize_plan_phase(
+        mode: ModeKind,
+        plan_phase: Option<PlanModePhase>,
+    ) -> Option<PlanModePhase> {
+        match mode {
+            ModeKind::Execute => Some(PlanModePhase::Executing),
+            ModeKind::Plan | ModeKind::AutoPlan => {
+                Some(plan_phase.unwrap_or(PlanModePhase::Planning))
+            }
+            ModeKind::Default | ModeKind::PairProgramming => None,
+        }
+    }
+
     /// Returns a reference to the settings.
     fn settings_ref(&self) -> &Settings {
         &self.settings
+    }
+
+    pub fn normalized(&self) -> Self {
+        let mode = Self::normalize_mode(self.mode);
+        let plan_phase = Self::normalize_plan_phase(self.mode, self.plan_phase);
+        Self {
+            mode,
+            plan_phase,
+            settings: self.settings.clone(),
+        }
     }
 
     pub fn model(&self) -> &str {
@@ -381,6 +451,22 @@ impl CollaborationMode {
 
     pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
         self.settings_ref().reasoning_effort
+    }
+
+    pub fn plan_phase(&self) -> Option<PlanModePhase> {
+        Self::normalize_plan_phase(self.mode, self.plan_phase)
+    }
+
+    pub fn is_plan_mode(&self) -> bool {
+        Self::normalize_mode(self.mode).is_plan_mode()
+    }
+
+    pub fn is_plan_output_mode(&self) -> bool {
+        matches!(self.plan_phase(), Some(PlanModePhase::Planning))
+    }
+
+    pub fn is_plan_execution_mode(&self) -> bool {
+        matches!(self.plan_phase(), Some(PlanModePhase::Executing))
     }
 
     /// Updates the collaboration mode with new model and/or effort values.
@@ -404,8 +490,10 @@ impl CollaborationMode {
                 .unwrap_or_else(|| settings.developer_instructions.clone()),
         };
 
+        let normalized = self.normalized();
         CollaborationMode {
-            mode: self.mode,
+            mode: normalized.mode,
+            plan_phase: normalized.plan_phase,
             settings: updated_settings,
         }
     }
@@ -417,8 +505,10 @@ impl CollaborationMode {
     /// The `name` field in the mask is ignored as it's metadata for the mask itself.
     pub fn apply_mask(&self, mask: &CollaborationModeMask) -> Self {
         let settings = self.settings_ref();
+        let mode = mask.mode.unwrap_or(self.mode);
         CollaborationMode {
-            mode: mask.mode.unwrap_or(self.mode),
+            mode: Self::normalize_mode(mode),
+            plan_phase: Self::normalize_plan_phase(mode, mask.plan_phase.or(self.plan_phase)),
             settings: Settings {
                 model: mask.model.clone().unwrap_or_else(|| settings.model.clone()),
                 reasoning_effort: mask.reasoning_effort.unwrap_or(settings.reasoning_effort),
@@ -445,6 +535,7 @@ pub struct Settings {
 pub struct CollaborationModeMask {
     pub name: String,
     pub mode: Option<ModeKind>,
+    pub plan_phase: Option<PlanModePhase>,
     pub model: Option<String>,
     pub reasoning_effort: Option<Option<ReasoningEffort>>,
     pub developer_instructions: Option<Option<String>>,
@@ -459,6 +550,7 @@ mod tests {
     fn apply_mask_can_clear_optional_fields() {
         let mode = CollaborationMode {
             mode: ModeKind::Default,
+            plan_phase: None,
             settings: Settings {
                 model: "gpt-5.2-codex".to_string(),
                 reasoning_effort: Some(ReasoningEffort::High),
@@ -468,6 +560,7 @@ mod tests {
         let mask = CollaborationModeMask {
             name: "Clear".to_string(),
             mode: None,
+            plan_phase: None,
             model: None,
             reasoning_effort: Some(None),
             developer_instructions: Some(None),
@@ -475,6 +568,7 @@ mod tests {
 
         let expected = CollaborationMode {
             mode: ModeKind::Default,
+            plan_phase: None,
             settings: Settings {
                 model: "gpt-5.2-codex".to_string(),
                 reasoning_effort: None,
@@ -482,6 +576,30 @@ mod tests {
             },
         };
         assert_eq!(expected, mode.apply_mask(&mask));
+    }
+
+    #[test]
+    fn execute_mode_normalizes_to_plan_executing() {
+        let mode = CollaborationMode {
+            mode: ModeKind::Execute,
+            plan_phase: None,
+            settings: Settings {
+                model: "gpt-5.2-codex".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        };
+
+        let expected = CollaborationMode {
+            mode: ModeKind::Plan,
+            plan_phase: Some(PlanModePhase::Executing),
+            settings: Settings {
+                model: "gpt-5.2-codex".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        };
+        assert_eq!(expected, mode.normalized());
     }
 
     #[test]

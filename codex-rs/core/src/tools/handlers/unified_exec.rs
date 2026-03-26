@@ -212,7 +212,7 @@ impl ToolHandler for UnifiedExecHandler {
                 let cwd = workdir.clone().unwrap_or(cwd);
                 reject_plan_mode_target_repo_mutation(
                     session.as_ref(),
-                    turn.collaboration_mode.mode,
+                    &turn.collaboration_mode,
                     turn.cwd.as_path(),
                     &cwd,
                     !is_known_safe_command(&command),

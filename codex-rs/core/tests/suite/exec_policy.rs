@@ -26,6 +26,7 @@ use std::fs;
 fn collaboration_mode_for_model(model: String) -> CollaborationMode {
     CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort: None,

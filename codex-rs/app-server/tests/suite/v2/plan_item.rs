@@ -22,6 +22,7 @@ use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
@@ -430,6 +431,7 @@ async fn start_plan_mode_turn(mcp: &mut McpProcess) -> Result<codex_app_server_p
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Planning),
         settings: Settings {
             model: "mock-model".to_string(),
             reasoning_effort: None,

@@ -1,4 +1,8 @@
 use super::*;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
+use codex_protocol::config_types::Settings;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -48,4 +52,22 @@ fn request_user_input_tool_description_mentions_available_modes() {
             request_user_input_tool_description(true),
             "Request user input for one to three short questions and wait for the response. This tool is only available in Default or Plan mode.".to_string()
         );
+}
+
+#[test]
+fn request_user_input_unavailable_message_mentions_plan_execution_phase() {
+    let collaboration_mode = CollaborationMode {
+        mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Executing),
+        settings: Settings {
+            model: "gpt-5".to_string(),
+            reasoning_effort: None,
+            developer_instructions: None,
+        },
+    };
+
+    assert_eq!(
+        request_user_input_unavailable_message_for_collaboration_mode(&collaboration_mode, false),
+        Some("request_user_input is unavailable in Plan execution phase".to_string())
+    );
 }

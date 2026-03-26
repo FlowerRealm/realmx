@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -145,6 +146,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode,
+                plan_phase: mode.is_plan_mode().then_some(PlanModePhase::Planning),
                 settings: Settings {
                     model: session_configured.model.clone(),
                     reasoning_effort: None,
@@ -272,16 +274,21 @@ where
     assert_eq!(success, None);
     assert_eq!(
         output,
-        format!("request_user_input is unavailable in {mode_name} mode")
+        if mode_name == "Plan execution phase" {
+            "request_user_input is unavailable in Plan execution phase".to_string()
+        } else {
+            format!("request_user_input is unavailable in {mode_name} mode")
+        }
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_rejected_in_execute_mode_alias() -> anyhow::Result<()> {
-    assert_request_user_input_rejected("Execute", |model| CollaborationMode {
-        mode: ModeKind::Execute,
+async fn request_user_input_rejected_in_plan_execution_phase() -> anyhow::Result<()> {
+    assert_request_user_input_rejected("Plan execution phase", |model| CollaborationMode {
+        mode: ModeKind::Plan,
+        plan_phase: Some(PlanModePhase::Executing),
         settings: Settings {
             model,
             reasoning_effort: None,
@@ -295,6 +302,7 @@ async fn request_user_input_rejected_in_execute_mode_alias() -> anyhow::Result<(
 async fn request_user_input_rejected_in_default_mode_by_default() -> anyhow::Result<()> {
     assert_request_user_input_rejected("Default", |model| CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort: None,
@@ -313,6 +321,7 @@ async fn request_user_input_round_trip_in_default_mode_with_feature() -> anyhow:
 async fn request_user_input_rejected_in_pair_mode_alias() -> anyhow::Result<()> {
     assert_request_user_input_rejected("Pair Programming", |model| CollaborationMode {
         mode: ModeKind::PairProgramming,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort: None,

@@ -1,6 +1,7 @@
 use codex_core::models_manager::manager::ModelsManager;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 
 fn filtered_presets(models_manager: &ModelsManager) -> Vec<CollaborationModeMask> {
     models_manager
@@ -52,10 +53,15 @@ pub(crate) fn next_mask(
     presets.get(next_index).cloned()
 }
 
-pub(crate) fn default_mode_mask(models_manager: &ModelsManager) -> Option<CollaborationModeMask> {
-    mask_for_kind(models_manager, ModeKind::Default)
-}
-
 pub(crate) fn plan_mask(models_manager: &ModelsManager) -> Option<CollaborationModeMask> {
     mask_for_kind(models_manager, ModeKind::Plan)
+}
+
+pub(crate) fn plan_phase_mask(
+    models_manager: &ModelsManager,
+    plan_phase: PlanModePhase,
+) -> Option<CollaborationModeMask> {
+    let mut mask = plan_mask(models_manager)?;
+    mask.plan_phase = Some(plan_phase);
+    Some(mask)
 }

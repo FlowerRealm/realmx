@@ -19,6 +19,7 @@ use codex_protocol::config_types::CollaborationModeMask as CoreCollaborationMode
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode as CoreSandboxMode;
 use codex_protocol::config_types::ServiceTier;
@@ -1826,6 +1827,7 @@ pub struct CollaborationModeListParams {}
 pub struct CollaborationModeMask {
     pub name: String,
     pub mode: Option<ModeKind>,
+    pub plan_phase: Option<PlanModePhase>,
     pub model: Option<String>,
     #[serde(rename = "reasoning_effort")]
     #[ts(rename = "reasoning_effort")]
@@ -1837,6 +1839,7 @@ impl From<CoreCollaborationModeMask> for CollaborationModeMask {
         Self {
             name: value.name,
             mode: value.mode,
+            plan_phase: value.plan_phase,
             model: value.model,
             reasoning_effort: value.reasoning_effort,
         }

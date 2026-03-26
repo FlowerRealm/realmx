@@ -1032,6 +1032,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
                 turn_id: turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
@@ -1205,6 +1206,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
                 turn_id: first_turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
@@ -1227,6 +1229,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
                 turn_id: rolled_back_turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
@@ -1303,6 +1306,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
                 turn_id: first_turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
@@ -1323,6 +1327,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
                 turn_id: compact_turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::Compacted(CompactedItem {
@@ -1338,6 +1343,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
                 turn_id: rolled_back_turn_id.clone(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
@@ -1385,6 +1391,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
                 turn_id: "turn-1".to_string(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
@@ -1405,6 +1412,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
                 turn_id: "turn-2".to_string(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
@@ -1425,6 +1433,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
                 turn_id: "turn-3".to_string(),
                 model_context_window: Some(128_000),
                 collaboration_mode_kind: ModeKind::Default,
+                plan_phase: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
@@ -1524,6 +1533,7 @@ async fn set_rate_limits_retains_previous_credits() {
     let reasoning_effort = config.model_reasoning_effort;
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort,
@@ -1621,6 +1631,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
     let reasoning_effort = config.model_reasoning_effort;
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort,
@@ -1975,6 +1986,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
     let reasoning_effort = config.model_reasoning_effort;
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort,
@@ -2206,6 +2218,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
     let model_info = ModelsManager::construct_model_info_offline_for_tests(model.as_str(), &config);
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort: config.model_reasoning_effort,
@@ -2300,6 +2313,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let reasoning_effort = config.model_reasoning_effort;
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort,
@@ -3130,6 +3144,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
     let reasoning_effort = config.model_reasoning_effort;
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model,
             reasoning_effort,

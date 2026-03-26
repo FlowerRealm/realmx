@@ -623,6 +623,9 @@ impl DeveloperInstructions {
 
     /// Returns developer instructions from a collaboration mode if they exist and are non-empty.
     pub fn from_collaboration_mode(collaboration_mode: &CollaborationMode) -> Option<Self> {
+        if collaboration_mode.is_plan_execution_mode() {
+            return None;
+        }
         collaboration_mode
             .settings
             .developer_instructions

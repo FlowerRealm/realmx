@@ -1273,6 +1273,7 @@ mod tests {
                 turn_id: turn_id.to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "hello".into(),
@@ -1592,6 +1593,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "Start".into(),
@@ -1646,6 +1648,7 @@ mod tests {
                 turn_id: "turn-1".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "run tools".into(),
@@ -1750,6 +1753,7 @@ mod tests {
                 turn_id: "turn-1".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "run dynamic tool".into(),
@@ -1809,6 +1813,7 @@ mod tests {
                 turn_id: "turn-1".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "run tools".into(),
@@ -1895,6 +1900,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "first".into(),
@@ -1910,6 +1916,7 @@ mod tests {
                 turn_id: "turn-b".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "second".into(),
@@ -1977,6 +1984,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "first".into(),
@@ -1992,6 +2000,7 @@ mod tests {
                 turn_id: "turn-b".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "second".into(),
@@ -2055,6 +2064,7 @@ mod tests {
                 turn_id: turn_id.to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "apply patch".into(),
@@ -2118,6 +2128,7 @@ mod tests {
                 turn_id: turn_id.to_string(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "apply patch".into(),
@@ -2180,6 +2191,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "first".into(),
@@ -2195,6 +2207,7 @@ mod tests {
                 turn_id: "turn-b".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "second".into(),
@@ -2234,6 +2247,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "first".into(),
@@ -2249,6 +2263,7 @@ mod tests {
                 turn_id: "turn-b".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "second".into(),
@@ -2285,6 +2300,7 @@ mod tests {
                 turn_id: "turn-compact".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             })),
             RolloutItem::Compacted(CompactedItem {
                 message: String::new(),
@@ -2521,6 +2537,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "hello".into(),
@@ -2568,6 +2585,7 @@ mod tests {
                 turn_id: "turn-a".into(),
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
+                plan_phase: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 message: "hello".into(),

@@ -8,6 +8,7 @@ use codex_core::features::Feature;
 use codex_core::plan_workspace::PlanWorkspace;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::protocol::AskForApproval;
@@ -895,6 +896,7 @@ plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject inva
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Execute,
+                plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: session_configured.model.clone(),
                     reasoning_effort: None,
@@ -986,6 +988,7 @@ plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject inva
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Execute,
+                plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: session_configured.model.clone(),
                     reasoning_effort: None,

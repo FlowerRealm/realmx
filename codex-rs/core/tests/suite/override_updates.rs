@@ -25,6 +25,7 @@ use tempfile::TempDir;
 fn collab_mode_with_instructions(instructions: Option<&str>) -> CollaborationMode {
     CollaborationMode {
         mode: ModeKind::Default,
+        plan_phase: None,
         settings: Settings {
             model: "gpt-5.1".to_string(),
             reasoning_effort: None,

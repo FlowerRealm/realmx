@@ -556,12 +556,14 @@ impl Codex {
         // to avoid extracting these fields separately and constructing CollaborationMode here.
         let collaboration_mode = CollaborationMode {
             mode: ModeKind::Default,
+            plan_phase: None,
             settings: Settings {
                 model: model.clone(),
                 reasoning_effort: config.model_reasoning_effort,
                 developer_instructions: None,
             },
-        };
+        }
+        .normalized();
         let session_configuration = SessionConfiguration {
             provider: config.model_provider.clone(),
             collaboration_mode,
@@ -3498,7 +3500,7 @@ impl Session {
 
     pub(crate) async fn collaboration_mode(&self) -> CollaborationMode {
         let state = self.state.lock().await;
-        state.session_configuration.collaboration_mode.clone()
+        state.session_configuration.collaboration_mode.normalized()
     }
 
     async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
@@ -3581,7 +3583,7 @@ impl Session {
         {
             developer_sections.push(collab_instructions.into_text());
         }
-        if collaboration_mode.mode == ModeKind::Execute
+        if collaboration_mode.is_plan_execution_mode()
             && let Some(state_db) = self.state_db()
         {
             let thread_id = self.conversation_id.to_string();
@@ -4629,14 +4631,18 @@ mod handlers {
                 personality,
             } => {
                 let collaboration_mode = collaboration_mode.or_else(|| {
-                    Some(CollaborationMode {
-                        mode: ModeKind::Default,
-                        settings: Settings {
-                            model: model.clone(),
-                            reasoning_effort: effort,
-                            developer_instructions: None,
-                        },
-                    })
+                    Some(
+                        CollaborationMode {
+                            mode: ModeKind::Default,
+                            plan_phase: None,
+                            settings: Settings {
+                                model: model.clone(),
+                                reasoning_effort: effort,
+                                developer_instructions: None,
+                            },
+                        }
+                        .normalized(),
+                    )
                 });
                 (
                     items,
@@ -5622,6 +5628,7 @@ pub(crate) async fn run_turn(
         turn_id: turn_context.sub_id.clone(),
         model_context_window: turn_context.model_context_window(),
         collaboration_mode_kind: turn_context.collaboration_mode.mode,
+        plan_phase: turn_context.collaboration_mode.plan_phase(),
     });
     sess.send_event(&turn_context, event).await;
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
@@ -5827,7 +5834,7 @@ pub(crate) async fn run_turn(
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     let mut server_model_warning_emitted_for_turn = false;
     let mut plan_acceptance = PlanAcceptanceState::new(
-        turn_context.collaboration_mode.mode.is_plan_output_mode()
+        turn_context.collaboration_mode.is_plan_output_mode()
             && turn_context
                 .features
                 .enabled(Feature::PlanModeSubagentReview),
@@ -7504,7 +7511,7 @@ async fn try_run_sampling_request(
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
     let mut should_emit_turn_diff = false;
-    let plan_mode = turn_context.collaboration_mode.mode.is_plan_output_mode();
+    let plan_mode = turn_context.collaboration_mode.is_plan_output_mode();
     let hidden_plan_review_enabled = plan_mode
         && turn_context
             .features

@@ -16,6 +16,7 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
 use tokio::time::timeout;
@@ -59,6 +60,7 @@ async fn request_user_input_round_trip() -> Result<()> {
             effort: Some(ReasoningEffort::Medium),
             collaboration_mode: Some(CollaborationMode {
                 mode: ModeKind::Plan,
+                plan_phase: Some(PlanModePhase::Planning),
                 settings: Settings {
                     model: "mock-model".to_string(),
                     reasoning_effort: Some(ReasoningEffort::Medium),

@@ -38,7 +38,7 @@ pub(crate) use crate::tools::code_mode::CodeModeExecuteHandler;
 pub(crate) use crate::tools::code_mode::CodeModeWaitHandler;
 pub use apply_patch::ApplyPatchHandler;
 pub use artifacts::ArtifactsHandler;
-use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 pub use dynamic::DynamicToolHandler;
@@ -107,12 +107,12 @@ fn resolve_workdir_base_path(
 
 pub(crate) fn reject_plan_mode_target_repo_mutation(
     session: &Session,
-    mode: ModeKind,
+    collaboration_mode: &CollaborationMode,
     target_repo_cwd: &Path,
     workdir: &Path,
     is_mutating: bool,
 ) -> Result<(), FunctionCallError> {
-    if !mode.is_plan_output_mode() || !is_mutating {
+    if !collaboration_mode.is_plan_output_mode() || !is_mutating {
         return Ok(());
     }
 
@@ -282,7 +282,10 @@ mod tests {
     use crate::codex::make_session_and_context;
     use crate::features::Feature;
     use crate::sandboxing::SandboxPermissions;
+    use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::ModeKind;
+    use codex_protocol::config_types::PlanModePhase;
+    use codex_protocol::config_types::Settings;
     use codex_protocol::models::FileSystemPermissions;
     use codex_protocol::models::NetworkPermissions;
     use codex_protocol::models::PermissionProfile;
@@ -402,7 +405,15 @@ mod tests {
 
         let err = reject_plan_mode_target_repo_mutation(
             &session,
-            ModeKind::Plan,
+            &CollaborationMode {
+                mode: ModeKind::Plan,
+                plan_phase: Some(PlanModePhase::Planning),
+                settings: Settings {
+                    model: "gpt-5".to_string(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            },
             repo.path(),
             &nested,
             true,
@@ -425,7 +436,15 @@ mod tests {
 
         reject_plan_mode_target_repo_mutation(
             &session,
-            ModeKind::Plan,
+            &CollaborationMode {
+                mode: ModeKind::Plan,
+                plan_phase: Some(PlanModePhase::Planning),
+                settings: Settings {
+                    model: "gpt-5".to_string(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            },
             repo.path(),
             outside.path(),
             true,
@@ -440,7 +459,15 @@ mod tests {
 
         let err = reject_plan_mode_target_repo_mutation(
             &session,
-            ModeKind::Plan,
+            &CollaborationMode {
+                mode: ModeKind::Plan,
+                plan_phase: Some(PlanModePhase::Planning),
+                settings: Settings {
+                    model: "gpt-5".to_string(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            },
             outside.path(),
             outside.path(),
             true,
