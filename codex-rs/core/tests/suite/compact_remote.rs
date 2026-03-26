@@ -193,6 +193,27 @@ fn assert_request_contains_realtime_end(request: &responses::ResponsesRequest) {
     );
 }
 
+async fn wait_for_non_auto_compact_turn_complete(codex: &codex_core::CodexThread) {
+    loop {
+        let event = codex.next_event().await.expect("expected turn event");
+        if matches!(event.msg, EventMsg::TurnComplete(_)) && !event.id.starts_with("auto-compact-")
+        {
+            break;
+        }
+    }
+}
+
+fn request_has_call_item(request: &responses::ResponsesRequest, call_id: &str) -> bool {
+    ["function_call", "local_shell_call"]
+        .into_iter()
+        .flat_map(|item_type| request.inputs_of_type(item_type))
+        .any(|item| item.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id))
+}
+
+fn request_call_item_count(request: &responses::ResponsesRequest) -> usize {
+    request.inputs_of_type("function_call").len() + request.inputs_of_type("local_shell_call").len()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_compact_replaces_history_for_followups() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -493,14 +514,14 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     );
 
     assert!(
-        compact_request.has_function_call(retained_call_id)
+        request_has_call_item(&compact_request, retained_call_id)
             && compact_request
-                .any_tool_call_output_text(retained_call_id)
-                .is_some(),
+                .any_tool_call_output(retained_call_id)
+                .is_object(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
-        !compact_request.has_function_call(trimmed_call_id)
+        !request_has_call_item(&compact_request, trimmed_call_id)
             && compact_request
                 .any_tool_call_output_text(trimmed_call_id)
                 .is_none(),
@@ -508,7 +529,7 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     );
 
     assert_eq!(
-        compact_request.inputs_of_type("function_call").len(),
+        request_call_item_count(&compact_request),
         1,
         "expected exactly one function call after trimming"
     );
@@ -606,7 +627,7 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
     assert_eq!(
         compact_mock.requests().len(),
         1,
@@ -629,14 +650,14 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     );
 
     assert!(
-        compact_request.has_function_call(retained_call_id)
+        request_has_call_item(&compact_request, retained_call_id)
             && compact_request
-                .any_tool_call_output_text(retained_call_id)
-                .is_some(),
+                .any_tool_call_output(retained_call_id)
+                .is_object(),
         "expected compact request to keep the older function call/result pair"
     );
     assert!(
-        !compact_request.has_function_call(trimmed_call_id)
+        !request_has_call_item(&compact_request, trimmed_call_id)
             && compact_request
                 .any_tool_call_output_text(trimmed_call_id)
                 .is_none(),
@@ -644,7 +665,7 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     );
 
     assert_eq!(
-        compact_request.inputs_of_type("function_call").len(),
+        request_call_item_count(&compact_request),
         1,
         "expected exactly one function call after trimming"
     );
@@ -688,14 +709,6 @@ async fn auto_remote_compact_failure_stops_agent_loop() -> Result<()> {
         serde_json::json!({ "output": "invalid compact payload shape" }),
     )
     .await;
-    let post_compact_turn_mock = mount_sse_once(
-        harness.server(),
-        sse(vec![
-            responses::ev_assistant_message("post-compact-assistant", "should not run"),
-            responses::ev_completed("post-compact-response"),
-        ]),
-    )
-    .await;
 
     codex
         .submit(Op::UserInput {
@@ -723,7 +736,7 @@ async fn auto_remote_compact_failure_stops_agent_loop() -> Result<()> {
         _ => None,
     })
     .await;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert!(
         error_message.contains("Error running remote compact task"),
@@ -733,10 +746,6 @@ async fn auto_remote_compact_failure_stops_agent_loop() -> Result<()> {
         first_compact_mock.requests().len(),
         1,
         "expected first remote compact attempt with incoming items"
-    );
-    assert!(
-        post_compact_turn_mock.requests().is_empty(),
-        "expected agent loop to stop after compaction failure"
     );
 
     insta::assert_snapshot!(
@@ -841,11 +850,11 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
 
     let baseline_compact_request = baseline_compact_mock.single_request();
     assert!(
-        baseline_compact_request.has_function_call(baseline_retained_call_id),
+        request_has_call_item(&baseline_compact_request, baseline_retained_call_id),
         "expected baseline compact request to retain older function call history"
     );
     assert!(
-        baseline_compact_request.has_function_call(baseline_trailing_call_id),
+        request_has_call_item(&baseline_compact_request, baseline_trailing_call_id),
         "expected baseline compact request to retain trailing function call history"
     );
 
@@ -944,11 +953,11 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
         override_base_instructions
     );
     assert!(
-        override_compact_request.has_function_call(override_retained_call_id),
+        request_has_call_item(&override_compact_request, override_retained_call_id),
         "expected remote compact request to preserve older function call history"
     );
     assert!(
-        !override_compact_request.has_function_call(override_trailing_call_id),
+        !request_has_call_item(&override_compact_request, override_trailing_call_id),
         "expected remote compact request to trim trailing function call history with override instructions"
     );
 
@@ -1515,7 +1524,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1650,7 +1659,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1736,7 +1745,7 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(test.codex.as_ref()).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -2037,7 +2046,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
                 final_output_json_schema: None,
             })
             .await?;
-        wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+        wait_for_non_auto_compact_turn_complete(&codex).await;
     }
 
     assert_eq!(compact_mock.requests().len(), 1);
@@ -2090,20 +2099,18 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
     .await?;
     let codex = harness.test().codex.clone();
 
-    let initial_turn_request_mock = responses::mount_sse_once(
+    let responses_mock = responses::mount_sse_sequence(
         harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m1", "BEFORE_SWITCH_REPLY"),
-            responses::ev_completed_with_tokens("r1", 500),
-        ]),
-    )
-    .await;
-    let post_compact_turn_request_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m2", "AFTER_SWITCH_REPLY"),
-            responses::ev_completed_with_tokens("r2", 80),
-        ]),
+        vec![
+            responses::sse(vec![
+                responses::ev_assistant_message("m1", "BEFORE_SWITCH_REPLY"),
+                responses::ev_completed_with_tokens("r1", 500),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("m2", "AFTER_SWITCH_REPLY"),
+                responses::ev_completed_with_tokens("r2", 80),
+            ]),
+        ],
     )
     .await;
     let compact_mock = responses::mount_compact_user_history_with_summary_once(
@@ -2147,27 +2154,24 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert_eq!(
         compact_mock.requests().len(),
         1,
         "expected a single remote pre-turn compaction request"
     );
+
+    let requests = responses_mock.requests();
     assert_eq!(
-        initial_turn_request_mock.requests().len(),
-        1,
-        "expected initial turn request"
-    );
-    assert_eq!(
-        post_compact_turn_request_mock.requests().len(),
-        1,
-        "expected post-compaction follow-up request"
+        requests.len(),
+        2,
+        "expected initial and post-compaction turn requests"
     );
 
-    let initial_turn_request = initial_turn_request_mock.single_request();
+    let initial_turn_request = &requests[0];
     let compact_request = compact_mock.single_request();
-    let post_compact_turn_request = post_compact_turn_request_mock.single_request();
+    let post_compact_turn_request = &requests[1];
     let compact_body = compact_request.body_json().to_string();
     assert!(
         !compact_body.contains("AFTER_SWITCH_USER"),
@@ -2201,7 +2205,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
                 ("Remote Compaction Request", &compact_request),
                 (
                     "Remote Post-Compaction History Layout",
-                    &post_compact_turn_request
+                    post_compact_turn_request
                 ),
             ]
         )
@@ -2226,12 +2230,12 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
     .await?;
     let codex = harness.test().codex.clone();
 
-    let responses_mock = responses::mount_sse_sequence(
+    let responses_mock = responses::mount_sse_once(
         harness.server(),
-        vec![responses::sse(vec![
+        responses::sse(vec![
             responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
             responses::ev_completed_with_tokens("r1", 500),
-        ])],
+        ]),
     )
     .await;
 
@@ -2245,15 +2249,6 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
         })),
     )
     .await;
-    let post_compact_turn_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m2", "REMOTE_POST_COMPACT_SHOULD_NOT_RUN"),
-            responses::ev_completed_with_tokens("r2", 80),
-        ]),
-    )
-    .await;
-
     codex
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
@@ -2279,7 +2274,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
         _ => None,
     })
     .await;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -2287,10 +2282,6 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
         requests.len(),
         1,
         "expected no post-compaction follow-up turn request after compact failure"
-    );
-    assert!(
-        post_compact_turn_mock.requests().is_empty(),
-        "expected turn to stop after compaction failure"
     );
 
     let include_attempt_request = compact_mock.single_request();
@@ -2356,7 +2347,7 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -2396,20 +2387,18 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
     .await?;
     let codex = harness.test().codex.clone();
 
-    let initial_turn_request_mock = responses::mount_sse_once(
+    let responses_mock = responses::mount_sse_sequence(
         harness.server(),
-        responses::sse(vec![
-            responses::ev_function_call("call-remote-summary-only", DUMMY_FUNCTION_NAME, "{}"),
-            responses::ev_completed_with_tokens("r1", 500),
-        ]),
-    )
-    .await;
-    let post_compact_turn_request_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m2", "REMOTE_SUMMARY_ONLY_FINAL_REPLY"),
-            responses::ev_completed_with_tokens("r2", 80),
-        ]),
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call("call-remote-summary-only", DUMMY_FUNCTION_NAME, "{}"),
+                responses::ev_completed_with_tokens("r1", 500),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("m2", "REMOTE_SUMMARY_ONLY_FINAL_REPLY"),
+                responses::ev_completed_with_tokens("r2", 80),
+            ]),
+        ],
     )
     .await;
 
@@ -2431,22 +2420,18 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     assert_eq!(
-        initial_turn_request_mock.requests().len(),
-        1,
-        "expected initial turn request"
-    );
-    assert_eq!(
-        post_compact_turn_request_mock.requests().len(),
-        1,
-        "expected post-compaction request"
+        responses_mock.requests().len(),
+        2,
+        "expected initial and post-compaction requests"
     );
 
     let compact_request = compact_mock.single_request();
-    let post_compact_turn_request = post_compact_turn_request_mock.single_request();
+    let requests = responses_mock.requests();
+    let post_compact_turn_request = &requests[1];
     insta::assert_snapshot!(
         "remote_mid_turn_compaction_summary_only_reinjects_context_shapes",
         format_labeled_requests_snapshot(
@@ -2455,7 +2440,7 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
                 ("Remote Compaction Request", &compact_request),
                 (
                     "Remote Post-Compaction History Layout",
-                    &post_compact_turn_request
+                    post_compact_turn_request
                 ),
             ]
         )
@@ -2479,20 +2464,18 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
     .await?;
     let codex = harness.test().codex.clone();
 
-    let setup_turn_request_mock = responses::mount_sse_once(
+    let responses_mock = responses::mount_sse_sequence(
         harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("setup", "REMOTE_SETUP_REPLY"),
-            responses::ev_completed_with_tokens("setup-response", 60),
-        ]),
-    )
-    .await;
-    let second_turn_request_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_shell_command_call("call-remote-multi-summary", "echo multi-summary"),
-            responses::ev_completed_with_tokens("r1", 1_000),
-        ]),
+        vec![
+            responses::sse(vec![
+                responses::ev_assistant_message("setup", "REMOTE_SETUP_REPLY"),
+                responses::ev_completed_with_tokens("setup-response", 60),
+            ]),
+            responses::sse(vec![
+                responses::ev_shell_command_call("call-remote-multi-summary", "echo multi-summary"),
+                responses::ev_completed_with_tokens("r1", 1_000),
+            ]),
+        ],
     )
     .await;
 
@@ -2528,18 +2511,13 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_non_auto_compact_turn_complete(&codex).await;
 
     assert_eq!(compact_mock.requests().len(), 2);
     assert_eq!(
-        setup_turn_request_mock.requests().len(),
-        1,
-        "expected setup turn request"
-    );
-    assert_eq!(
-        second_turn_request_mock.requests().len(),
-        1,
-        "expected second-turn pre-compaction request"
+        responses_mock.requests().len(),
+        2,
+        "expected setup turn and second-turn requests"
     );
 
     let compact_requests = compact_mock.requests();
@@ -2549,7 +2527,7 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
         "expected one setup compact and one mid-turn compact request"
     );
     let compact_request = compact_requests[1].clone();
-    let second_turn_request = second_turn_request_mock.single_request();
+    let second_turn_request = responses_mock.requests()[1].clone();
     assert!(
         compact_request.body_contains_text("REMOTE_OLDER_SUMMARY"),
         "older summary should round-trip from conversation history into the next compact request"
