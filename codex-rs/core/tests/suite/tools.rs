@@ -234,7 +234,15 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         )
         .await?;
 
-    let request = mock.single_request();
+    let request = mock
+        .requests()
+        .into_iter()
+        .find(|request| {
+            request
+                .any_tool_call_output_content_and_success(call_id)
+                .is_some()
+        })
+        .context("shell output request present")?;
     let item = request.any_tool_call_output(call_id);
     let (body_opt, success) = request
         .any_tool_call_output_content_and_success(call_id)
