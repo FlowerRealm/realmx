@@ -7936,7 +7936,7 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(popup.contains("codex-auto-fast"));
-    assert!(popup.contains("gpt-5.4"));
+    assert!(!popup.contains("gpt-5.4"));
     assert!(popup.contains("All models"));
     assert!(!popup.contains(remote_slug));
     assert!(!popup.contains("Loading models..."));
