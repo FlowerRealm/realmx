@@ -2746,7 +2746,7 @@ async fn auto_compact_clamps_config_limit_to_context_window() {
             .iter()
             .any(|text| {
                 text.contains(SUMMARIZATION_PROMPT)
-                    || text.contains(summary_with_prefix(AUTO_SUMMARY_TEXT))
+                    || text.contains(&summary_with_prefix(AUTO_SUMMARY_TEXT))
             }),
         "auto compact should still run when config limit exceeds context"
     );
