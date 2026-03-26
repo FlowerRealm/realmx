@@ -16,7 +16,6 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -102,23 +101,6 @@ fn role_block(description: &str, role_name: &str) -> Option<String> {
     Some(block.join("\n"))
 }
 
-async fn wait_for_spawned_thread_id(test: &TestCodex) -> Result<String> {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let ids = test.thread_manager.list_thread_ids().await;
-        if let Some(spawned_id) = ids
-            .iter()
-            .find(|id| **id != test.session_configured.session_id)
-        {
-            return Ok(spawned_id.to_string());
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("timed out waiting for spawned thread id");
-        }
-        sleep(Duration::from_millis(10)).await;
-    }
-}
-
 async fn wait_for_requests(
     mock: &core_test_support::responses::ResponseMock,
 ) -> Result<Vec<ResponsesRequest>> {
@@ -135,10 +117,25 @@ async fn wait_for_requests(
     }
 }
 
+fn spawned_agent_id_from_request(request: &ResponsesRequest) -> Result<String> {
+    let output = request
+        .function_call_output_text(SPAWN_CALL_ID)
+        .ok_or_else(|| anyhow::anyhow!("expected spawn_agent tool output"))?;
+    let payload: serde_json::Value = serde_json::from_str(&output)?;
+    payload["agent_id"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("spawn_agent output missing agent_id"))
+}
+
 async fn setup_turn_one_with_spawned_child(
     server: &MockServer,
     child_response_delay: Option<Duration>,
-) -> Result<(TestCodex, ResponseMock)> {
+) -> Result<(
+    core_test_support::test_codex::TestCodex,
+    ResponseMock,
+    ResponseMock,
+)> {
     setup_turn_one_with_custom_spawned_child(
         server,
         json!({
@@ -159,7 +156,11 @@ async fn setup_turn_one_with_custom_spawned_child(
     configure_test: impl FnOnce(
         core_test_support::test_codex::TestCodexBuilder,
     ) -> core_test_support::test_codex::TestCodexBuilder,
-) -> Result<(TestCodex, ResponseMock)> {
+) -> Result<(
+    core_test_support::test_codex::TestCodex,
+    ResponseMock,
+    ResponseMock,
+)> {
     let spawn_args = serde_json::to_string(&spawn_args)?;
 
     mount_sse_once_match(
@@ -198,7 +199,7 @@ async fn setup_turn_one_with_custom_spawned_child(
         .await
     };
 
-    let _turn1_followup = mount_sse_once_match(
+    let turn1_followup = mount_sse_once_match(
         server,
         |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
         sse(vec![
@@ -242,7 +243,7 @@ async fn setup_turn_one_with_custom_spawned_child(
             sleep(Duration::from_millis(10)).await;
         }
     }
-    Ok((test, child_request_log))
+    Ok((test, child_request_log, turn1_followup))
 }
 
 async fn spawn_child_and_capture_snapshot(
@@ -252,10 +253,14 @@ async fn spawn_child_and_capture_snapshot(
         core_test_support::test_codex::TestCodexBuilder,
     ) -> core_test_support::test_codex::TestCodexBuilder,
 ) -> Result<ThreadConfigSnapshot> {
-    let (test, _child_request_log) =
+    let (test, _child_request_log, turn1_followup) =
         setup_turn_one_with_custom_spawned_child(server, spawn_args, None, false, configure_test)
             .await?;
-    let spawned_id = wait_for_spawned_thread_id(&test).await?;
+    let requests = wait_for_requests(&turn1_followup).await?;
+    let spawned_id = requests
+        .iter()
+        .find_map(|request| spawned_agent_id_from_request(request).ok())
+        .ok_or_else(|| anyhow::anyhow!("expected child request to include spawn_agent output"))?;
     let thread_id = ThreadId::from_string(&spawned_id)?;
     Ok(test
         .thread_manager
@@ -270,7 +275,8 @@ async fn subagent_notification_is_included_without_wait() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let (test, _spawned_id) = setup_turn_one_with_spawned_child(&server, None).await?;
+    let (test, _child_request_log, _turn1_followup) =
+        setup_turn_one_with_spawned_child(&server, None).await?;
 
     let turn2 = mount_sse_once_match(
         &server,

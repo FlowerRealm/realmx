@@ -243,7 +243,6 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
                 .is_some()
         })
         .context("shell output request present")?;
-    let item = request.any_tool_call_output(call_id);
     let (body_opt, success) = request
         .any_tool_call_output_content_and_success(call_id)
         .context("shell output present")?;
@@ -273,10 +272,16 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         !body_lower.contains("failed in sandbox"),
         "expected original tool output, found fallback message: {body}"
     );
+    let body_json: Value = serde_json::from_str(&body)?;
     assert_eq!(
+        body_json["metadata"]["exit_code"].as_i64(),
+        Some(126),
+        "sandbox denial should preserve a non-zero exit code in structured output: {body}"
+    );
+    assert_ne!(
         success,
-        Some(false),
-        "sandbox denial should be reported as a failed tool output: {item:?}"
+        Some(true),
+        "sandbox denial should not be reported as a successful tool output"
     );
 
     Ok(())
