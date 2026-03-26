@@ -2,7 +2,6 @@ use anyhow::Result;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::config::AgentRoleConfig;
 use codex_core::features::Feature;
-use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
@@ -115,17 +114,6 @@ async fn wait_for_requests(
         }
         sleep(Duration::from_millis(10)).await;
     }
-}
-
-fn spawned_agent_id_from_request(request: &ResponsesRequest) -> Result<String> {
-    let output = request
-        .function_call_output_text(SPAWN_CALL_ID)
-        .ok_or_else(|| anyhow::anyhow!("expected spawn_agent tool output"))?;
-    let payload: serde_json::Value = serde_json::from_str(&output)?;
-    payload["agent_id"]
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow::anyhow!("spawn_agent output missing agent_id"))
 }
 
 async fn setup_turn_one_with_spawned_child(
@@ -253,15 +241,71 @@ async fn spawn_child_and_capture_snapshot(
         core_test_support::test_codex::TestCodexBuilder,
     ) -> core_test_support::test_codex::TestCodexBuilder,
 ) -> Result<ThreadConfigSnapshot> {
-    let (test, _child_request_log, turn1_followup) =
-        setup_turn_one_with_custom_spawned_child(server, spawn_args, None, false, configure_test)
-            .await?;
-    let requests = wait_for_requests(&turn1_followup).await?;
-    let spawned_id = requests
-        .iter()
-        .find_map(|request| spawned_agent_id_from_request(request).ok())
-        .ok_or_else(|| anyhow::anyhow!("expected child request to include spawn_agent output"))?;
-    let thread_id = ThreadId::from_string(&spawned_id)?;
+    let spawn_args = serde_json::to_string(&spawn_args)?;
+
+    mount_sse_once_match(
+        server,
+        |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
+        sse(vec![
+            ev_response_created("resp-turn1-1"),
+            ev_function_call(SPAWN_CALL_ID, "spawn_agent", &spawn_args),
+            ev_completed("resp-turn1-1"),
+        ]),
+    )
+    .await;
+
+    let child_request_log = mount_sse_once_match(
+        server,
+        |req: &wiremock::Request| {
+            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
+        },
+        sse(vec![
+            ev_response_created("resp-child-1"),
+            ev_assistant_message("msg-child-1", "child done"),
+            ev_completed("resp-child-1"),
+        ]),
+    )
+    .await;
+
+    mount_sse_once_match(
+        server,
+        |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
+        sse(vec![
+            ev_response_created("resp-turn1-2"),
+            ev_assistant_message("msg-turn1-2", "parent done"),
+            ev_completed("resp-turn1-2"),
+        ]),
+    )
+    .await;
+
+    let mut builder = configure_test(test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::Collab)
+            .expect("test config should allow feature update");
+        config.model = Some(INHERITED_MODEL.to_string());
+        config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
+    }));
+    let test = builder.build(server).await?;
+    let existing_thread_ids = test.thread_manager.list_thread_ids().await;
+    test.submit_turn(TURN_1_PROMPT).await?;
+    let _ = wait_for_requests(&child_request_log).await?;
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let thread_id = loop {
+        let current_thread_ids = test.thread_manager.list_thread_ids().await;
+        let new_thread_ids = current_thread_ids
+            .into_iter()
+            .filter(|thread_id| !existing_thread_ids.contains(thread_id))
+            .collect::<Vec<_>>();
+        if new_thread_ids.len() == 1 {
+            break new_thread_ids[0];
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("expected exactly one spawned child thread");
+        }
+        sleep(Duration::from_millis(10)).await;
+    };
     Ok(test
         .thread_manager
         .get_thread(thread_id)

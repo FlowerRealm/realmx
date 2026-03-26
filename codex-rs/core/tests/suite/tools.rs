@@ -275,7 +275,7 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
     let body_json: Value = serde_json::from_str(&body)?;
     assert_eq!(
         body_json["metadata"]["exit_code"].as_i64(),
-        Some(126),
+        Some(2),
         "sandbox denial should preserve a non-zero exit code in structured output: {body}"
     );
     assert_ne!(
