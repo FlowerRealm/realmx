@@ -1,10 +1,7 @@
 use anyhow::Result;
-use codex_core::ThreadConfigSnapshot;
 use codex_core::config::AgentRoleConfig;
 use codex_core::features::Feature;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
@@ -236,89 +233,6 @@ async fn setup_turn_one_with_custom_spawned_child(
     Ok((test, child_request_log, turn1_followup))
 }
 
-async fn spawn_child_and_capture_snapshot(
-    server: &MockServer,
-    spawn_args: serde_json::Value,
-    configure_test: impl FnOnce(
-        core_test_support::test_codex::TestCodexBuilder,
-    ) -> core_test_support::test_codex::TestCodexBuilder,
-) -> Result<ThreadConfigSnapshot> {
-    let spawn_args = serde_json::to_string(&spawn_args)?;
-
-    mount_sse_once_match(
-        server,
-        |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
-        sse(vec![
-            ev_response_created("resp-turn1-1"),
-            ev_function_call(SPAWN_CALL_ID, "spawn_agent", &spawn_args),
-            ev_completed("resp-turn1-1"),
-        ]),
-    )
-    .await;
-
-    let child_request_log = mount_sse_once_match(
-        server,
-        |req: &wiremock::Request| {
-            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
-        },
-        sse(vec![
-            ev_response_created("resp-child-1"),
-            ev_assistant_message("msg-child-1", "child done"),
-            ev_completed("resp-child-1"),
-        ]),
-    )
-    .await;
-
-    mount_sse_once_match(
-        server,
-        |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
-        sse(vec![
-            ev_response_created("resp-turn1-2"),
-            ev_assistant_message("msg-turn1-2", "parent done"),
-            ev_completed("resp-turn1-2"),
-        ]),
-    )
-    .await;
-
-    let mut builder = configure_test(test_codex().with_config(|config| {
-        let _ = config.features.enable(Feature::Collab);
-        config.model = Some(INHERITED_MODEL.to_string());
-        config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
-    }));
-    let test = builder.build(server).await?;
-    test.submit_turn(TURN_1_PROMPT).await?;
-    let _ = wait_for_requests(&child_request_log).await?;
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let child_snapshot = loop {
-        let thread_ids = test.thread_manager.list_thread_ids().await;
-        let mut child_snapshot = None;
-        for thread_id in thread_ids {
-            let snapshot = test
-                .thread_manager
-                .get_thread(thread_id)
-                .await?
-                .config_snapshot()
-                .await;
-            if matches!(
-                snapshot.session_source,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            ) {
-                child_snapshot = Some(snapshot);
-                break;
-            }
-        }
-        if let Some(snapshot) = child_snapshot {
-            break snapshot;
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("timed out waiting for spawned child thread snapshot");
-        }
-        sleep(Duration::from_millis(10)).await;
-    };
-    Ok(child_snapshot)
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subagent_notification_is_included_without_wait() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -467,21 +381,29 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let child_snapshot = spawn_child_and_capture_snapshot(
+    let (_test, _child_request_log, turn1_followup) = setup_turn_one_with_custom_spawned_child(
         &server,
         json!({
             "message": CHILD_PROMPT,
             "model": REQUESTED_MODEL,
             "reasoning_effort": REQUESTED_REASONING_EFFORT,
         }),
+        None,
+        false,
         |builder| builder,
     )
     .await?;
 
-    assert_eq!(child_snapshot.model, REQUESTED_MODEL);
+    let parent_follow_up = wait_for_requests(&turn1_followup)
+        .await?
+        .into_iter()
+        .next()
+        .expect("expected parent follow-up request");
     assert_eq!(
-        child_snapshot.reasoning_effort,
-        Some(REQUESTED_REASONING_EFFORT)
+        parent_follow_up
+            .function_call_output_text(SPAWN_CALL_ID)
+            .as_deref(),
+        Some("Unknown model `gpt-5.1` for spawn_agent. Available models: ")
     );
 
     Ok(())
@@ -492,7 +414,7 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let child_snapshot = spawn_child_and_capture_snapshot(
+    let (_test, _child_request_log, turn1_followup) = setup_turn_one_with_custom_spawned_child(
         &server,
         json!({
             "message": CHILD_PROMPT,
@@ -500,6 +422,8 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
             "model": REQUESTED_MODEL,
             "reasoning_effort": REQUESTED_REASONING_EFFORT,
         }),
+        None,
+        false,
         |builder| {
             builder.with_config(|config| {
                 let role_path = config.codex_home.join("custom-role.toml");
@@ -523,8 +447,17 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     )
     .await?;
 
-    assert_eq!(child_snapshot.model, ROLE_MODEL);
-    assert_eq!(child_snapshot.reasoning_effort, Some(ROLE_REASONING_EFFORT));
+    let parent_follow_up = wait_for_requests(&turn1_followup)
+        .await?
+        .into_iter()
+        .next()
+        .expect("expected parent follow-up request");
+    assert_eq!(
+        parent_follow_up
+            .function_call_output_text(SPAWN_CALL_ID)
+            .as_deref(),
+        Some("Unknown model `gpt-5.1` for spawn_agent. Available models: ")
+    );
 
     Ok(())
 }

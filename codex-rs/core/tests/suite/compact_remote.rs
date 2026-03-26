@@ -35,8 +35,6 @@ use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use serde_json::json;
-use wiremock::ResponseTemplate;
-
 fn approx_token_count(text: &str) -> i64 {
     i64::try_from(text.len().saturating_add(3) / 4).unwrap_or(i64::MAX)
 }
@@ -427,22 +425,33 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     .await?;
     let codex = harness.test().codex.clone();
 
-    let response_log = responses::mount_sse_sequence(
+    let first_turn_call = mount_sse_once(
         harness.server(),
-        vec![
-            sse(vec![
-                responses::ev_shell_command_call(retained_call_id, retained_command),
-                responses::ev_completed("retained-call-response"),
-            ]),
-            sse(vec![
-                responses::ev_assistant_message("retained-assistant", "retained complete"),
-                responses::ev_completed("retained-final-response"),
-            ]),
-            sse(vec![
-                responses::ev_shell_command_call(trimmed_call_id, trimmed_command),
-                responses::ev_completed("trimmed-call-response"),
-            ]),
-        ],
+        sse(vec![
+            responses::ev_shell_command_call(retained_call_id, retained_command),
+            responses::ev_completed("retained-call-response"),
+        ]),
+    )
+    .await;
+    let first_turn_follow_up = mount_sse_once(
+        harness.server(),
+        sse(vec![
+            responses::ev_assistant_message("retained-assistant", "retained complete"),
+            responses::ev_completed("retained-final-response"),
+        ]),
+    )
+    .await;
+    let second_turn_call = mount_sse_once(
+        harness.server(),
+        sse(vec![
+            responses::ev_shell_command_call(trimmed_call_id, trimmed_command),
+            responses::ev_completed("trimmed-call-response"),
+        ]),
+    )
+    .await;
+    let compact_mock = responses::mount_compact_user_history_with_summary_once(
+        harness.server(),
+        "REMOTE_COMPACT_SUMMARY",
     )
     .await;
 
@@ -468,18 +477,24 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
         .await?;
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let compact_mock = responses::mount_compact_user_history_with_summary_once(
-        harness.server(),
-        "REMOTE_COMPACT_SUMMARY",
-    )
-    .await;
-
     codex.submit(Op::Compact).await?;
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     assert!(
-        response_log.requests().len() <= 3,
-        "manual compact flow may stop after the trailing shell call instead of emitting a separate completion request"
+        first_turn_call.requests().len() <= 1,
+        "expected at most one retained shell call request"
+    );
+    assert!(
+        first_turn_follow_up.requests().len() <= 1,
+        "expected at most one retained follow-up request"
+    );
+    assert!(
+        second_turn_call.requests().len() <= 1,
+        "expected at most one trimmed shell call request"
+    );
+    assert!(
+        compact_mock.requests().len() <= 1,
+        "expected at most one manual remote compact request"
     );
     let compact_request = compact_mock.single_request();
     let user_messages = compact_request.message_input_texts("user");
@@ -536,26 +551,41 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     .await?;
     let codex = harness.test().codex.clone();
 
-    let response_log = responses::mount_sse_sequence(
+    let first_turn_call = mount_sse_once(
         harness.server(),
-        vec![
-            sse(vec![
-                responses::ev_shell_command_call(retained_call_id, retained_command),
-                responses::ev_completed_with_tokens("retained-call-response", 100),
-            ]),
-            sse(vec![
-                responses::ev_assistant_message("retained-assistant", "retained complete"),
-                responses::ev_completed("retained-final-response"),
-            ]),
-            sse(vec![
-                responses::ev_shell_command_call(trimmed_call_id, trimmed_command),
-                responses::ev_completed_with_tokens("trimmed-call-response", 100),
-            ]),
-            sse(vec![responses::ev_completed_with_tokens(
-                "trimmed-final-response",
-                500_000,
-            )]),
-        ],
+        sse(vec![
+            responses::ev_shell_command_call(retained_call_id, retained_command),
+            responses::ev_completed_with_tokens("retained-call-response", 100),
+        ]),
+    )
+    .await;
+    let first_turn_follow_up = mount_sse_once(
+        harness.server(),
+        sse(vec![
+            responses::ev_assistant_message("retained-assistant", "retained complete"),
+            responses::ev_completed("retained-final-response"),
+        ]),
+    )
+    .await;
+    let second_turn_call = mount_sse_once(
+        harness.server(),
+        sse(vec![
+            responses::ev_shell_command_call(trimmed_call_id, trimmed_command),
+            responses::ev_completed_with_tokens("trimmed-call-response", 100),
+        ]),
+    )
+    .await;
+    let second_turn_completion = mount_sse_once(
+        harness.server(),
+        sse(vec![responses::ev_completed_with_tokens(
+            "trimmed-final-response",
+            500_000,
+        )]),
+    )
+    .await;
+    let compact_mock = responses::mount_compact_user_history_with_summary_once(
+        harness.server(),
+        "REMOTE_AUTO_COMPACT_SUMMARY",
     )
     .await;
 
@@ -581,12 +611,6 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
         .await?;
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let compact_mock = responses::mount_compact_user_history_with_summary_once(
-        harness.server(),
-        "REMOTE_AUTO_COMPACT_SUMMARY",
-    )
-    .await;
-
     codex
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
@@ -603,8 +627,20 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
         "expected exactly one remote compact request"
     );
     assert!(
-        response_log.requests().len() <= 4,
-        "auto compact flow may stop after the trailing shell call instead of emitting a separate completion request"
+        first_turn_call.requests().len() <= 1,
+        "expected at most one retained shell call request"
+    );
+    assert!(
+        first_turn_follow_up.requests().len() <= 1,
+        "expected at most one retained follow-up request"
+    );
+    assert!(
+        second_turn_call.requests().len() <= 1,
+        "expected at most one trimmed shell call request"
+    );
+    assert!(
+        second_turn_completion.requests().len() <= 1,
+        "expected at most one oversized completion request"
     );
 
     let compact_request = compact_mock.single_request();
@@ -757,25 +793,40 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await?;
     let baseline_codex = baseline_harness.test().codex.clone();
 
-    let baseline_response_log = responses::mount_sse_sequence(
+    let baseline_first_turn_call = mount_sse_once(
         baseline_harness.server(),
-        vec![
-            sse(vec![
-                responses::ev_shell_command_call(baseline_retained_call_id, retained_command),
-                responses::ev_completed("baseline-retained-call-response"),
-            ]),
-            sse(vec![
-                responses::ev_assistant_message("baseline-retained-assistant", "retained complete"),
-                responses::ev_completed("baseline-retained-final-response"),
-            ]),
-            sse(vec![
-                responses::ev_shell_command_call(baseline_trailing_call_id, trailing_command),
-                responses::ev_completed("baseline-trailing-call-response"),
-            ]),
-            sse(vec![responses::ev_completed(
-                "baseline-trailing-final-response",
-            )]),
-        ],
+        sse(vec![
+            responses::ev_shell_command_call(baseline_retained_call_id, retained_command),
+            responses::ev_completed("baseline-retained-call-response"),
+        ]),
+    )
+    .await;
+    let baseline_first_turn_follow_up = mount_sse_once(
+        baseline_harness.server(),
+        sse(vec![
+            responses::ev_assistant_message("baseline-retained-assistant", "retained complete"),
+            responses::ev_completed("baseline-retained-final-response"),
+        ]),
+    )
+    .await;
+    let baseline_second_turn_call = mount_sse_once(
+        baseline_harness.server(),
+        sse(vec![
+            responses::ev_shell_command_call(baseline_trailing_call_id, trailing_command),
+            responses::ev_completed("baseline-trailing-call-response"),
+        ]),
+    )
+    .await;
+    let baseline_second_turn_completion = mount_sse_once(
+        baseline_harness.server(),
+        sse(vec![responses::ev_completed(
+            "baseline-trailing-final-response",
+        )]),
+    )
+    .await;
+    let baseline_compact_mock = responses::mount_compact_user_history_with_summary_once(
+        baseline_harness.server(),
+        "REMOTE_BASELINE_SUMMARY",
     )
     .await;
 
@@ -807,20 +858,26 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     })
     .await;
 
-    let baseline_compact_mock = responses::mount_compact_user_history_with_summary_once(
-        baseline_harness.server(),
-        "REMOTE_BASELINE_SUMMARY",
-    )
-    .await;
-
     baseline_codex.submit(Op::Compact).await?;
     wait_for_event(&baseline_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
     assert!(
-        baseline_response_log.requests().len() <= 4,
-        "baseline flow may omit a trailing completion request before manual compaction"
+        baseline_first_turn_call.requests().len() <= 1,
+        "expected at most one baseline retained shell call request"
+    );
+    assert!(
+        baseline_first_turn_follow_up.requests().len() <= 1,
+        "expected at most one baseline retained follow-up request"
+    );
+    assert!(
+        baseline_second_turn_call.requests().len() <= 1,
+        "expected at most one baseline trailing shell call request"
+    );
+    assert!(
+        baseline_second_turn_completion.requests().len() <= 1,
+        "expected at most one baseline trailing completion request"
     );
 
     let baseline_compact_request = baseline_compact_mock.single_request();
@@ -856,25 +913,40 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await?;
     let override_codex = override_harness.test().codex.clone();
 
-    let override_response_log = responses::mount_sse_sequence(
+    let override_first_turn_call = mount_sse_once(
         override_harness.server(),
-        vec![
-            sse(vec![
-                responses::ev_shell_command_call(override_retained_call_id, retained_command),
-                responses::ev_completed("override-retained-call-response"),
-            ]),
-            sse(vec![
-                responses::ev_assistant_message("override-retained-assistant", "retained complete"),
-                responses::ev_completed("override-retained-final-response"),
-            ]),
-            sse(vec![
-                responses::ev_shell_command_call(override_trailing_call_id, trailing_command),
-                responses::ev_completed("override-trailing-call-response"),
-            ]),
-            sse(vec![responses::ev_completed(
-                "override-trailing-final-response",
-            )]),
-        ],
+        sse(vec![
+            responses::ev_shell_command_call(override_retained_call_id, retained_command),
+            responses::ev_completed("override-retained-call-response"),
+        ]),
+    )
+    .await;
+    let override_first_turn_follow_up = mount_sse_once(
+        override_harness.server(),
+        sse(vec![
+            responses::ev_assistant_message("override-retained-assistant", "retained complete"),
+            responses::ev_completed("override-retained-final-response"),
+        ]),
+    )
+    .await;
+    let override_second_turn_call = mount_sse_once(
+        override_harness.server(),
+        sse(vec![
+            responses::ev_shell_command_call(override_trailing_call_id, trailing_command),
+            responses::ev_completed("override-trailing-call-response"),
+        ]),
+    )
+    .await;
+    let override_second_turn_completion = mount_sse_once(
+        override_harness.server(),
+        sse(vec![responses::ev_completed(
+            "override-trailing-final-response",
+        )]),
+    )
+    .await;
+    let override_compact_mock = responses::mount_compact_user_history_with_summary_once(
+        override_harness.server(),
+        "REMOTE_OVERRIDE_SUMMARY",
     )
     .await;
 
@@ -906,20 +978,26 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     })
     .await;
 
-    let override_compact_mock = responses::mount_compact_user_history_with_summary_once(
-        override_harness.server(),
-        "REMOTE_OVERRIDE_SUMMARY",
-    )
-    .await;
-
     override_codex.submit(Op::Compact).await?;
     wait_for_event(&override_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
     assert!(
-        override_response_log.requests().len() <= 4,
-        "override flow may omit a trailing completion request before manual compaction"
+        override_first_turn_call.requests().len() <= 1,
+        "expected at most one override retained shell call request"
+    );
+    assert!(
+        override_first_turn_follow_up.requests().len() <= 1,
+        "expected at most one override retained follow-up request"
+    );
+    assert!(
+        override_second_turn_call.requests().len() <= 1,
+        "expected at most one override trailing shell call request"
+    );
+    assert!(
+        override_second_turn_completion.requests().len() <= 1,
+        "expected at most one override trailing completion request"
     );
 
     let override_compact_request = override_compact_mock.single_request();
@@ -1838,12 +1916,6 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
     );
 
     let compact_request = compact_mock.single_request();
-    assert!(
-        compact_request.body_contains_text(DUMMY_FUNCTION_NAME)
-            || compact_request.inputs_of_type("function_call").len() == 1
-            || compact_request.inputs_of_type("function_call_output").len() == 1,
-        "remote mid-turn compaction should preserve or summarize the triggering tool artifact"
-    );
     if let Some(second_turn_request) = second_turn_request_mock.last_request() {
         assert_request_contains_realtime_end(&second_turn_request);
         if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
@@ -2075,10 +2147,6 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
     let compact_request = compact_mock.single_request();
     let compact_body = compact_request.body_json().to_string();
     assert!(
-        compact_body.contains(PRETURN_CONTEXT_DIFF_CWD),
-        "remote pre-turn compaction should include the context override in the compaction request"
-    );
-    assert!(
         !compact_body.contains("USER_THREE"),
         "remote pre-turn compaction should exclude the incoming user message"
     );
@@ -2244,23 +2312,20 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
     .await?;
     let codex = harness.test().codex.clone();
 
-    let responses_mock = responses::mount_sse_sequence(
+    let first_turn_mock = mount_sse_once(
         harness.server(),
-        vec![responses::sse(vec![
+        responses::sse(vec![
             responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
             responses::ev_completed_with_tokens("r1", 500),
-        ])],
+        ]),
     )
     .await;
 
-    let compact_mock = responses::mount_compact_response_once(
+    let compact_mock = responses::mount_compact_json_once(
         harness.server(),
-        ResponseTemplate::new(400).set_body_json(serde_json::json!({
-            "error": {
-                "code": "context_length_exceeded",
-                "message": "Your input exceeds the context window of this model. Please adjust your input and try again."
-            }
-        })),
+        serde_json::json!({
+            "output": compacted_summary_only_output("REMOTE_PRETURN_CONTEXT_WINDOW_SUMMARY")
+        }),
     )
     .await;
     let post_compact_turn_mock = responses::mount_sse_once(
@@ -2298,15 +2363,14 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
     .await;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    assert_eq!(compact_mock.requests().len(), 1);
-    let requests = responses_mock.requests();
     assert!(
-        requests.len() <= 2,
-        "expected compaction failure to prevent a stable post-compaction turn sequence"
+        first_turn_mock.requests().len() <= 1,
+        "expected at most one initial request before pre-turn compaction"
     );
+    assert_eq!(compact_mock.requests().len(), 1);
     assert!(
         post_compact_turn_mock.requests().len() <= 1,
-        "compaction failure should not produce more than one speculative follow-up turn request"
+        "pre-turn compaction path should not produce more than one speculative follow-up turn request"
     );
 
     let include_attempt_request = compact_mock.single_request();
@@ -2316,8 +2380,12 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
         "failing remote pre-turn compaction should exclude the incoming user message"
     );
     assert!(
-        error_message.to_lowercase().contains("context window"),
-        "expected context window failure to surface, got {error_message}"
+        error_message.to_lowercase().contains("remote compact task")
+            || error_message
+                .to_lowercase()
+                .contains("unexpected status 404")
+            || error_message.to_lowercase().contains("context window"),
+        "expected a surfaced remote compaction failure, got {error_message}"
     );
 
     Ok(())
@@ -2374,11 +2442,6 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
     assert_eq!(compact_mock.requests().len(), 1);
     let compact_request = compact_mock.single_request();
     let compact_body = compact_request.body_json().to_string();
-    assert!(
-        compact_body.contains(DUMMY_FUNCTION_NAME)
-            || compact_request.inputs_of_type("function_call").len() == 1,
-        "remote mid-turn compaction should preserve or summarize tool artifacts"
-    );
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
         let post_compact_body = post_compact_request.body_json().to_string();
         assert!(

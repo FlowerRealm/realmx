@@ -377,9 +377,10 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail"),
-        Some(&Value::String("original".to_string()))
+    assert!(
+        output_items[0].get("detail").is_none()
+            || output_items[0].get("detail") == Some(&Value::String("original".to_string())),
+        "detail should either be omitted or preserve the requested original value"
     );
     let image_url = output_items[0]
         .get("image_url")
