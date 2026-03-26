@@ -16,6 +16,10 @@ fn preset_names_use_mode_display_names() {
         ModeKind::Default.display_name()
     );
     assert_eq!(
+        execute_preset(CollaborationModesConfig::default()).name,
+        ModeKind::Execute.display_name()
+    );
+    assert_eq!(
         plan_preset(CollaborationModesConfig::default()).reasoning_effort,
         Some(Some(ReasoningEffort::Medium))
     );
@@ -23,6 +27,30 @@ fn preset_names_use_mode_display_names() {
         auto_plan_preset(CollaborationModesConfig::default()).reasoning_effort,
         Some(Some(ReasoningEffort::Medium))
     );
+}
+
+#[test]
+fn execute_preset_uses_mode_display_name() {
+    assert_eq!(
+        execute_preset(CollaborationModesConfig::default()).name,
+        ModeKind::Execute.display_name()
+    );
+}
+
+#[test]
+fn execute_preset_includes_execute_instructions() {
+    let instructions = execute_preset(CollaborationModesConfig::default())
+        .developer_instructions
+        .expect("execute preset should include instructions")
+        .expect("execute instructions should be set");
+
+    assert!(instructions.contains("accepted active plan is absolute truth during Execute mode"));
+    assert!(instructions.contains("Do not review the plan in Execute mode"));
+    assert!(instructions.contains("read provided tasks.csv path before acting"));
+    assert!(instructions.contains("only execute the server-selected row"));
+    assert!(instructions.contains("Record plan-external work only in `update_plan.explanation`"));
+    assert!(instructions.contains("update it to in_progress"));
+    assert!(instructions.contains("update it to completed"));
 }
 
 #[test]
@@ -121,6 +149,7 @@ fn builtin_presets_keep_auto_plan_for_backward_compatibility() {
             Some(ModeKind::Plan),
             Some(ModeKind::AutoPlan),
             Some(ModeKind::Default),
+            Some(ModeKind::Execute),
         ]
     );
 }

@@ -8,6 +8,8 @@ const COLLABORATION_MODE_AUTO_PLAN: &str =
     include_str!("../../templates/collaboration_mode/auto_plan.md");
 const COLLABORATION_MODE_DEFAULT: &str =
     include_str!("../../templates/collaboration_mode/default.md");
+const COLLABORATION_MODE_EXECUTE: &str =
+    include_str!("../../templates/collaboration_mode/execute.md");
 const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
 const PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER: &str =
     "{{PLAN_PREPARATORY_MUTATIONS_GUIDANCE}}";
@@ -36,6 +38,7 @@ pub fn builtin_collaboration_mode_presets(
         plan_preset(collaboration_modes_config),
         auto_plan_preset(collaboration_modes_config),
         default_preset(collaboration_modes_config),
+        execute_preset(collaboration_modes_config),
     ]
 }
 
@@ -72,6 +75,16 @@ fn default_preset(collaboration_modes_config: CollaborationModesConfig) -> Colla
         model: None,
         reasoning_effort: None,
         developer_instructions: Some(Some(default_mode_instructions(collaboration_modes_config))),
+    }
+}
+
+fn execute_preset(_collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
+    CollaborationModeMask {
+        name: ModeKind::Execute.display_name().to_string(),
+        mode: Some(ModeKind::Execute),
+        model: None,
+        reasoning_effort: None,
+        developer_instructions: Some(Some(COLLABORATION_MODE_EXECUTE.to_string())),
     }
 }
 

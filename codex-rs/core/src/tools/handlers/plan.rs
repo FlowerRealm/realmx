@@ -2,6 +2,7 @@ use crate::client_common::tools::ResponsesApiTool;
 use crate::client_common::tools::ToolSpec;
 use crate::codex::Session;
 use crate::codex::TurnContext;
+use crate::execute_plan_guard::validate_execute_mode_plan_update;
 use crate::features::Feature;
 use crate::function_tool::FunctionCallError;
 use crate::plan_csv::canonical_plan_csv_from_update_plan_args;
@@ -14,6 +15,7 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::spec::JsonSchema;
 use async_trait::async_trait;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
@@ -164,6 +166,12 @@ pub(crate) async fn handle_update_plan(
         ));
     }
     let mut args = parse_update_plan_arguments(&arguments)?;
+    if try_handle_execute_mode_active_plan_update(session, turn_context, &mut args).await? {
+        session
+            .send_event(turn_context, EventMsg::PlanUpdate(args))
+            .await;
+        return Ok("Plan updated".to_string());
+    }
     if try_sync_active_thread_plan(session, turn_context, &mut args, call_id.as_str()).await? {
         session
             .send_event(turn_context, EventMsg::PlanUpdate(args))
@@ -174,6 +182,43 @@ pub(crate) async fn handle_update_plan(
         .send_event(turn_context, EventMsg::PlanUpdate(args))
         .await;
     Ok("Plan updated".to_string())
+}
+
+async fn try_handle_execute_mode_active_plan_update(
+    session: &Session,
+    turn_context: &TurnContext,
+    args: &mut UpdatePlanArgs,
+) -> Result<bool, FunctionCallError> {
+    if turn_context.collaboration_mode.mode != ModeKind::Execute {
+        return Ok(false);
+    }
+    let Some(state_db) = session.state_db() else {
+        return Ok(false);
+    };
+
+    let thread_id = session.conversation_id.to_string();
+    let Some(active_plan) = state_db
+        .get_active_thread_plan(thread_id.as_str())
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("failed to load active thread plan: {err}"))
+        })?
+    else {
+        return Ok(false);
+    };
+
+    validate_execute_mode_plan_update(active_plan.items.as_slice(), args)
+        .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+
+    update_existing_active_thread_plan(
+        session,
+        turn_context,
+        args,
+        thread_id.as_str(),
+        active_plan,
+    )
+    .await?;
+    Ok(true)
 }
 
 fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, FunctionCallError> {

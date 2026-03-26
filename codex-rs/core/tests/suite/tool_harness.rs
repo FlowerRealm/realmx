@@ -6,6 +6,9 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use codex_core::features::Feature;
 use codex_core::plan_workspace::PlanWorkspace;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -815,6 +818,190 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
         );
     }
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_mode_update_plan_rejects_pending_to_completed() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    let mut builder = test_codex().with_home(home).with_config(|config| {
+        let _ = config.features.enable(Feature::PlanProgressCsv);
+    });
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let db = codex.state_db().expect("state db");
+    db.replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+        id: "snapshot-1".to_string(),
+        thread_id: session_configured.session_id.to_string(),
+        source_turn_id: "turn-1".to_string(),
+        source_item_id: "item-1".to_string(),
+        raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-1,pending,Guard execute,codex-rs/core/src/execute_plan_guard.rs,gate execute updates,,,,
+plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject invalid execute mutations,,,plan-1,
+"
+        .to_string(),
+    })
+    .await?;
+
+    let call_id = "execute-plan-bad-transition";
+    let plan_args = json!({
+        "explanation": "skip start",
+        "plan": [
+            {"id": "plan-1", "step": "Guard execute", "status": "completed"}
+        ],
+    })
+    .to_string();
+
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "update_plan", &plan_args),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let second_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "execute the plan".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_configured.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: Some(CollaborationMode {
+                mode: ModeKind::Execute,
+                settings: Settings {
+                    model: session_configured.model.clone(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            }),
+            personality: None,
+        })
+        .await?;
+
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let req = second_mock.single_request();
+    let (output, _success_flag) = call_output(&req, call_id);
+    assert!(output.contains("pending rows must first transition to in_progress"));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_mode_update_plan_allows_current_row_to_start() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    let mut builder = test_codex().with_home(home).with_config(|config| {
+        let _ = config.features.enable(Feature::PlanProgressCsv);
+    });
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let db = codex.state_db().expect("state db");
+    db.replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+        id: "snapshot-1".to_string(),
+        thread_id: session_configured.session_id.to_string(),
+        source_turn_id: "turn-1".to_string(),
+        source_item_id: "item-1".to_string(),
+        raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-1,pending,Guard execute,codex-rs/core/src/execute_plan_guard.rs,gate execute updates,,,,
+plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject invalid execute mutations,,,plan-1,
+"
+        .to_string(),
+    })
+    .await?;
+
+    let call_id = "execute-plan-start-transition";
+    let plan_args = json!({
+        "explanation": "start current row",
+        "plan": [
+            {"id": "plan-1", "step": "Guard execute", "status": "in_progress"}
+        ],
+    })
+    .to_string();
+
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "update_plan", &plan_args),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "execute the plan".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: session_configured.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: Some(CollaborationMode {
+                mode: ModeKind::Execute,
+                settings: Settings {
+                    model: session_configured.model.clone(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            }),
+            personality: None,
+        })
+        .await?;
+
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let plan = db
+        .get_active_thread_plan(session_configured.session_id.to_string().as_str())
+        .await?
+        .expect("active plan should exist");
+    assert_eq!(plan.items[0].status, ThreadPlanItemStatus::InProgress);
     Ok(())
 }
 

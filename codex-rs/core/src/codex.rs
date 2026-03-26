@@ -3581,6 +3581,32 @@ impl Session {
         {
             developer_sections.push(collab_instructions.into_text());
         }
+        if collaboration_mode.mode == ModeKind::Execute
+            && let Some(state_db) = self.state_db()
+        {
+            let thread_id = self.conversation_id.to_string();
+            if let Some(active_plan) = state_db
+                .get_active_thread_plan(thread_id.as_str())
+                .await
+                .ok()
+                .flatten()
+            {
+                let codex_home = self.codex_home().await;
+                let workspace = PlanWorkspace::new(
+                    codex_home.as_path(),
+                    turn_context.cwd.as_path(),
+                    thread_id.as_str(),
+                );
+                if let Ok(execute_instructions) =
+                    crate::execute_plan_guard::build_execute_plan_guard_instructions(
+                        workspace.root(),
+                        active_plan.items.as_slice(),
+                    )
+                {
+                    developer_sections.push(execute_instructions);
+                }
+            }
+        }
         if let Some(realtime_update) = crate::context_manager::updates::build_initial_realtime_item(
             reference_context_item.as_ref(),
             previous_turn_settings.as_ref(),

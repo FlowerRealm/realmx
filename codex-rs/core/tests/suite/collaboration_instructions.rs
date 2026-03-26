@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::sync::Arc;
+
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
@@ -7,6 +9,7 @@ use codex_protocol::protocol::COLLABORATION_MODE_OPEN_TAG;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use codex_state::ThreadPlanSnapshotCreateParams;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
@@ -17,6 +20,7 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
+use tempfile::TempDir;
 
 fn collab_mode_with_mode_and_instructions(
     mode: ModeKind,
@@ -980,6 +984,79 @@ async fn clearing_collaboration_instructions_removes_stale_prompt() -> Result<()
     let collab_text = collab_xml(collab_text);
     assert_eq!(count_messages_containing(&dev_texts, &collab_text), 0);
     assert_eq!(count_collaboration_mode_messages(&dev_texts), 0);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_mode_injects_plan_paths_and_current_row_only() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let req = mount_sse_once(
+        &server,
+        sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+    )
+    .await;
+
+    let home = Arc::new(TempDir::new()?);
+    let test = test_codex().with_home(home).build(&server).await?;
+    let db = test.codex.state_db().expect("state db");
+    db.replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+        id: "snapshot-1".to_string(),
+        thread_id: test.session_configured.session_id.to_string(),
+        source_turn_id: "turn-1".to_string(),
+        source_item_id: "item-1".to_string(),
+        raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Guard execute,codex-rs/core/src/execute_plan_guard.rs,add execute plan guard,,,,guard selects current row
+plan-02,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,gate update_plan,,,plan-01,handler rejects invalid updates
+"
+        .to_string(),
+    })
+    .await?;
+
+    test.codex
+        .submit(Op::UserTurn {
+            items: vec![UserInput::Text {
+                text: "run execute mode".into(),
+                text_elements: Vec::new(),
+            }],
+            cwd: test.config.cwd.clone(),
+            approval_policy: test.config.permissions.approval_policy.value(),
+            sandbox_policy: test.config.permissions.sandbox_policy.get().clone(),
+            model: test.session_configured.model.clone(),
+            effort: None,
+            summary: Some(
+                test.config
+                    .model_reasoning_summary
+                    .unwrap_or(codex_protocol::config_types::ReasoningSummary::Auto),
+            ),
+            service_tier: None,
+            collaboration_mode: Some(CollaborationMode {
+                mode: ModeKind::Execute,
+                settings: Settings {
+                    model: test.session_configured.model.clone(),
+                    reasoning_effort: None,
+                    developer_instructions: None,
+                },
+            }),
+            final_output_json_schema: None,
+            personality: None,
+        })
+        .await?;
+    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    let input = req.single_request().input();
+    let dev_texts = developer_texts(&input);
+    let joined = dev_texts.join("\n");
+    assert!(joined.contains("tasks.csv"));
+    assert!(joined.contains("tasks.md"));
+    assert!(joined.contains("plan-01"));
+    assert!(joined.contains("Guard execute"));
+    assert!(joined.contains("codex-rs/core/src/execute_plan_guard.rs"));
+    assert!(!joined.contains("plan-02,pending,Wire handler"));
+    assert!(!joined.contains("handler rejects invalid updates"));
 
     Ok(())
 }
