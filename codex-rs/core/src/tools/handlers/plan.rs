@@ -207,6 +207,12 @@ async fn try_handle_execute_mode_active_plan_update(
         return Ok(false);
     };
 
+    if session.enabled(Feature::ExecutePlanSubagentDispatch) {
+        return Err(FunctionCallError::RespondToModel(
+            "Execute mode active plan rows are managed by execute_active_plan_with_subagents while automatic dispatch is enabled".to_string(),
+        ));
+    }
+
     validate_execute_mode_plan_update(active_plan.items.as_slice(), args)
         .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
 

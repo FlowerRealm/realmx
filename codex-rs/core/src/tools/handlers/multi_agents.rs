@@ -116,7 +116,7 @@ fn agent_id(id: &str) -> Result<ThreadId, FunctionCallError> {
         .map_err(|e| FunctionCallError::RespondToModel(format!("invalid agent id {id}: {e:?}")))
 }
 
-fn build_wait_agent_statuses(
+pub(crate) fn build_wait_agent_statuses(
     statuses: &HashMap<ThreadId, AgentStatus>,
     receiver_agents: &[CollabAgentRef],
 ) -> Vec<CollabAgentStatusEntry> {
@@ -177,7 +177,7 @@ fn collab_agent_error(agent_id: ThreadId, err: CodexErr) -> FunctionCallError {
     }
 }
 
-fn thread_spawn_source(
+pub(crate) fn thread_spawn_source(
     parent_thread_id: ThreadId,
     depth: i32,
     agent_role: Option<&str>,
@@ -286,7 +286,7 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
 ///
 /// These values are chosen by the live turn rather than persisted config, so leaving them stale
 /// can make a child agent disagree with its parent about approval policy, cwd, or sandboxing.
-fn apply_spawn_agent_runtime_overrides(
+pub(crate) fn apply_spawn_agent_runtime_overrides(
     config: &mut Config,
     turn: &TurnContext,
 ) -> Result<(), FunctionCallError> {

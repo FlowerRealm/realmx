@@ -153,6 +153,49 @@ WHERE id = ?
 
         self.get_active_thread_plan(thread_id).await
     }
+
+    pub async fn update_active_thread_plan_item_statuses(
+        &self,
+        thread_id: &str,
+        updates: &[(String, ThreadPlanItemStatus)],
+    ) -> anyhow::Result<Option<ActiveThreadPlan>> {
+        if updates.is_empty() {
+            return self.get_active_thread_plan(thread_id).await;
+        }
+
+        let Some(active_plan) = self.get_active_thread_plan(thread_id).await? else {
+            return Ok(None);
+        };
+
+        let mut rows = active_plan
+            .items
+            .iter()
+            .map(thread_plan_item_to_create_params)
+            .collect::<Vec<_>>();
+        for (row_id, status) in updates {
+            let Some(row) = rows.iter_mut().find(|item| item.row_id == *row_id) else {
+                return Err(anyhow::anyhow!(
+                    "active thread plan row not found: {row_id}"
+                ));
+            };
+            row.status = *status;
+        }
+        let raw_csv = render_thread_plan_csv(rows.as_slice())?;
+
+        sqlx::query(
+            r#"
+UPDATE thread_plan_snapshots
+SET raw_csv = ?
+WHERE id = ?
+            "#,
+        )
+        .bind(raw_csv.as_str())
+        .bind(active_plan.snapshot.id.as_str())
+        .execute(self.pool.as_ref())
+        .await?;
+
+        self.get_active_thread_plan(thread_id).await
+    }
 }
 
 fn rows_to_thread_plan_items(
@@ -258,6 +301,47 @@ plan-02,pending,Render plan,codex-rs/tui/src/history_cell.rs,,active plan rows,h
                 .raw_csv
                 .contains("plan-02,completed,Render plan")
         );
+    }
+
+    #[tokio::test]
+    async fn batch_updates_active_thread_plan_item_statuses() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-batch";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-batch".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-1".to_string(),
+            source_item_id: "item-1".to_string(),
+            raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,One,codex-rs/core/src/codex.rs,,,,,
+plan-02,pending,Two,codex-rs/tui/src/app.rs,,,,,
+"
+            .to_string(),
+        };
+
+        runtime
+            .replace_active_thread_plan(&snapshot)
+            .await
+            .expect("create active plan");
+
+        let updated = runtime
+            .update_active_thread_plan_item_statuses(
+                thread_id,
+                &[
+                    ("plan-01".to_string(), ThreadPlanItemStatus::InProgress),
+                    ("plan-02".to_string(), ThreadPlanItemStatus::InProgress),
+                ],
+            )
+            .await
+            .expect("update statuses")
+            .expect("active plan should exist");
+        assert_eq!(updated.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(updated.items[1].status, ThreadPlanItemStatus::InProgress);
     }
 
     #[tokio::test]

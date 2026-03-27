@@ -16,6 +16,23 @@ pub const THREAD_PLAN_CSV_HEADERS: [&str; 9] = [
 ];
 
 pub fn parse_thread_plan_csv(raw_csv: &str) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
+    parse_thread_plan_csv_with_options(
+        raw_csv,
+        ThreadPlanCsvParseOptions {
+            allow_multiple_in_progress: true,
+        },
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ThreadPlanCsvParseOptions {
+    allow_multiple_in_progress: bool,
+}
+
+fn parse_thread_plan_csv_with_options(
+    raw_csv: &str,
+    options: ThreadPlanCsvParseOptions,
+) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(false)
@@ -88,7 +105,7 @@ pub fn parse_thread_plan_csv(raw_csv: &str) -> anyhow::Result<Vec<ThreadPlanItem
             "plan csv block must include at least one row"
         ));
     }
-    if in_progress_count > 1 {
+    if !options.allow_multiple_in_progress && in_progress_count > 1 {
         return Err(anyhow::anyhow!(
             "plan csv may include at most one in_progress row"
         ));
@@ -129,7 +146,12 @@ pub fn canonicalize_thread_plan_csv(raw_csv: &str) -> anyhow::Result<String> {
 }
 
 pub fn canonicalize_thread_plan_csv_for_authoring(raw_csv: &str) -> anyhow::Result<String> {
-    let rows = parse_thread_plan_csv(raw_csv)?;
+    let rows = parse_thread_plan_csv_with_options(
+        raw_csv,
+        ThreadPlanCsvParseOptions {
+            allow_multiple_in_progress: false,
+        },
+    )?;
     validate_thread_plan_rows_for_authoring(rows.as_slice())?;
     render_thread_plan_csv(rows.as_slice())
 }
@@ -223,6 +245,7 @@ mod tests {
     use super::parse_thread_plan_csv;
     use super::render_thread_plan_csv;
     use super::validate_thread_plan_rows_for_authoring;
+    use crate::ThreadPlanItemStatus;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -253,6 +276,36 @@ plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows
         assert_eq!(
             err.to_string(),
             "plan csv headers must be id,status,step,path,details,inputs,outputs,depends_on,acceptance; found id,status,step,path,details"
+        );
+    }
+
+    #[test]
+    fn runtime_parser_allows_multiple_in_progress_rows() {
+        let raw_csv = "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Touch core,codex-rs/core/src/codex.rs,,,,,
+plan-02,in_progress,Touch tui,codex-rs/tui/src/app.rs,,,,,
+";
+
+        let rows = parse_thread_plan_csv(raw_csv).expect("runtime parser should allow rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(rows[1].status, ThreadPlanItemStatus::InProgress);
+    }
+
+    #[test]
+    fn authoring_parser_rejects_multiple_in_progress_rows() {
+        let raw_csv = "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Touch core,codex-rs/core/src/codex.rs,,,,,
+plan-02,in_progress,Touch tui,codex-rs/tui/src/app.rs,,,,,
+";
+
+        let err = canonicalize_thread_plan_csv_for_authoring(raw_csv)
+            .expect_err("authoring parser should reject multiple in_progress rows");
+        assert_eq!(
+            err.to_string(),
+            "plan csv may include at most one in_progress row"
         );
     }
 

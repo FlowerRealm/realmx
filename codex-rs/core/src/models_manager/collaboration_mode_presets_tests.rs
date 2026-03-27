@@ -49,8 +49,8 @@ fn execute_preset_includes_execute_instructions() {
     assert!(instructions.contains("read provided tasks.csv path before acting"));
     assert!(instructions.contains("only execute the server-selected row"));
     assert!(instructions.contains("Record plan-external work only in `update_plan.explanation`"));
-    assert!(instructions.contains("update it to in_progress"));
-    assert!(instructions.contains("update it to completed"));
+    assert!(instructions.contains("automatic plan-dispatch tool"));
+    assert!(instructions.contains("instead of manually updating plan rows"));
 }
 
 #[test]

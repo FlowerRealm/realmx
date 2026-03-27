@@ -900,6 +900,7 @@ impl TurnContext {
             sandbox_policy: self.sandbox_policy.get(),
             windows_sandbox_level: self.windows_sandbox_level,
             mode: Some(self.collaboration_mode.mode),
+            collaboration_mode: Some(self.collaboration_mode.clone()),
         })
         .with_unified_exec_shell_mode(self.tools_config.unified_exec_shell_mode.clone())
         .with_web_search_config(self.tools_config.web_search_config.clone())
@@ -1348,6 +1349,7 @@ impl Session {
             sandbox_policy: session_configuration.sandbox_policy.get(),
             windows_sandbox_level: session_configuration.windows_sandbox_level,
             mode: Some(session_configuration.collaboration_mode.mode),
+            collaboration_mode: Some(session_configuration.collaboration_mode.clone()),
         })
         .with_unified_exec_shell_mode_for_session(
             user_shell,
@@ -3599,12 +3601,19 @@ impl Session {
                     turn_context.cwd.as_path(),
                     thread_id.as_str(),
                 );
-                if let Ok(execute_instructions) =
-                    crate::execute_plan_guard::build_execute_plan_guard_instructions(
-                        workspace.root(),
-                        active_plan.items.as_slice(),
-                    )
-                {
+                let execute_instructions =
+                    if self.features.enabled(Feature::ExecutePlanSubagentDispatch) {
+                        crate::execute_plan_dispatch::build_execute_dispatch_guard_instructions(
+                            &workspace,
+                            &active_plan,
+                        )
+                    } else {
+                        crate::execute_plan_guard::build_execute_plan_guard_instructions(
+                            workspace.root(),
+                            active_plan.items.as_slice(),
+                        )
+                    };
+                if let Ok(execute_instructions) = execute_instructions {
                     developer_sections.push(execute_instructions);
                 }
             }
@@ -5427,6 +5436,15 @@ async fn spawn_review_thread(
         sandbox_policy: parent_turn_context.sandbox_policy.get(),
         windows_sandbox_level: parent_turn_context.windows_sandbox_level,
         mode: Some(ModeKind::Default),
+        collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+            mode: ModeKind::Default,
+            plan_phase: None,
+            settings: codex_protocol::config_types::Settings {
+                model: model.clone(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        }),
     })
     .with_unified_exec_shell_mode_for_session(
         sess.services.user_shell.as_ref(),

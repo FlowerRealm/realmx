@@ -171,6 +171,8 @@ pub enum Feature {
     PlanModeSubagentReview,
     /// Store default-mode plan progress as canonical CSV-backed active plans.
     PlanProgressCsv,
+    /// Execute accepted active plans by dispatching dependency-ready rows to worker subagents.
+    ExecutePlanSubagentDispatch,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
@@ -806,6 +808,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::PlanProgressCsv,
         key: "plan_progress_csv",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ExecutePlanSubagentDispatch,
+        key: "execute_plan_subagent_dispatch",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

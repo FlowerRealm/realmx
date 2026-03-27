@@ -12,6 +12,6 @@ You are in the execution phase of Plan mode. If the current thread has an accept
 
 ## Progress updates
 
-- When you start the current row, update it to in_progress.
-- When you finish the current row, update it to completed.
-- Do not update any other row.
+- Follow any server-provided execute-specific instructions for how progress is recorded.
+- If the server provides an automatic plan-dispatch tool, use that tool instead of manually updating plan rows.
+- Otherwise, only update the server-selected row and do not update any other row.

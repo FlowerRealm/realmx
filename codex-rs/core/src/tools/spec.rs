@@ -279,6 +279,7 @@ pub(crate) struct ToolsConfig {
     pub request_user_input: bool,
     pub default_mode_request_user_input: bool,
     pub plan_workspace_enabled: bool,
+    pub execute_plan_dispatch_enabled: bool,
     pub experimental_supported_tools: Vec<String>,
     pub agent_jobs_tools: bool,
     pub agent_jobs_worker_tools: bool,
@@ -293,6 +294,7 @@ pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) sandbox_policy: &'a SandboxPolicy,
     pub(crate) windows_sandbox_level: WindowsSandboxLevel,
     pub(crate) mode: Option<codex_protocol::config_types::ModeKind>,
+    pub(crate) collaboration_mode: Option<codex_protocol::config_types::CollaborationMode>,
 }
 
 fn unified_exec_allowed_in_environment(
@@ -319,6 +321,7 @@ impl ToolsConfig {
             sandbox_policy,
             windows_sandbox_level,
             mode,
+            collaboration_mode,
         } = params;
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
         let include_code_mode = features.enabled(Feature::CodeMode);
@@ -331,8 +334,32 @@ impl ToolsConfig {
         let include_request_user_input = !matches!(session_source, SessionSource::SubAgent(_));
         let include_default_mode_request_user_input =
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
+        let normalized_collaboration_mode = collaboration_mode
+            .clone()
+            .map(|mode| mode.normalized())
+            .or_else(|| {
+                mode.map(|mode| {
+                    codex_protocol::config_types::CollaborationMode {
+                        mode,
+                        plan_phase: None,
+                        settings: codex_protocol::config_types::Settings {
+                            model: String::new(),
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }
+                    .normalized()
+                })
+            });
         let plan_workspace_enabled = features.enabled(Feature::PlanModeWorkspace)
-            && mode.is_some_and(codex_protocol::config_types::ModeKind::is_plan_output_mode)
+            && normalized_collaboration_mode
+                .as_ref()
+                .is_some_and(codex_protocol::config_types::CollaborationMode::is_plan_output_mode)
+            && !matches!(session_source, SessionSource::SubAgent(_));
+        let execute_plan_dispatch_enabled = features.enabled(Feature::ExecutePlanSubagentDispatch)
+            && normalized_collaboration_mode.as_ref().is_some_and(
+                codex_protocol::config_types::CollaborationMode::is_plan_execution_mode,
+            )
             && !matches!(session_source, SessionSource::SubAgent(_));
         let include_search_tool = model_info.supports_search_tool;
         let include_tool_suggest = include_search_tool && features.enabled(Feature::ToolSuggest);
@@ -417,6 +444,7 @@ impl ToolsConfig {
             request_user_input: include_request_user_input,
             default_mode_request_user_input: include_default_mode_request_user_input,
             plan_workspace_enabled,
+            execute_plan_dispatch_enabled,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
             agent_jobs_tools: include_agent_jobs,
             agent_jobs_worker_tools,
@@ -1544,6 +1572,43 @@ fn create_close_agent_tool() -> ToolSpec {
     })
 }
 
+fn create_execute_active_plan_with_subagents_tool() -> ToolSpec {
+    ToolSpec::Function(ResponsesApiTool {
+        name: "execute_active_plan_with_subagents".to_string(),
+        description: "Dispatch dependency-ready rows from the accepted active plan to worker subagents and wait for the current batch to finish.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties: BTreeMap::new(),
+            required: None,
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(json!({
+            "type": "object",
+            "properties": {
+                "completed_rows": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "failed_rows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "row_id": { "type": "string" },
+                            "message": { "type": "string" }
+                        },
+                        "required": ["row_id", "message"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["completed_rows", "failed_rows"],
+            "additionalProperties": false
+        })),
+    })
+}
+
 fn create_test_sync_tool() -> ToolSpec {
     let barrier_properties = BTreeMap::from([
         (
@@ -2522,6 +2587,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CodeModeExecuteHandler;
     use crate::tools::handlers::CodeModeWaitHandler;
     use crate::tools::handlers::DynamicToolHandler;
+    use crate::tools::handlers::ExecutePlanDispatchHandler;
     use crate::tools::handlers::GrepFilesHandler;
     use crate::tools::handlers::JsReplHandler;
     use crate::tools::handlers::JsReplResetHandler;
@@ -2705,6 +2771,19 @@ pub(crate) fn build_specs_with_discoverable_tools(
         config.code_mode_enabled,
     );
     builder.register_handler("update_plan", plan_handler);
+
+    if config.execute_plan_dispatch_enabled {
+        push_tool_spec(
+            &mut builder,
+            create_execute_active_plan_with_subagents_tool(),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        builder.register_handler(
+            "execute_active_plan_with_subagents",
+            Arc::new(ExecutePlanDispatchHandler),
+        );
+    }
 
     if config.plan_workspace_enabled {
         push_tool_spec(

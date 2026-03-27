@@ -8,7 +8,10 @@ use crate::tools::ToolRouter;
 use crate::tools::registry::ConfiguredToolSpec;
 use crate::tools::router::ToolRouterParams;
 use codex_app_server_protocol::AppInfo;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::PlanModePhase;
+use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelsResponse;
@@ -406,6 +409,7 @@ fn model_provided_unified_exec_is_blocked_for_windows_sandboxed_policies() {
         sandbox_policy: &SandboxPolicy::new_workspace_write_policy(),
         windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
         mode: None,
+        collaboration_mode: None,
     });
 
     let expected_shell_type = if cfg!(target_os = "windows") {
@@ -431,6 +435,7 @@ fn test_full_toolset_specs_for_gpt5_codex_unified_exec_web_search() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&config, None, None, &[]).build();
 
@@ -511,6 +516,7 @@ fn test_build_specs_collab_tools_enabled() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_contains_tool_names(
@@ -537,6 +543,7 @@ fn test_build_specs_enable_fanout_enables_agent_jobs_and_collab_tools() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_contains_tool_names(
@@ -568,6 +575,7 @@ fn view_image_tool_omits_detail_without_original_detail_feature() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     let view_image = find_tool(&tools, VIEW_IMAGE_TOOL_NAME);
@@ -598,6 +606,7 @@ fn view_image_tool_includes_detail_with_original_detail_feature() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     let view_image = find_tool(&tools, VIEW_IMAGE_TOOL_NAME);
@@ -636,6 +645,7 @@ fn test_build_specs_artifact_tool_enabled() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_contains_tool_names(&tools, &["artifacts"]);
@@ -661,6 +671,7 @@ fn test_build_specs_agent_job_worker_tools_enabled() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_contains_tool_names(
@@ -693,6 +704,7 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     let request_user_input_tool = find_tool(&tools, "request_user_input");
@@ -712,6 +724,7 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     let request_user_input_tool = find_tool(&tools, "request_user_input");
@@ -740,6 +753,7 @@ fn request_permissions_requires_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_lacks_tool_name(&tools, "request_permissions");
@@ -756,6 +770,7 @@ fn request_permissions_requires_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     let request_permissions_tool = find_tool(&tools, "request_permissions");
@@ -781,6 +796,7 @@ fn request_permissions_tool_is_independent_from_additional_permissions() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -803,6 +819,7 @@ fn get_memory_requires_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert!(
@@ -827,6 +844,7 @@ fn js_repl_requires_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -857,6 +875,7 @@ fn js_repl_enabled_adds_tools() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert_contains_tool_names(&tools, &["js_repl", "js_repl_reset"]);
@@ -884,6 +903,7 @@ fn image_generation_tools_require_feature_and_supported_model() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (default_tools, _) = build_specs(&default_tools_config, None, None, &[]).build();
     assert!(
@@ -902,6 +922,7 @@ fn image_generation_tools_require_feature_and_supported_model() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (supported_tools, _) = build_specs(&supported_tools_config, None, None, &[]).build();
     assert_contains_tool_names(&supported_tools, &["image_generation"]);
@@ -923,6 +944,7 @@ fn image_generation_tools_require_feature_and_supported_model() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
     assert!(
@@ -966,6 +988,7 @@ fn assert_model_tools(
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let router = ToolRouter::from_config(
         &tools_config,
@@ -1001,6 +1024,43 @@ fn model_tools_for_mode(
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode,
+        collaboration_mode: None,
+    });
+    let router = ToolRouter::from_config(
+        &tools_config,
+        ToolRouterParams {
+            mcp_tools: None,
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: &[],
+        },
+    );
+    router
+        .model_visible_specs()
+        .iter()
+        .map(|tool| tool.name().to_string())
+        .collect()
+}
+
+fn model_tools_for_collaboration_mode(
+    model_slug: &str,
+    features: &Features,
+    web_search_mode: Option<WebSearchMode>,
+    collaboration_mode: CollaborationMode,
+) -> Vec<String> {
+    let model_info = model_info_from_models_json(model_slug);
+    let available_models = Vec::new();
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features,
+        web_search_mode,
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        mode: Some(collaboration_mode.mode),
+        collaboration_mode: Some(collaboration_mode),
+        collaboration_mode: None,
     });
     let router = ToolRouter::from_config(
         &tools_config,
@@ -1050,6 +1110,7 @@ fn web_search_mode_cached_sets_external_web_access_false() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1082,6 +1143,7 @@ fn web_search_mode_live_sets_external_web_access_true() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1127,6 +1189,7 @@ fn web_search_config_is_forwarded_to_tool_spec() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     })
     .with_web_search_config(Some(web_search_config.clone()));
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
@@ -1166,6 +1229,7 @@ fn web_search_tool_type_text_and_image_sets_search_content_types() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1202,6 +1266,7 @@ fn mcp_resource_tools_are_hidden_without_mcp_servers() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1229,6 +1294,7 @@ fn mcp_resource_tools_are_included_when_mcp_servers_are_present() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, Some(HashMap::new()), None, &[]).build();
 
@@ -1306,6 +1372,66 @@ fn plan_workspace_tools_only_appear_in_plan_modes() {
         auto_plan_tools
             .iter()
             .any(|name| name == "plan_workspace_write")
+    );
+}
+
+#[test]
+fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
+    let mut features = Features::with_defaults();
+    features.enable(Feature::ExecutePlanSubagentDispatch);
+
+    let default_tools =
+        model_tools_for_mode("gpt-5-codex", &features, Some(WebSearchMode::Cached), None);
+    assert!(
+        !default_tools
+            .iter()
+            .any(|name| name == "execute_active_plan_with_subagents")
+    );
+
+    let execute_tools = model_tools_for_collaboration_mode(
+        "gpt-5-codex",
+        &features,
+        Some(WebSearchMode::Cached),
+        CollaborationMode {
+            mode: ModeKind::Plan,
+            plan_phase: Some(PlanModePhase::Executing),
+            settings: Settings {
+                model: "gpt-5-codex".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        },
+    );
+    assert!(
+        execute_tools
+            .iter()
+            .any(|name| name == "execute_active_plan_with_subagents")
+    );
+}
+
+#[test]
+fn execute_plan_dispatch_tool_does_not_appear_in_planning_mode() {
+    let mut features = Features::with_defaults();
+    features.enable(Feature::ExecutePlanSubagentDispatch);
+
+    let plan_tools = model_tools_for_collaboration_mode(
+        "gpt-5-codex",
+        &features,
+        Some(WebSearchMode::Cached),
+        CollaborationMode {
+            mode: ModeKind::Plan,
+            plan_phase: Some(PlanModePhase::Planning),
+            settings: Settings {
+                model: "gpt-5-codex".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        },
+    );
+    assert!(
+        !plan_tools
+            .iter()
+            .any(|name| name == "execute_active_plan_with_subagents")
     );
 }
 
@@ -1514,6 +1640,7 @@ fn test_build_specs_default_shell_present() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, Some(HashMap::new()), None, &[]).build();
 
@@ -1543,6 +1670,7 @@ fn shell_zsh_fork_prefers_shell_command_over_unified_exec() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let user_shell = Shell {
         shell_type: ShellType::Zsh,
@@ -1606,6 +1734,7 @@ fn test_parallel_support_flags() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1637,6 +1766,7 @@ fn test_test_model_info_includes_sync_tool() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -1674,6 +1804,7 @@ fn test_build_specs_mcp_tools_converted() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(
         &tools_config,
@@ -1768,6 +1899,7 @@ fn test_build_specs_mcp_tools_sorted_by_name() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     // Intentionally construct a map with keys that would sort alphabetically.
@@ -1817,6 +1949,7 @@ fn search_tool_description_lists_each_codex_apps_connector_once() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -1960,6 +2093,7 @@ fn search_tool_requires_model_capability_only() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, app_tools.clone(), &[]).build();
     assert_lacks_tool_name(&tools, TOOL_SEARCH_TOOL_NAME);
@@ -1973,6 +2107,7 @@ fn search_tool_requires_model_capability_only() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(&tools_config, None, app_tools, &[]).build();
     assert_contains_tool_names(&tools, &[TOOL_SEARCH_TOOL_NAME]);
@@ -1993,6 +2128,7 @@ fn tool_suggest_is_not_registered_without_feature_flag() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs_with_discoverable_tools(
         &tools_config,
@@ -2029,6 +2165,7 @@ fn search_tool_description_handles_no_enabled_apps() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(&tools_config, None, Some(HashMap::new()), &[]).build();
@@ -2056,6 +2193,7 @@ fn search_tool_description_falls_back_to_connector_name_without_description() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2105,6 +2243,7 @@ fn search_tool_registers_namespaced_app_tool_aliases() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (_, registry) = build_specs(
@@ -2172,6 +2311,7 @@ fn tool_suggest_description_lists_discoverable_tools() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let discoverable_tools = vec![
@@ -2253,6 +2393,7 @@ fn test_mcp_tool_property_missing_type_defaults_to_string() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2314,6 +2455,7 @@ fn test_mcp_tool_integer_normalized_to_number() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2372,6 +2514,7 @@ fn test_mcp_tool_array_without_items_gets_default_string_items() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2432,6 +2575,7 @@ fn test_mcp_tool_anyof_defaults_to_string() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2630,6 +2774,7 @@ fn test_get_openai_tools_mcp_tools_with_additional_properties_schema() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
     let (tools, _) = build_specs(
         &tools_config,
@@ -2742,6 +2887,7 @@ fn code_mode_augments_builtin_tool_descriptions_with_typed_sample() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
@@ -2774,6 +2920,7 @@ fn code_mode_augments_mcp_tool_descriptions_with_namespaced_sample() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(
@@ -2841,6 +2988,7 @@ fn code_mode_only_exec_description_includes_full_nested_tool_details() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
@@ -2874,6 +3022,7 @@ fn code_mode_exec_description_omits_nested_tool_details_when_not_code_mode_only(
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: None,
+        collaboration_mode: None,
     });
 
     let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
