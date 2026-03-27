@@ -163,16 +163,9 @@ pub enum Feature {
     Steer,
     /// Allow request_user_input in Default collaboration mode.
     DefaultModeRequestUserInput,
-    /// Allow Plan mode to perform preparatory mutations outside the target repo.
-    PlanModePreparatoryMutations,
-    /// Enable file-first plan workspace persistence and tools in plan modes.
-    PlanModeWorkspace,
-    /// Run a plan review pass before accepting a final plan-mode plan.
-    PlanModeSubagentReview,
-    /// Store default-mode plan progress as canonical CSV-backed active plans.
-    PlanProgressCsv,
-    /// Execute accepted active plans by dispatching dependency-ready rows to worker subagents.
-    ExecutePlanSubagentDispatch,
+    /// Enable the file-first Plan workflow, including workspace-backed planning,
+    /// structured active-plan persistence, execute-phase guards, and hidden plan review.
+    PlanWorkflow,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
     /// Enable collaboration modes (Plan, Default).
@@ -788,32 +781,8 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::PlanModePreparatoryMutations,
-        key: "plan_mode_preparatory_mutations",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::PlanModeWorkspace,
-        key: "plan_mode_workspace",
-        stage: Stage::UnderDevelopment,
-        default_enabled: true,
-    },
-    FeatureSpec {
-        id: Feature::PlanModeSubagentReview,
-        key: "plan_mode_subagent_review",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::PlanProgressCsv,
-        key: "plan_progress_csv",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::ExecutePlanSubagentDispatch,
-        key: "execute_plan_subagent_dispatch",
+        id: Feature::PlanWorkflow,
+        key: "plan_workflow",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

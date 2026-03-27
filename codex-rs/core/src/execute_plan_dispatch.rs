@@ -120,7 +120,7 @@ pub(crate) async fn execute_active_plan_with_subagents(
     session: &Arc<Session>,
     turn: &Arc<TurnContext>,
 ) -> Result<ExecuteDispatchSummary, FunctionCallError> {
-    if !session.enabled(Feature::ExecutePlanSubagentDispatch) {
+    if !session.enabled(Feature::PlanWorkflow) {
         return Err(FunctionCallError::RespondToModel(
             "execute active plan dispatch feature is disabled".to_string(),
         ));

@@ -118,12 +118,9 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
         return Ok(());
     }
 
-    if !session
-        .features()
-        .enabled(Feature::PlanModePreparatoryMutations)
-    {
+    if !session.features().enabled(Feature::PlanWorkflow) {
         return Err(FunctionCallError::RespondToModel(
-            "Plan mode only allows non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+            "Plan mode only allows non-mutating exploration unless `features.plan_workflow` is enabled."
                 .to_string(),
         ));
     }
@@ -399,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn plan_mode_rejects_mutations_inside_target_repo() {
         let (mut session, _turn_context) = make_session_and_context().await;
-        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        session.enable_feature_for_test(Feature::PlanWorkflow);
         let repo = tempdir().expect("tempdir");
         std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
         let nested = repo.path().join("nested");
@@ -431,7 +428,7 @@ mod tests {
     #[tokio::test]
     async fn plan_mode_allows_mutations_outside_target_repo_when_feature_enabled() {
         let (mut session, _turn_context) = make_session_and_context().await;
-        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        session.enable_feature_for_test(Feature::PlanWorkflow);
         let repo = tempdir().expect("tempdir");
         std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
         let outside = tempdir().expect("tempdir");
@@ -478,7 +475,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "Plan mode only allows non-mutating exploration unless `features.plan_mode_preparatory_mutations` is enabled."
+            "Plan mode only allows non-mutating exploration unless `features.plan_workflow` is enabled."
         );
     }
 }

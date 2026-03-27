@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::PlanModePhase;
@@ -1004,7 +1005,16 @@ async fn execute_mode_injects_plan_paths_and_current_row_only() -> Result<()> {
     .await;
 
     let home = Arc::new(TempDir::new()?);
-    let test = test_codex().with_home(home).build(&server).await?;
+    let test = test_codex()
+        .with_home(home)
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::PlanWorkflow)
+                .expect("feature should enable in test");
+        })
+        .build(&server)
+        .await?;
     let db = test.codex.state_db().expect("state db");
     db.replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
         id: "snapshot-1".to_string(),

@@ -130,6 +130,7 @@ fn task_started_produces_turn_started_event() {
             turn_id: "turn-1".to_string(),
             model_context_window: Some(32_000),
             collaboration_mode_kind: ModeKind::Default,
+            plan_phase: None,
         }),
     ));
 
@@ -383,7 +384,7 @@ fn plan_update_emits_todo_list_started_updated_and_completed() {
 
 #[test]
 fn plan_update_emits_plan_progress_started_updated_and_completed() {
-    let mut ep = EventProcessorWithJsonOutput::new_with_plan_progress_csv(None, true);
+    let mut ep = EventProcessorWithJsonOutput::new_with_plan_workflow(None, true);
     let first_args = UpdatePlanArgs {
         explanation: Some("structured".to_string()),
         plan: vec![

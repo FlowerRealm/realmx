@@ -64,7 +64,7 @@ pub struct EventProcessorWithJsonOutput {
     last_message_path: Option<PathBuf>,
     last_proposed_plan: Option<String>,
     next_event_id: AtomicU64,
-    plan_progress_csv_enabled: bool,
+    plan_workflow_enabled: bool,
     // Tracks running commands by call_id, including the associated item id.
     running_commands: HashMap<String, RunningCommand>,
     running_patch_applies: HashMap<String, protocol::PatchApplyBeginEvent>,
@@ -113,18 +113,18 @@ struct RunningCollabToolCall {
 
 impl EventProcessorWithJsonOutput {
     pub fn new(last_message_path: Option<PathBuf>) -> Self {
-        Self::new_with_plan_progress_csv(last_message_path, false)
+        Self::new_with_plan_workflow(last_message_path, false)
     }
 
-    pub fn new_with_plan_progress_csv(
+    pub fn new_with_plan_workflow(
         last_message_path: Option<PathBuf>,
-        plan_progress_csv_enabled: bool,
+        plan_workflow_enabled: bool,
     ) -> Self {
         Self {
             last_message_path,
             last_proposed_plan: None,
             next_event_id: AtomicU64::new(0),
-            plan_progress_csv_enabled,
+            plan_workflow_enabled,
             running_commands: HashMap::new(),
             running_patch_applies: HashMap::new(),
             running_plan_progress: None,
@@ -781,7 +781,7 @@ impl EventProcessorWithJsonOutput {
     }
 
     fn handle_plan_update(&mut self, args: &UpdatePlanArgs) -> Vec<ThreadEvent> {
-        if self.plan_progress_csv_enabled
+        if self.plan_workflow_enabled
             && let Some(plan_progress) = self.plan_progress_item_from_plan(args)
         {
             if let Some(RunningPlanProgress::Csv {

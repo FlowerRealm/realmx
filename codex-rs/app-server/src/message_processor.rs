@@ -213,12 +213,9 @@ impl MessageProcessor {
                         default_mode_request_user_input: config
                             .features
                             .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
-                        plan_mode_preparatory_mutations: config
+                        plan_workflow_enabled: config
                             .features
-                            .enabled(codex_core::features::Feature::PlanModePreparatoryMutations),
-                        plan_mode_subagent_review: config
-                            .features
-                            .enabled(codex_core::features::Feature::PlanModeSubagentReview),
+                            .enabled(codex_core::features::Feature::PlanWorkflow),
                     },
                 ));
                 (auth_manager, thread_manager)

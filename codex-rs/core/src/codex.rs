@@ -3586,6 +3586,7 @@ impl Session {
             developer_sections.push(collab_instructions.into_text());
         }
         if collaboration_mode.is_plan_execution_mode()
+            && self.features.enabled(Feature::PlanWorkflow)
             && let Some(state_db) = self.state_db()
         {
             let thread_id = self.conversation_id.to_string();
@@ -3601,18 +3602,17 @@ impl Session {
                     turn_context.cwd.as_path(),
                     thread_id.as_str(),
                 );
-                let execute_instructions =
-                    if self.features.enabled(Feature::ExecutePlanSubagentDispatch) {
-                        crate::execute_plan_dispatch::build_execute_dispatch_guard_instructions(
-                            &workspace,
-                            &active_plan,
-                        )
-                    } else {
-                        crate::execute_plan_guard::build_execute_plan_guard_instructions(
-                            workspace.root(),
-                            active_plan.items.as_slice(),
-                        )
-                    };
+                let execute_instructions = if self.features.enabled(Feature::PlanWorkflow) {
+                    crate::execute_plan_dispatch::build_execute_dispatch_guard_instructions(
+                        &workspace,
+                        &active_plan,
+                    )
+                } else {
+                    crate::execute_plan_guard::build_execute_plan_guard_instructions(
+                        workspace.root(),
+                        active_plan.items.as_slice(),
+                    )
+                };
                 if let Ok(execute_instructions) = execute_instructions {
                     developer_sections.push(execute_instructions);
                 }
@@ -5853,9 +5853,7 @@ pub(crate) async fn run_turn(
     let mut server_model_warning_emitted_for_turn = false;
     let mut plan_acceptance = PlanAcceptanceState::new(
         turn_context.collaboration_mode.is_plan_output_mode()
-            && turn_context
-                .features
-                .enabled(Feature::PlanModeSubagentReview),
+            && turn_context.features.enabled(Feature::PlanWorkflow),
     );
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
@@ -7530,10 +7528,8 @@ async fn try_run_sampling_request(
     let mut active_item: Option<TurnItem> = None;
     let mut should_emit_turn_diff = false;
     let plan_mode = turn_context.collaboration_mode.is_plan_output_mode();
-    let hidden_plan_review_enabled = plan_mode
-        && turn_context
-            .features
-            .enabled(Feature::PlanModeSubagentReview);
+    let hidden_plan_review_enabled =
+        plan_mode && turn_context.features.enabled(Feature::PlanWorkflow);
     let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
     let allow_non_plan_message_emission = !hidden_plan_review_enabled;
     let mut plan_mode_state = plan_mode.then(|| {

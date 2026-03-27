@@ -623,9 +623,6 @@ impl DeveloperInstructions {
 
     /// Returns developer instructions from a collaboration mode if they exist and are non-empty.
     pub fn from_collaboration_mode(collaboration_mode: &CollaborationMode) -> Option<Self> {
-        if collaboration_mode.is_plan_execution_mode() {
-            return None;
-        }
         collaboration_mode
             .settings
             .developer_instructions
@@ -1502,7 +1499,10 @@ impl std::fmt::Display for FunctionCallOutputPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_types::ModeKind;
+    use crate::config_types::PlanModePhase;
     use crate::config_types::SandboxMode;
+    use crate::config_types::Settings;
     use crate::protocol::AskForApproval;
     use crate::protocol::GranularApprovalConfig;
     use anyhow::Result;
@@ -2067,6 +2067,28 @@ mod tests {
         assert!(
             text.contains("The built-in `request_permissions` tool is available in this session.")
         );
+    }
+
+    #[test]
+    fn collaboration_mode_instructions_include_plan_execution_phase_text() {
+        let instructions = DeveloperInstructions::from_collaboration_mode(&CollaborationMode {
+            mode: ModeKind::Plan,
+            plan_phase: Some(PlanModePhase::Executing),
+            settings: Settings {
+                model: "mock-model-execute".to_string(),
+                reasoning_effort: None,
+                developer_instructions: Some(
+                    "# Collaboration Style: Plan Execution Phase\nDo not review the plan in the execution phase.".to_string(),
+                ),
+            },
+        })
+        .expect("execute phase collaboration mode should preserve instructions")
+        .into_text();
+
+        assert!(instructions.contains(COLLABORATION_MODE_OPEN_TAG));
+        assert!(instructions.contains("# Collaboration Style: Plan Execution Phase"));
+        assert!(instructions.contains("Do not review the plan in the execution phase."));
+        assert!(instructions.contains(COLLABORATION_MODE_CLOSE_TAG));
     }
 
     #[test]

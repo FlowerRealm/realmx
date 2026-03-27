@@ -207,7 +207,7 @@ async fn try_handle_execute_mode_active_plan_update(
         return Ok(false);
     };
 
-    if session.enabled(Feature::ExecutePlanSubagentDispatch) {
+    if session.enabled(Feature::PlanWorkflow) {
         return Err(FunctionCallError::RespondToModel(
             "Execute mode active plan rows are managed by execute_active_plan_with_subagents while automatic dispatch is enabled".to_string(),
         ));
@@ -358,7 +358,7 @@ async fn try_sync_active_thread_plan(
     args: &mut UpdatePlanArgs,
     call_id: &str,
 ) -> Result<bool, FunctionCallError> {
-    if !session.enabled(Feature::PlanProgressCsv) {
+    if !session.enabled(Feature::PlanWorkflow) {
         return try_update_active_thread_plan(session, turn_context, args).await;
     }
 

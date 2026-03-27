@@ -264,7 +264,7 @@ plan-01,in_progress,Revised final,codex-rs/core/src/codex.rs,revised final,,,,
         &server.uri(),
         BTreeMap::from([
             (Feature::CollaborationModes, true),
-            (Feature::PlanModeSubagentReview, true),
+            (Feature::PlanWorkflow, true),
         ]),
     )?;
 
@@ -367,7 +367,7 @@ plan-01,in_progress,Fallback step,codex-rs/core/src/codex.rs,fallback detail,,,,
         &server.uri(),
         BTreeMap::from([
             (Feature::CollaborationModes, true),
-            (Feature::PlanModeSubagentReview, true),
+            (Feature::PlanWorkflow, true),
         ]),
     )?;
 

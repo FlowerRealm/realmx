@@ -732,8 +732,7 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
         request_user_input_tool.spec,
         create_request_user_input_tool(CollaborationModesConfig {
             default_mode_request_user_input: true,
-            plan_mode_preparatory_mutations: false,
-            plan_mode_subagent_review: false,
+            plan_workflow_enabled: false,
         })
     );
 }
@@ -1060,7 +1059,6 @@ fn model_tools_for_collaboration_mode(
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         mode: Some(collaboration_mode.mode),
         collaboration_mode: Some(collaboration_mode),
-        collaboration_mode: None,
     });
     let router = ToolRouter::from_config(
         &tools_config,
@@ -1333,7 +1331,8 @@ fn test_build_specs_gpt5_codex_default() {
 
 #[test]
 fn plan_workspace_tools_only_appear_in_plan_modes() {
-    let features = Features::with_defaults();
+    let mut features = Features::with_defaults();
+    features.enable(Feature::PlanWorkflow);
 
     let default_tools =
         model_tools_for_mode("gpt-5-codex", &features, Some(WebSearchMode::Cached), None);
@@ -1378,7 +1377,7 @@ fn plan_workspace_tools_only_appear_in_plan_modes() {
 #[test]
 fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
     let mut features = Features::with_defaults();
-    features.enable(Feature::ExecutePlanSubagentDispatch);
+    features.enable(Feature::PlanWorkflow);
 
     let default_tools =
         model_tools_for_mode("gpt-5-codex", &features, Some(WebSearchMode::Cached), None);
@@ -1412,7 +1411,7 @@ fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
 #[test]
 fn execute_plan_dispatch_tool_does_not_appear_in_planning_mode() {
     let mut features = Features::with_defaults();
-    features.enable(Feature::ExecutePlanSubagentDispatch);
+    features.enable(Feature::PlanWorkflow);
 
     let plan_tools = model_tools_for_collaboration_mode(
         "gpt-5-codex",

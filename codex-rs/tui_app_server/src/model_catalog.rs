@@ -39,8 +39,7 @@ mod tests {
     fn list_collaboration_modes_reuses_core_presets() {
         let collaboration_modes_config = CollaborationModesConfig {
             default_mode_request_user_input: true,
-            plan_mode_preparatory_mutations: true,
-            plan_mode_subagent_review: false,
+            plan_workflow_enabled: true,
         };
         let catalog = ModelCatalog::new(Vec::new(), collaboration_modes_config);
 

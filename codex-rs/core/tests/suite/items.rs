@@ -1294,7 +1294,7 @@ async fn plan_mode_review_shows_visible_review_step_before_accepting_first_candi
     let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
         config
             .features
-            .enable(Feature::PlanModeSubagentReview)
+            .enable(Feature::PlanWorkflow)
             .expect("feature should enable in test");
     }))
     .await?;
@@ -1377,7 +1377,7 @@ async fn plan_mode_review_shows_visible_review_step_before_revised_plan() -> any
     let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
         config
             .features
-            .enable(Feature::PlanModeSubagentReview)
+            .enable(Feature::PlanWorkflow)
             .expect("feature should enable in test");
     }))
     .await?;
@@ -1489,7 +1489,7 @@ async fn plan_mode_review_shows_visible_fallback_message_when_review_is_unavaila
     let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
         config
             .features
-            .enable(Feature::PlanModeSubagentReview)
+            .enable(Feature::PlanWorkflow)
             .expect("feature should enable in test");
     }))
     .await?;
@@ -1573,7 +1573,7 @@ async fn plan_mode_review_stalled_reviewer_does_not_surface_internal_agent_died(
     let harness = TestCodexHarness::with_builder(test_codex().with_config(|config| {
         config
             .features
-            .enable(Feature::PlanModeSubagentReview)
+            .enable(Feature::PlanWorkflow)
             .expect("feature should enable in test");
     }))
     .await?;

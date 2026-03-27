@@ -351,12 +351,13 @@ impl ToolsConfig {
                     .normalized()
                 })
             });
-        let plan_workspace_enabled = features.enabled(Feature::PlanModeWorkspace)
+        let plan_workflow_enabled = features.enabled(Feature::PlanWorkflow);
+        let plan_workspace_enabled = plan_workflow_enabled
             && normalized_collaboration_mode
                 .as_ref()
                 .is_some_and(codex_protocol::config_types::CollaborationMode::is_plan_output_mode)
             && !matches!(session_source, SessionSource::SubAgent(_));
-        let execute_plan_dispatch_enabled = features.enabled(Feature::ExecutePlanSubagentDispatch)
+        let execute_plan_dispatch_enabled = plan_workflow_enabled
             && normalized_collaboration_mode.as_ref().is_some_and(
                 codex_protocol::config_types::CollaborationMode::is_plan_execution_mode,
             )
@@ -2824,8 +2825,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
             &mut builder,
             create_request_user_input_tool(CollaborationModesConfig {
                 default_mode_request_user_input: config.default_mode_request_user_input,
-                plan_mode_preparatory_mutations: false,
-                plan_mode_subagent_review: false,
+                plan_workflow_enabled: false,
             }),
             /*supports_parallel_tool_calls*/ false,
             config.code_mode_enabled,

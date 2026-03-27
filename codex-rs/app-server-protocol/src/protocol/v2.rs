@@ -1836,10 +1836,20 @@ pub struct CollaborationModeMask {
 
 impl From<CoreCollaborationModeMask> for CollaborationModeMask {
     fn from(value: CoreCollaborationModeMask) -> Self {
+        let normalized = codex_protocol::config_types::CollaborationMode {
+            mode: value.mode.unwrap_or_default(),
+            plan_phase: value.plan_phase,
+            settings: codex_protocol::config_types::Settings {
+                model: value.model.clone().unwrap_or_default(),
+                reasoning_effort: value.reasoning_effort.unwrap_or(None),
+                developer_instructions: None,
+            },
+        }
+        .normalized();
         Self {
             name: value.name,
-            mode: value.mode,
-            plan_phase: value.plan_phase,
+            mode: Some(normalized.mode),
+            plan_phase: normalized.plan_phase,
             model: value.model,
             reasoning_effort: value.reasoning_effort,
         }

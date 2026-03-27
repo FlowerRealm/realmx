@@ -487,9 +487,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     } = args;
 
     let mut event_processor: Box<dyn EventProcessor> = match json_mode {
-        true => Box::new(EventProcessorWithJsonOutput::new_with_plan_progress_csv(
+        true => Box::new(EventProcessorWithJsonOutput::new_with_plan_workflow(
             last_message_file.clone(),
-            config.features.enabled(Feature::PlanProgressCsv),
+            config.features.enabled(Feature::PlanWorkflow),
         )),
         _ => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stderr_with_ansi,

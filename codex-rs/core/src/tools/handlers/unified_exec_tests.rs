@@ -193,7 +193,7 @@ fn exec_command_args_resolve_relative_additional_permissions_against_workdir() -
 #[tokio::test]
 async fn plan_mode_mutating_exec_requires_scratch_dir() {
     let (mut session, _turn_context) = make_session_and_context().await;
-    session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+    session.enable_feature_for_test(Feature::PlanWorkflow);
     let repo = tempdir().expect("tempdir");
     fs::create_dir_all(repo.path().join(".git")).expect("git dir");
 

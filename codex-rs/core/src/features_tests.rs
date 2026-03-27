@@ -104,30 +104,9 @@ fn request_permissions_tool_is_under_development() {
 }
 
 #[test]
-fn plan_mode_preparatory_mutations_is_under_development() {
-    assert_eq!(
-        Feature::PlanModePreparatoryMutations.stage(),
-        Stage::UnderDevelopment
-    );
-    assert_eq!(
-        Feature::PlanModePreparatoryMutations.default_enabled(),
-        false
-    );
-}
-
-#[test]
-fn plan_mode_subagent_review_is_under_development() {
-    assert_eq!(
-        Feature::PlanModeSubagentReview.stage(),
-        Stage::UnderDevelopment
-    );
-    assert_eq!(Feature::PlanModeSubagentReview.default_enabled(), false);
-}
-
-#[test]
-fn plan_progress_csv_is_under_development() {
-    assert_eq!(Feature::PlanProgressCsv.stage(), Stage::UnderDevelopment);
-    assert_eq!(Feature::PlanProgressCsv.default_enabled(), false);
+fn plan_workflow_is_under_development() {
+    assert_eq!(Feature::PlanWorkflow.stage(), Stage::UnderDevelopment);
+    assert_eq!(Feature::PlanWorkflow.default_enabled(), false);
 }
 
 #[test]

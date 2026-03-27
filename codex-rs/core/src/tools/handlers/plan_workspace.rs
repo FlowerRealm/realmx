@@ -125,7 +125,7 @@ impl ToolHandler for PlanWorkspaceReadHandler {
             }
         };
 
-        ensure_plan_workspace_available(session.enabled(Feature::PlanModeWorkspace), &turn)?;
+        ensure_plan_workspace_available(session.enabled(Feature::PlanWorkflow), &turn)?;
         let args: PlanWorkspaceReadArgs = parse_arguments(&arguments)?;
         let codex_home = session.codex_home().await;
         let thread_id = session.conversation_id.to_string();
@@ -165,7 +165,7 @@ impl ToolHandler for PlanWorkspaceWriteHandler {
             }
         };
 
-        ensure_plan_workspace_available(session.enabled(Feature::PlanModeWorkspace), &turn)?;
+        ensure_plan_workspace_available(session.enabled(Feature::PlanWorkflow), &turn)?;
         let args: PlanWorkspaceWriteArgs = parse_arguments(&arguments)?;
         let file = args.file.into_core();
         let codex_home = session.codex_home().await;

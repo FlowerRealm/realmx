@@ -322,7 +322,7 @@ async fn update_plan_tool_with_feature_persists_canonical_active_plan() -> anyho
     let home = Arc::new(TempDir::new()?);
 
     let mut builder = test_codex().with_home(home.clone()).with_config(|config| {
-        let _ = config.features.enable(Feature::PlanProgressCsv);
+        let _ = config.features.enable(Feature::PlanWorkflow);
     });
     let TestCodex {
         codex,
@@ -457,7 +457,7 @@ async fn update_plan_tool_with_feature_expands_status_patch_to_full_plan() -> an
     let home = Arc::new(TempDir::new()?);
 
     let mut builder = test_codex().with_home(home).with_config(|config| {
-        let _ = config.features.enable(Feature::PlanProgressCsv);
+        let _ = config.features.enable(Feature::PlanWorkflow);
     });
     let TestCodex {
         codex,
@@ -568,7 +568,7 @@ async fn update_plan_tool_with_feature_rejects_unstructured_new_plan() -> anyhow
     let home = Arc::new(TempDir::new()?);
 
     let mut builder = test_codex().with_home(home).with_config(|config| {
-        let _ = config.features.enable(Feature::PlanProgressCsv);
+        let _ = config.features.enable(Feature::PlanWorkflow);
     });
     let TestCodex {
         codex,
@@ -829,7 +829,7 @@ async fn execute_mode_update_plan_rejects_pending_to_completed() -> anyhow::Resu
     let server = start_mock_server().await;
     let home = Arc::new(TempDir::new()?);
     let mut builder = test_codex().with_home(home).with_config(|config| {
-        let _ = config.features.enable(Feature::PlanProgressCsv);
+        let _ = config.features.enable(Feature::PlanWorkflow);
     });
     let TestCodex {
         codex,
@@ -921,7 +921,7 @@ async fn execute_mode_update_plan_allows_current_row_to_start() -> anyhow::Resul
     let server = start_mock_server().await;
     let home = Arc::new(TempDir::new()?);
     let mut builder = test_codex().with_home(home).with_config(|config| {
-        let _ = config.features.enable(Feature::PlanProgressCsv);
+        let _ = config.features.enable(Feature::PlanWorkflow);
     });
     let TestCodex {
         codex,

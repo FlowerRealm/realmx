@@ -261,7 +261,9 @@ use codex_login::run_login_server;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ForcedLoginMethod;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::dynamic_tools::DynamicToolSpec as CoreDynamicToolSpec;
 use codex_protocol::items::TurnItem;
@@ -618,13 +620,34 @@ impl CodexMessageProcessor {
         collaboration_modes_config: CollaborationModesConfig,
     ) -> CollaborationMode {
         collaboration_mode = collaboration_mode.normalized();
+        let collaboration_mode_key = CollaborationMode {
+            mode: collaboration_mode.mode,
+            plan_phase: collaboration_mode.plan_phase,
+            settings: Settings {
+                model: String::new(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        };
         if collaboration_mode.settings.developer_instructions.is_none()
             && let Some(instructions) = self
                 .thread_manager
                 .get_models_manager()
                 .list_collaboration_modes_for_config(collaboration_modes_config)
                 .into_iter()
-                .find(|preset| preset.mode == Some(collaboration_mode.mode))
+                .find(|preset| {
+                    CollaborationMode {
+                        mode: preset.mode.unwrap_or(ModeKind::Default),
+                        plan_phase: preset.plan_phase,
+                        settings: Settings {
+                            model: String::new(),
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }
+                    .normalized()
+                        == collaboration_mode_key
+                })
                 .and_then(|preset| preset.developer_instructions.flatten())
                 .filter(|instructions| !instructions.is_empty())
         {
@@ -6365,8 +6388,7 @@ impl CodexMessageProcessor {
 
         let collaboration_modes_config = CollaborationModesConfig {
             default_mode_request_user_input: thread.enabled(Feature::DefaultModeRequestUserInput),
-            plan_mode_preparatory_mutations: thread.enabled(Feature::PlanModePreparatoryMutations),
-            plan_mode_subagent_review: thread.enabled(Feature::PlanModeSubagentReview),
+            plan_workflow_enabled: thread.enabled(Feature::PlanWorkflow),
         };
         let collaboration_mode = params.collaboration_mode.map(|mode| {
             self.normalize_turn_start_collaboration_mode(mode, collaboration_modes_config)

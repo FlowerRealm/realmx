@@ -44,21 +44,31 @@ fn execute_preset_includes_execute_instructions() {
         .expect("execute preset should include instructions")
         .expect("execute instructions should be set");
 
-    assert!(instructions.contains("accepted active plan is absolute truth during Execute mode"));
-    assert!(instructions.contains("Do not review the plan in Execute mode"));
+    assert!(instructions.contains("You execute on a well-specified task independently"));
+}
+
+#[test]
+fn execute_preset_uses_plan_execution_instructions_when_plan_workflow_enabled() {
+    let instructions = execute_preset(CollaborationModesConfig {
+        default_mode_request_user_input: false,
+        plan_workflow_enabled: true,
+    })
+    .developer_instructions
+    .expect("execute preset should include instructions")
+    .expect("execute instructions should be set");
+
+    assert!(instructions.contains("accepted active plan is absolute truth during Plan execution"));
     assert!(instructions.contains("read provided tasks.csv path before acting"));
     assert!(instructions.contains("only execute the server-selected row"));
     assert!(instructions.contains("Record plan-external work only in `update_plan.explanation`"));
     assert!(instructions.contains("automatic plan-dispatch tool"));
-    assert!(instructions.contains("instead of manually updating plan rows"));
 }
 
 #[test]
 fn default_mode_instructions_replace_mode_names_placeholder() {
     let default_instructions = default_preset(CollaborationModesConfig {
         default_mode_request_user_input: true,
-        plan_mode_preparatory_mutations: false,
-        plan_mode_subagent_review: false,
+        plan_workflow_enabled: false,
     })
     .developer_instructions
     .expect("default preset should include instructions")
@@ -98,36 +108,23 @@ fn plan_mode_instructions_disallow_preparatory_mutations_by_default() {
         .expect("plan preset should include instructions")
         .expect("plan instructions should be set");
 
-    assert!(instructions.contains("Do not perform **mutating** actions in Plan mode."));
-    assert!(instructions.contains("`git clone`"));
+    assert!(!instructions.contains("tasks.csv"));
+    assert!(!instructions.contains("plan workspace"));
 }
 
 #[test]
-fn plan_mode_instructions_require_flow_logic_and_ascii_flowchart() {
-    let instructions = plan_preset(CollaborationModesConfig::default())
-        .developer_instructions
-        .expect("plan preset should include instructions")
-        .expect("plan instructions should be set");
-
-    assert!(instructions.contains("A `Data Structure or Interface Changes` section"));
-    assert!(instructions.contains("A `Flow Logic` section"));
-    assert!(instructions.contains("Exactly one ASCII flowchart"));
-    assert!(instructions.contains("Do not use Mermaid"));
-    assert!(instructions.contains("[Collect facts]"));
-}
-
-#[test]
-fn plan_mode_instructions_allow_preparatory_mutations_when_enabled() {
+fn plan_mode_instructions_use_plan_workflow_when_enabled() {
     let instructions = plan_preset(CollaborationModesConfig {
         default_mode_request_user_input: false,
-        plan_mode_preparatory_mutations: true,
-        plan_mode_subagent_review: false,
+        plan_workflow_enabled: true,
     })
     .developer_instructions
     .expect("plan preset should include instructions")
     .expect("plan instructions should be set");
 
-    assert!(instructions.contains("`features.plan_mode_preparatory_mutations`"));
+    assert!(instructions.contains("`features.plan_workflow`"));
+    assert!(instructions.contains("tasks.csv"));
+    assert!(instructions.contains("plan workspace"));
     assert!(instructions.contains("must stay outside the current target repo"));
     assert!(instructions.contains("prefer direct `git` access over `web search`"));
     assert!(instructions.contains("`git clone --depth 1 --single-branch --branch <branch>`"));

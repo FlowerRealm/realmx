@@ -4,6 +4,11 @@ exports_files(
     [
         "templates/collaboration_mode/default.md",
         "templates/collaboration_mode/plan.md",
+        "templates/collaboration_mode/plan_legacy.md",
+        "templates/collaboration_mode/auto_plan.md",
+        "templates/collaboration_mode/auto_plan_legacy.md",
+        "templates/collaboration_mode/execute.md",
+        "templates/collaboration_mode/execute_legacy.md",
     ],
     visibility = ["//visibility:public"],
 )
