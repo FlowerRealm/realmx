@@ -3,6 +3,7 @@ use crate::plan_csv::render_empty_plan_csv;
 use crate::plan_csv::render_plan_text;
 use codex_state::ThreadPlanItemCreateParams;
 use codex_state::canonicalize_thread_plan_csv;
+use codex_state::canonicalize_thread_plan_csv_for_authoring;
 use codex_state::parse_thread_plan_csv;
 use std::borrow::Cow;
 use std::path::Path;
@@ -162,7 +163,7 @@ impl PlanWorkspace {
         self.ensure_scaffold().await?;
         match file {
             PlanWorkspaceFile::TasksCsv => {
-                let plan = canonicalize_workspace_tasks_csv(content)?;
+                let plan = canonicalize_workspace_tasks_csv_for_authoring(content)?;
                 fs::write(
                     self.file_path(PlanWorkspaceFile::TasksCsv),
                     plan.raw_csv.as_str(),
@@ -267,7 +268,7 @@ impl PlanWorkspace {
     pub async fn finalize_plan_for_acceptance(&self) -> anyhow::Result<PlanWorkspacePlan> {
         self.ensure_scaffold().await?;
         let draft_csv = self.read_file(PlanWorkspaceFile::TasksCsv).await?;
-        match parse_workspace_plan(draft_csv.as_str())? {
+        match parse_workspace_plan_for_authoring(draft_csv.as_str())? {
             Some(plan) => Ok(plan),
             None => anyhow::bail!(
                 "tasks.csv must include at least one non-header row before finalizing the plan"
@@ -316,8 +317,10 @@ impl PlanWorkspace {
         let Some(active_csv) = active_csv else {
             return Ok(true);
         };
-        let draft = normalize_workspace_csv(draft_csv.as_str())?;
-        let active = normalize_workspace_csv(active_csv.as_str())?;
+        let draft =
+            normalize_workspace_csv(draft_csv.as_str(), WorkspaceValidationMode::Compatible)?;
+        let active =
+            normalize_workspace_csv(active_csv.as_str(), WorkspaceValidationMode::Compatible)?;
         Ok(draft == active)
     }
 
@@ -393,7 +396,20 @@ impl PlanWorkspace {
 }
 
 pub fn canonicalize_workspace_tasks_csv(content: &str) -> anyhow::Result<PlanWorkspacePlan> {
-    let raw_csv = normalize_workspace_csv(content)?;
+    let raw_csv = normalize_workspace_csv(content, WorkspaceValidationMode::Compatible)?;
+    let rows = parse_thread_plan_csv(raw_csv.as_str())?;
+    let plan_text = render_plan_text(rows.as_slice());
+    Ok(PlanWorkspacePlan {
+        raw_csv,
+        rows,
+        plan_text,
+    })
+}
+
+pub fn canonicalize_workspace_tasks_csv_for_authoring(
+    content: &str,
+) -> anyhow::Result<PlanWorkspacePlan> {
+    let raw_csv = normalize_workspace_csv(content, WorkspaceValidationMode::Authoring)?;
     let rows = parse_thread_plan_csv(raw_csv.as_str())?;
     let plan_text = render_plan_text(rows.as_slice());
     Ok(PlanWorkspacePlan {
@@ -410,7 +426,17 @@ fn parse_workspace_plan(content: &str) -> anyhow::Result<Option<PlanWorkspacePla
     canonicalize_workspace_tasks_csv(content).map(Some)
 }
 
-fn normalize_workspace_csv(content: &str) -> anyhow::Result<String> {
+fn parse_workspace_plan_for_authoring(content: &str) -> anyhow::Result<Option<PlanWorkspacePlan>> {
+    if !workspace_csv_has_rows(content) {
+        return Ok(None);
+    }
+    canonicalize_workspace_tasks_csv_for_authoring(content).map(Some)
+}
+
+fn normalize_workspace_csv(
+    content: &str,
+    validation_mode: WorkspaceValidationMode,
+) -> anyhow::Result<String> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return Ok(render_empty_plan_csv());
@@ -431,7 +457,18 @@ fn normalize_workspace_csv(content: &str) -> anyhow::Result<String> {
         return Ok(render_empty_plan_csv());
     }
 
-    canonicalize_thread_plan_csv(normalized.as_str())
+    match validation_mode {
+        WorkspaceValidationMode::Compatible => canonicalize_thread_plan_csv(normalized.as_str()),
+        WorkspaceValidationMode::Authoring => {
+            canonicalize_thread_plan_csv_for_authoring(normalized.as_str())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceValidationMode {
+    Compatible,
+    Authoring,
 }
 
 fn workspace_csv_has_rows(content: &str) -> bool {

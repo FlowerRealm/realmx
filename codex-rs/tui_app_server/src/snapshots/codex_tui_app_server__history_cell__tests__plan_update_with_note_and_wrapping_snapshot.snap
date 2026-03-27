@@ -8,41 +8,51 @@ expression: rendered
     retries and clearer messages
     when the backend is
     unreachable.
-    ✔ Investigate existing error
-      paths and logging around
-      HTTP timeouts (codex-rs/
-      core/src/client.rs) -
-      trace retryable transport
+    Dependency Tree
+    ✔ 1 Investigate existing
+      error paths and logging
+      around HTTP timeouts
+      (plan-01; codex-rs/core/
+      src/client.rs) - trace
+      retryable transport
       failures
-      inputs: timeout logs
-      outputs: failure
-        taxonomy
-      acceptance: retryable
-        failures identified
-    ◐ Harden Grafana client
-      error handling with retry/
-      backoff and user‑friendly
-      messages (codex-rs/tui/
-      src/history_cell.rs) -
-      render structured progress
-      for retries
-      inputs: failure
-        taxonomy, existing
-        copy
-      outputs: plan progress
-        cell
-      depends_on: plan-01
-      acceptance: retries and
-        copy are visible
-    ○ Add tests for transient
-      failure scenarios and
-      surfacing to the UI
-      (codex-rs/tui/src/
-      history_cell.rs) - capture
-      wrapped metadata lines
-      inputs: plan progress
-        cell
-      outputs: snapshots
-      depends_on: plan-02
-      acceptance: snapshots
-        show plan metadata
+        inputs: timeout logs
+        outputs: failure
+          taxonomy
+        acceptance: retryable
+          failures identified
+      ◐ 1.1 Harden Grafana
+        client error handling
+        with retry/backoff and
+        user‑friendly messages
+        (plan-02; codex-rs/tui/
+        src/history_cell.rs) -
+        render structured
+        progress for retries
+          inputs: failure
+            taxonomy, existing
+            copy
+          outputs: plan
+            progress cell
+          acceptance: retries
+            and copy are
+            visible
+        ○ 1.1.1 Add tests for
+          transient failure
+          scenarios and
+          surfacing to the UI
+          (plan-03; codex-rs/
+          tui/src/
+          history_cell.rs) -
+          capture wrapped
+          metadata lines
+            inputs: plan
+              progress cell
+            outputs: snapshots
+            acceptance:
+              snapshots show
+              plan metadata
+    Parallel Layers
+        L0: 1 (plan-01)
+        L1: 1.1 (plan-02)
+        L2: 1.1.1 (plan-03)

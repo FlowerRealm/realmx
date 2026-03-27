@@ -6,9 +6,11 @@ use codex_state::ThreadPlanItem;
 use codex_state::ThreadPlanItemCreateParams;
 use codex_state::ThreadPlanItemStatus;
 use codex_state::canonicalize_thread_plan_csv;
+use codex_state::canonicalize_thread_plan_csv_for_authoring;
 use codex_state::parse_thread_plan_csv;
 use codex_state::render_thread_plan_csv;
-use std::fmt::Write;
+
+use crate::plan_display::render_plan_markdown;
 
 const CSV_OPEN_FENCE: &str = "```csv";
 const CSV_CLOSE_FENCE: &str = "```";
@@ -23,13 +25,26 @@ pub(crate) fn canonical_plan_csv_from_proposed_plan(
     markdown: &str,
 ) -> anyhow::Result<CanonicalPlanCsv> {
     let raw_csv = extract_csv_block(markdown)?;
-    let raw_csv = canonicalize_thread_plan_csv(raw_csv.as_str())?;
+    let raw_csv = canonicalize_thread_plan_csv_for_authoring(raw_csv.as_str())?;
     let rows = parse_thread_plan_csv(raw_csv.as_str())?;
     Ok(CanonicalPlanCsv { raw_csv, rows })
 }
 
 pub fn canonical_plan_csv_from_update_plan_args(
     args: &UpdatePlanArgs,
+) -> anyhow::Result<CanonicalPlanCsv> {
+    canonical_plan_csv_from_update_plan_args_with_mode(args, CanonicalizationMode::Compatible)
+}
+
+pub(crate) fn canonical_plan_csv_from_update_plan_args_for_authoring(
+    args: &UpdatePlanArgs,
+) -> anyhow::Result<CanonicalPlanCsv> {
+    canonical_plan_csv_from_update_plan_args_with_mode(args, CanonicalizationMode::Authoring)
+}
+
+fn canonical_plan_csv_from_update_plan_args_with_mode(
+    args: &UpdatePlanArgs,
+    mode: CanonicalizationMode,
 ) -> anyhow::Result<CanonicalPlanCsv> {
     let rows = args
         .plan
@@ -38,7 +53,12 @@ pub fn canonical_plan_csv_from_update_plan_args(
         .map(|(index, item)| thread_plan_row_from_plan_item(index, item))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let raw_csv = render_thread_plan_csv(rows.as_slice())?;
-    let raw_csv = canonicalize_thread_plan_csv(raw_csv.as_str())?;
+    let raw_csv = match mode {
+        CanonicalizationMode::Compatible => canonicalize_thread_plan_csv(raw_csv.as_str())?,
+        CanonicalizationMode::Authoring => {
+            canonicalize_thread_plan_csv_for_authoring(raw_csv.as_str())?
+        }
+    };
     let rows = parse_thread_plan_csv(raw_csv.as_str())?;
     Ok(CanonicalPlanCsv { raw_csv, rows })
 }
@@ -48,29 +68,24 @@ pub(crate) fn render_empty_plan_csv() -> String {
 }
 
 pub(crate) fn render_plan_text(rows: &[ThreadPlanItemCreateParams]) -> String {
-    let mut out = String::from("# Plan\n\n");
-    for (index, row) in rows.iter().enumerate() {
-        let status = match row.status {
-            ThreadPlanItemStatus::Pending => "pending",
-            ThreadPlanItemStatus::InProgress => "in_progress",
-            ThreadPlanItemStatus::Completed => "completed",
-        };
-        let _ = write!(out, "- [{status}] {} (`{}`)", row.step, row.path);
-        if !row.details.is_empty() {
-            let _ = write!(out, " - {}", row.details);
-        }
-        out.push('\n');
-        append_plan_metadata_line(&mut out, "inputs", row.inputs.as_slice());
-        append_plan_metadata_line(&mut out, "outputs", row.outputs.as_slice());
-        append_plan_metadata_line(&mut out, "depends_on", row.depends_on.as_slice());
-        if let Some(acceptance) = row.acceptance.as_deref() {
-            let _ = writeln!(out, "  acceptance: {acceptance}");
-        }
-        if index + 1 != rows.len() {
-            out.push('\n');
-        }
-    }
-    out
+    let plan = UpdatePlanArgs {
+        explanation: None,
+        plan: rows
+            .iter()
+            .map(|row| PlanItemArg {
+                id: Some(row.row_id.clone()),
+                step: row.step.clone(),
+                status: thread_plan_status_to_step_status(row.status),
+                path: Some(row.path.clone()),
+                details: (!row.details.is_empty()).then_some(row.details.clone()),
+                inputs: (!row.inputs.is_empty()).then_some(row.inputs.clone()),
+                outputs: (!row.outputs.is_empty()).then_some(row.outputs.clone()),
+                depends_on: (!row.depends_on.is_empty()).then_some(row.depends_on.clone()),
+                acceptance: row.acceptance.clone(),
+            })
+            .collect(),
+    };
+    render_plan_markdown(plan.plan.as_slice())
 }
 
 pub(crate) fn update_plan_from_thread_plan_items(
@@ -114,13 +129,6 @@ fn extract_csv_block(markdown: &str) -> anyhow::Result<String> {
         ));
     }
     Ok(csv.to_string())
-}
-
-fn append_plan_metadata_line(out: &mut String, label: &str, values: &[String]) {
-    if values.is_empty() {
-        return;
-    }
-    let _ = writeln!(out, "  {label}: {}", values.join(", "));
 }
 
 fn thread_plan_row_from_plan_item(
@@ -181,6 +189,12 @@ fn thread_plan_status_to_step_status(status: ThreadPlanItemStatus) -> StepStatus
         ThreadPlanItemStatus::InProgress => StepStatus::InProgress,
         ThreadPlanItemStatus::Completed => StepStatus::Completed,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalizationMode {
+    Compatible,
+    Authoring,
 }
 
 fn step_status_to_thread_plan_status(status: StepStatus) -> ThreadPlanItemStatus {
@@ -261,10 +275,16 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows,plan ma
             "\
 # Plan
 
-- [in_progress] Parse CSV (`codex-rs/core/src/plan_csv.rs`) - extract rows
+## Dependency Tree
+
+- [in_progress] 1 Parse CSV (`plan-01`; `codex-rs/core/src/plan_csv.rs`) - extract rows
   inputs: plan markdown, csv body
   outputs: thread plan rows
   acceptance: rows persist
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
         );
     }

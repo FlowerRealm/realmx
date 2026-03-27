@@ -77,10 +77,15 @@ plan-02,pending,Second step,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
         text: "\
 # Plan
 
-- [in_progress] First step (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
 
-- [pending] Second step (`codex-rs/core/src/plan_csv.rs`) - second step
-  depends_on: plan-01
+- [in_progress] 1 First step (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+  - [pending] 1.1 Second step (`plan-02`; `codex-rs/core/src/plan_csv.rs`) - second step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
+- L1: 1.1 (`plan-02`)
 "
         .to_string(),
     };
@@ -309,7 +314,13 @@ plan-01,in_progress,Revised final,codex-rs/core/src/codex.rs,revised final,,,,
             text: "\
 # Plan
 
-- [in_progress] Revised final (`codex-rs/core/src/codex.rs`) - revised final
+## Dependency Tree
+
+- [in_progress] 1 Revised final (`plan-01`; `codex-rs/core/src/codex.rs`) - revised final
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
             .to_string(),
         }]
@@ -406,7 +417,13 @@ plan-01,in_progress,Fallback step,codex-rs/core/src/codex.rs,fallback detail,,,,
             text: "\
 # Plan
 
-- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+## Dependency Tree
+
+- [in_progress] 1 Fallback step (`plan-01`; `codex-rs/core/src/codex.rs`) - fallback detail
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
             .to_string(),
         }]

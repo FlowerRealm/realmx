@@ -873,6 +873,8 @@ id,status,step,path,details,inputs,outputs,depends_on,acceptance
 
 `inputs`, `outputs`, and `depends_on` use `|`-delimited values inside a single CSV cell. Older 5-column CSV blocks are no longer accepted.
 
+For newly authored plans, every `depends_on` id must reference an earlier row in `tasks.csv`. The dependency graph remains the source of truth; tree numbering and parallel-layer summaries are derived at render time and should not be stored in CSV fields.
+
 The final `<proposed_plan>` block is now primarily a finalize/preview signal. Clients and restore flows should prefer the workspace-backed plan data (`draftPlan` when present, otherwise `activePlan`) instead of treating the `<proposed_plan>` body as the only authoritative plan source.
 
 #### reasoning

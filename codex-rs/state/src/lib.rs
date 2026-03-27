@@ -58,8 +58,10 @@ pub use runtime::state_db_filename;
 pub use runtime::state_db_path;
 pub use thread_plan_csv::THREAD_PLAN_CSV_HEADERS;
 pub use thread_plan_csv::canonicalize_thread_plan_csv;
+pub use thread_plan_csv::canonicalize_thread_plan_csv_for_authoring;
 pub use thread_plan_csv::parse_thread_plan_csv;
 pub use thread_plan_csv::render_thread_plan_csv;
+pub use thread_plan_csv::validate_thread_plan_rows_for_authoring;
 
 /// Environment variable for overriding the SQLite state database home directory.
 pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";

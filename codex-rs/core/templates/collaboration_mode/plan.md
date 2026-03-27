@@ -131,6 +131,11 @@ The CSV must:
 * use `inputs`, `outputs`, and `depends_on` as `|`-delimited lists within a single cell
 * use `acceptance` for the row-specific completion check
 * include at most one `in_progress` row
+* keep row order dependency-safe: every `depends_on` id must point to an earlier row
+
+Treat `depends_on` as the real execution graph. Do not add numbering columns or write `1`, `1.1`, `2` into CSV fields just for presentation.
+
+When several tasks can start independently, keep them as separate root rows instead of inventing a fake parent. When a task depends on multiple earlier rows, list all of them in `depends_on`; the runtime will derive a tree-style preview and parallel layers from that DAG.
 
 When a task spans multiple files, split it into multiple rows rather than stuffing multiple paths into one row. Prefer the smallest set of rows that keeps file ownership clear.
 

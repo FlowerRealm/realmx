@@ -536,10 +536,15 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
         "\
 # Plan
 
-- [in_progress] Step 1 (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
 
-- [pending] Step 2 (`codex-rs/core/src/plan_csv.rs`) - second step
-  depends_on: plan-01
+- [in_progress] 1 Step 1 (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+  - [pending] 1.1 Step 2 (`plan-02`; `codex-rs/core/src/plan_csv.rs`) - second step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
+- L1: 1.1 (`plan-02`)
 "
     );
 
@@ -643,10 +648,15 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
         "\
 # Plan
 
-- [in_progress] Step 1 (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
 
-- [pending] Step 2 (`codex-rs/core/src/plan_csv.rs`) - second step
-  depends_on: plan-01
+- [in_progress] 1 Step 1 (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+  - [pending] 1.1 Step 2 (`plan-02`; `codex-rs/core/src/plan_csv.rs`) - second step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
+- L1: 1.1 (`plan-02`)
 "
     );
     let agent_text_from_item: String = agent_item
@@ -836,7 +846,13 @@ plan-01,in_progress,Step 1,codex-rs/core/src/codex.rs,first step,,,,
         "\
 # Plan
 
-- [in_progress] Step 1 (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
+
+- [in_progress] 1 Step 1 (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
 
@@ -999,7 +1015,13 @@ plan-01,in_progress,Step 1,codex-rs/core/src/codex.rs,first step,,,,
         "\
 # Plan
 
-- [in_progress] Step 1 (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
+
+- [in_progress] 1 Step 1 (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
 
@@ -1097,7 +1119,13 @@ plan-01,in_progress,Step 1,codex-rs/core/src/codex.rs,first step,,,,
         "\
 # Plan
 
-- [in_progress] Step 1 (`codex-rs/core/src/codex.rs`) - first step
+## Dependency Tree
+
+- [in_progress] 1 Step 1 (`plan-01`; `codex-rs/core/src/codex.rs`) - first step
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
     let agent_text_from_item: String = agent_item
@@ -1310,7 +1338,13 @@ async fn plan_mode_review_shows_visible_review_step_before_accepting_first_candi
         "\
 # Plan
 
-- [in_progress] First accepted step (`codex-rs/core/src/codex.rs`) - first accepted detail
+## Dependency Tree
+
+- [in_progress] 1 First accepted step (`plan-01`; `codex-rs/core/src/codex.rs`) - first accepted detail
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
     let agent_texts = outcome
@@ -1400,7 +1434,13 @@ async fn plan_mode_review_shows_visible_review_step_before_revised_plan() -> any
         "\
 # Plan
 
-- [in_progress] Revised step (`codex-rs/core/src/codex.rs`) - revised detail
+## Dependency Tree
+
+- [in_progress] 1 Revised step (`plan-01`; `codex-rs/core/src/codex.rs`) - revised detail
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
     let agent_texts = outcome
@@ -1492,7 +1532,13 @@ async fn plan_mode_review_shows_visible_fallback_message_when_review_is_unavaila
         "\
 # Plan
 
-- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+## Dependency Tree
+
+- [in_progress] 1 Fallback step (`plan-01`; `codex-rs/core/src/codex.rs`) - fallback detail
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
     let agent_texts = outcome
@@ -1566,7 +1612,13 @@ async fn plan_mode_review_stalled_reviewer_does_not_surface_internal_agent_died(
         "\
 # Plan
 
-- [in_progress] Fallback step (`codex-rs/core/src/codex.rs`) - fallback detail
+## Dependency Tree
+
+- [in_progress] 1 Fallback step (`plan-01`; `codex-rs/core/src/codex.rs`) - fallback detail
+
+## Parallel Layers
+
+- L0: 1 (`plan-01`)
 "
     );
     let agent_texts = outcome

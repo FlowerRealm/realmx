@@ -6,6 +6,7 @@ use crate::execute_plan_guard::validate_execute_mode_plan_update;
 use crate::features::Feature;
 use crate::function_tool::FunctionCallError;
 use crate::plan_csv::canonical_plan_csv_from_update_plan_args;
+use crate::plan_csv::canonical_plan_csv_from_update_plan_args_for_authoring;
 use crate::plan_csv::update_plan_from_thread_plan_items;
 use crate::plan_workspace::PlanWorkspace;
 use crate::tools::context::FunctionToolOutput;
@@ -445,9 +446,10 @@ async fn replace_active_thread_plan(
     thread_id: &str,
     call_id: &str,
 ) -> Result<(), FunctionCallError> {
-    let canonical_plan = canonical_plan_csv_from_update_plan_args(args).map_err(|err| {
-        FunctionCallError::RespondToModel(format!("failed to canonicalize plan update: {err}"))
-    })?;
+    let canonical_plan =
+        canonical_plan_csv_from_update_plan_args_for_authoring(args).map_err(|err| {
+            FunctionCallError::RespondToModel(format!("failed to canonicalize plan update: {err}"))
+        })?;
     let state_db = session
         .state_db()
         .ok_or_else(|| FunctionCallError::RespondToModel("state db unavailable".to_string()))?;

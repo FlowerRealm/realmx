@@ -3,18 +3,22 @@ source: tui/src/history_cell.rs
 expression: rendered
 ---
 • Plan Progress
-  └ ◐ Define error taxonomy (codex-rs/
-      core/src/error.rs) - separate
-      retryable vs fatal paths
-      inputs: transport failures
-      outputs: error categories
-      acceptance: categories map to UX
-        copy
-    ○ Implement mapping to user messages
-      (codex-rs/tui/src/history_cell.rs)
-      - show explicit remediation hints
-      inputs: error categories
-      outputs: user-facing copy
-      depends_on: plan-01
-      acceptance: copy is visible in
-        history
+  └ Dependency Tree
+    ◐ 1 Define error taxonomy (plan-01;
+      codex-rs/core/src/error.rs) -
+      separate retryable vs fatal paths
+        inputs: transport failures
+        outputs: error categories
+        acceptance: categories map to
+          UX copy
+      ○ 1.1 Implement mapping to user
+        messages (plan-02; codex-rs/tui/
+        src/history_cell.rs) - show
+        explicit remediation hints
+          inputs: error categories
+          outputs: user-facing copy
+          acceptance: copy is visible
+            in history
+    Parallel Layers
+        L0: 1 (plan-01)
+        L1: 1.1 (plan-02)

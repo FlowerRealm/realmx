@@ -41,6 +41,7 @@ use codex_core::config::Config;
 use codex_core::config::types::McpServerTransportConfig;
 use codex_core::mcp::McpManager;
 use codex_core::plugins::PluginsManager;
+use codex_core::project_plan_items;
 use codex_core::web_search::web_search_detail;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::account::PlanType;
@@ -2317,51 +2318,58 @@ impl HistoryCell for PlanUpdateCell {
             out
         };
 
-        let render_metadata = |label: &str, value: &str| -> Vec<Line<'static>> {
+        let render_metadata = |depth: usize, label: &str, value: &str| -> Vec<Line<'static>> {
             let wrap_width = width.saturating_sub(6).max(1) as usize;
             let line = Line::from(format!("{label}: {value}").dim());
             let wrapped = adaptive_wrap_line(
                 &line,
                 RtOptions::new(wrap_width)
-                    .initial_indent("  ".into())
-                    .subsequent_indent("    ".into()),
+                    .initial_indent(format!("{}  ", "  ".repeat(depth + 1)).into())
+                    .subsequent_indent(format!("{}    ", "  ".repeat(depth + 1)).into()),
             );
             let mut out = Vec::new();
             push_owned_lines(&wrapped, &mut out);
             out
         };
 
-        let render_step = |item: &PlanItemArg| -> Vec<Line<'static>> {
-            let PlanItemArg {
-                step,
-                status,
-                path,
-                details,
-                inputs,
-                outputs,
-                depends_on,
-                acceptance,
-                ..
-            } = item;
-            let (marker, step_style) = match status {
+        let render_step = |row: &codex_core::PlanDisplayRow, show_all_dependencies: bool| {
+            let (marker, step_style) = match row.status {
                 StepStatus::Completed => ("✔ ".green(), Style::default().crossed_out().dim()),
                 StepStatus::InProgress => ("◐ ".cyan().bold(), Style::default().cyan().bold()),
                 StepStatus::Pending => ("○ ".dim(), Style::default().dim()),
             };
 
+            let tree_indent = "  ".repeat(row.depth);
             let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
-                .initial_indent(Line::from(vec![marker]))
-                .subsequent_indent("  ".into());
-            let mut text = step.clone();
-            if let Some(path) = path.as_ref().filter(|path| !path.trim().is_empty()) {
-                text.push_str(" (");
-                text.push_str(path);
-                text.push(')');
+                .initial_indent(Line::from(vec![tree_indent.clone().into(), marker]))
+                .subsequent_indent(format!("{tree_indent}  ").into());
+            let mut text = String::new();
+            if let Some(number) = row.display_number.as_deref() {
+                text.push_str(number);
+                text.push(' ');
             }
-            if let Some(details) = details
-                .as_ref()
-                .filter(|details| !details.trim().is_empty())
-            {
+            text.push_str(&row.step);
+            match (row.row_id.as_deref(), row.path.as_deref()) {
+                (Some(row_id), Some(path)) => {
+                    text.push_str(" (");
+                    text.push_str(row_id);
+                    text.push_str("; ");
+                    text.push_str(path);
+                    text.push(')');
+                }
+                (Some(row_id), None) => {
+                    text.push_str(" (");
+                    text.push_str(row_id);
+                    text.push(')');
+                }
+                (None, Some(path)) => {
+                    text.push_str(" (");
+                    text.push_str(path);
+                    text.push(')');
+                }
+                (None, None) => {}
+            }
+            if let Some(details) = row.details.as_deref() {
                 text.push_str(" - ");
                 text.push_str(details);
             }
@@ -2369,24 +2377,61 @@ impl HistoryCell for PlanUpdateCell {
             let wrapped = adaptive_wrap_line(&line, opts);
             let mut out = Vec::new();
             push_owned_lines(&wrapped, &mut out);
-            if let Some(inputs) = inputs.as_ref().filter(|values| !values.is_empty()) {
-                out.extend(render_metadata("inputs", &inputs.join(", ")));
+            if !row.inputs.is_empty() {
+                out.extend(render_metadata(row.depth, "inputs", &row.inputs.join(", ")));
             }
-            if let Some(outputs) = outputs.as_ref().filter(|values| !values.is_empty()) {
-                out.extend(render_metadata("outputs", &outputs.join(", ")));
+            if !row.outputs.is_empty() {
+                out.extend(render_metadata(
+                    row.depth,
+                    "outputs",
+                    &row.outputs.join(", "),
+                ));
             }
-            if let Some(depends_on) = depends_on.as_ref().filter(|values| !values.is_empty()) {
-                out.extend(render_metadata("depends_on", &depends_on.join(", ")));
+            let dependencies = if show_all_dependencies {
+                row.depends_on.as_slice()
+            } else {
+                row.additional_dependencies.as_slice()
+            };
+            if !dependencies.is_empty() {
+                out.extend(render_metadata(
+                    row.depth,
+                    "depends_on",
+                    &dependencies.join(", "),
+                ));
             }
-            if let Some(acceptance) = acceptance
-                .as_ref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-            {
-                out.extend(render_metadata("acceptance", acceptance));
+            if let Some(acceptance) = row.acceptance.as_deref() {
+                out.extend(render_metadata(row.depth, "acceptance", acceptance));
             }
             out
         };
+
+        let render_layers = |projection: &codex_core::PlanDisplayProjection| {
+            let mut out = Vec::new();
+            for layer in &projection.layers {
+                let entries = layer
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        let number = row.display_number.as_deref().unwrap_or("?");
+                        let row_id = row
+                            .row_id
+                            .as_deref()
+                            .unwrap_or(row.effective_row_id.as_str());
+                        format!("{number} ({row_id})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.extend(render_metadata(
+                    0,
+                    &format!("L{}", layer.layer_index),
+                    &entries,
+                ));
+            }
+            out
+        };
+
+        let projection = project_plan_items(self.plan.as_slice());
+        let show_all_dependencies = projection.mode == codex_core::PlanDisplayMode::Flat;
 
         let mut lines: Vec<Line<'static>> = vec![];
         lines.push(vec!["• ".dim(), "Plan Progress".bold()].into());
@@ -2399,13 +2444,23 @@ impl HistoryCell for PlanUpdateCell {
             .filter(|t| !t.is_empty());
         if let Some(expl) = note {
             indented_lines.extend(render_note(expl));
-        };
+        }
+        if let Some(note) = projection.compatibility_note.as_deref() {
+            indented_lines.extend(render_note(note));
+        }
 
-        if self.plan.is_empty() {
+        if projection.rows.is_empty() {
             indented_lines.push(Line::from("(no steps provided)".dim().italic()));
         } else {
-            for item in &self.plan {
-                indented_lines.extend(render_step(item));
+            if projection.mode == codex_core::PlanDisplayMode::Tree {
+                indented_lines.push("Dependency Tree".bold().into());
+            }
+            for row in &projection.rows {
+                indented_lines.extend(render_step(row, show_all_dependencies));
+            }
+            if !projection.layers.is_empty() {
+                indented_lines.push("Parallel Layers".bold().into());
+                indented_lines.extend(render_layers(&projection));
             }
         }
         lines.extend(prefix_lines(indented_lines, "  └ ".dim(), "    ".into()));

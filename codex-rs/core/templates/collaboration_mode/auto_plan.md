@@ -48,6 +48,9 @@ Rules for that CSV:
 - `inputs`, `outputs`, and `depends_on` should be `|`-delimited lists within one cell
 - `acceptance` should be the row-specific done condition
 - at most one row may be `in_progress`
+- every `depends_on` id must point to an earlier row
+
+`depends_on` is the real dependency graph. Do not add presentation-only numbering columns and do not bake `1`, `1.1`, `2` prefixes into `step`. Keep independent work as separate root rows; use multiple `depends_on` entries only when a task truly joins earlier work.
 
 The final `<proposed_plan>` block is a completion/finalization signal and concise preview. Do not rely on it as the only plan source of truth. Prefer brief Markdown that indicates the workspace-backed plan is ready; only include a fenced CSV block for backward-compatible fallback behavior.
 

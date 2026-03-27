@@ -1,5 +1,6 @@
 use crate::ThreadPlanItemCreateParams;
 use crate::ThreadPlanItemStatus;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const THREAD_PLAN_CSV_HEADERS: [&str; 9] = [
@@ -127,6 +128,12 @@ pub fn canonicalize_thread_plan_csv(raw_csv: &str) -> anyhow::Result<String> {
     render_thread_plan_csv(rows.as_slice())
 }
 
+pub fn canonicalize_thread_plan_csv_for_authoring(raw_csv: &str) -> anyhow::Result<String> {
+    let rows = parse_thread_plan_csv(raw_csv)?;
+    validate_thread_plan_rows_for_authoring(rows.as_slice())?;
+    render_thread_plan_csv(rows.as_slice())
+}
+
 fn parse_status(value: &str) -> anyhow::Result<ThreadPlanItemStatus> {
     match value.trim() {
         "pending" => Ok(ThreadPlanItemStatus::Pending),
@@ -179,11 +186,43 @@ fn validate_dependencies(rows: &[ThreadPlanItemCreateParams]) -> anyhow::Result<
     Ok(())
 }
 
+pub fn validate_thread_plan_rows_for_authoring(
+    rows: &[ThreadPlanItemCreateParams],
+) -> anyhow::Result<()> {
+    let id_to_index = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.row_id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+
+    for (index, row) in rows.iter().enumerate() {
+        for dependency in &row.depends_on {
+            let dependency_index = id_to_index.get(dependency.as_str()).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "plan csv row {} depends on unknown id: {}",
+                    row.row_id,
+                    dependency
+                )
+            })?;
+            if *dependency_index >= index {
+                return Err(anyhow::anyhow!(
+                    "plan csv row {} depends on a later row: {}",
+                    row.row_id,
+                    dependency
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::canonicalize_thread_plan_csv;
+    use super::canonicalize_thread_plan_csv_for_authoring;
     use super::parse_thread_plan_csv;
     use super::render_thread_plan_csv;
+    use super::validate_thread_plan_rows_for_authoring;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -245,5 +284,39 @@ plan-02,completed,Render Plan,codex-rs/core/src/codex.rs,emit final item,thread 
         let rows = parse_thread_plan_csv(raw_csv).expect("csv should parse");
         let rendered = render_thread_plan_csv(rows.as_slice()).expect("csv should render");
         assert_eq!(rendered, raw_csv);
+    }
+
+    #[test]
+    fn authoring_validation_accepts_dependency_safe_row_order() {
+        let raw_csv = "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Root A,src/root_a.rs,,,,,
+plan-02,pending,Child A,src/child_a.rs,,,,plan-01,
+plan-03,pending,Join work,src/join.rs,,,,plan-01|plan-02,
+";
+
+        let rows = parse_thread_plan_csv(raw_csv).expect("csv should parse");
+        validate_thread_plan_rows_for_authoring(rows.as_slice())
+            .expect("authoring validation should pass");
+        let canonical = canonicalize_thread_plan_csv_for_authoring(raw_csv)
+            .expect("authoring canonicalization should pass");
+        assert_eq!(canonical, raw_csv);
+    }
+
+    #[test]
+    fn authoring_validation_rejects_dependency_on_later_row() {
+        let raw_csv = "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Root A,src/root_a.rs,,,,plan-02,
+plan-02,pending,Root B,src/root_b.rs,,,,,
+";
+
+        let rows = parse_thread_plan_csv(raw_csv).expect("csv should parse");
+        let err = validate_thread_plan_rows_for_authoring(rows.as_slice())
+            .expect_err("later-row dependency should fail");
+        assert_eq!(
+            err.to_string(),
+            "plan csv row plan-01 depends on a later row: plan-02"
+        );
     }
 }
