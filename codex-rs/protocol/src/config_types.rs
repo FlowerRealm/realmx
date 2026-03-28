@@ -404,13 +404,59 @@ impl ModeKind {
 
 /// Collaboration mode for a Codex session.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", from = "CollaborationModeDe")]
 pub struct CollaborationMode {
     pub mode: ModeKind,
     #[ts(optional = false)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_phase: Option<PlanModePhase>,
     pub settings: Settings,
+}
+
+#[derive(Deserialize)]
+struct CollaborationModeDe {
+    mode: CollaborationModeDeKind,
+    plan_phase: Option<PlanModePhase>,
+    settings: Settings,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CollaborationModeDeKind {
+    Plan,
+    #[serde(alias = "auto_plan")]
+    UltraWork,
+    #[serde(alias = "execute")]
+    Execute,
+    #[serde(alias = "code", alias = "pair_programming", alias = "custom")]
+    Default,
+}
+
+impl From<CollaborationModeDe> for CollaborationMode {
+    fn from(value: CollaborationModeDe) -> Self {
+        match value.mode {
+            CollaborationModeDeKind::Plan => Self {
+                mode: ModeKind::Plan,
+                plan_phase: None,
+                settings: value.settings,
+            },
+            CollaborationModeDeKind::UltraWork => Self {
+                mode: ModeKind::UltraWork,
+                plan_phase: Some(value.plan_phase.unwrap_or(PlanModePhase::Planning)),
+                settings: value.settings,
+            },
+            CollaborationModeDeKind::Execute => Self {
+                mode: ModeKind::UltraWork,
+                plan_phase: Some(PlanModePhase::Executing),
+                settings: value.settings,
+            },
+            CollaborationModeDeKind::Default => Self {
+                mode: ModeKind::Default,
+                plan_phase: None,
+                settings: value.settings,
+            },
+        }
+    }
 }
 
 impl CollaborationMode {
@@ -632,6 +678,25 @@ mod tests {
             let mode: ModeKind = serde_json::from_str(&json).expect("deserialize mode");
             assert_eq!(ModeKind::UltraWork, mode);
         }
+    }
+
+    #[test]
+    fn collaboration_mode_deserializes_legacy_execute_payload_as_ultra_work_execution() {
+        let mode: CollaborationMode = serde_json::from_str(
+            r#"{
+                "mode":"execute",
+                "plan_phase":null,
+                "settings":{
+                    "model":"gpt-5.2-codex",
+                    "reasoning_effort":null,
+                    "developer_instructions":null
+                }
+            }"#,
+        )
+        .expect("deserialize collaboration mode");
+
+        assert_eq!(ModeKind::UltraWork, mode.mode);
+        assert_eq!(Some(PlanModePhase::Executing), mode.plan_phase());
     }
 
     #[test]

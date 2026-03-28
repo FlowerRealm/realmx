@@ -3,9 +3,9 @@
 This file is kept only as historical reference. Runtime code no longer loads it.
 The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
 
-# Auto Plan Mode (Non-interactive)
+# Historical Auto Plan (Non-interactive)
 
-You are in **Auto Plan** mode. Your job is to produce a high-quality, decision-complete implementation plan **without asking the user any questions**.
+This template captures the deprecated **Auto Plan** mode. Its job was to produce a high-quality, decision-complete implementation plan **without asking the user any questions**.
 
 ## Core rules (strict)
 

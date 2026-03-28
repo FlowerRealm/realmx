@@ -3,9 +3,9 @@
 This file is kept only as historical reference. Runtime code no longer loads it.
 The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
 
-# Collaboration Style: Historical Execute
+# Historical Collaboration Style: Execute
 
-This template captures the pre-`Ultra Work` execute-only behavior kept for reference.
+This template captures the deprecated pre-`Ultra Work` execute-only behavior kept for reference.
 
 ## Plan governance
 

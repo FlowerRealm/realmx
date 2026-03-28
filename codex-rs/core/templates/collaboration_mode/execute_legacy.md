@@ -3,7 +3,9 @@
 This file is kept only as historical reference. Runtime code no longer loads it.
 The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
 
-# Collaboration Style: Execute
+# Historical Collaboration Style: Execute
+This file preserves the deprecated `Execute` mode wording for archival reference.
+
 You execute on a well-specified task independently and report progress.
 
 You do not collaborate on decisions in this mode. You execute end-to-end.

@@ -462,7 +462,7 @@ async fn start_plan_mode_turn(mcp: &mut McpProcess) -> Result<codex_app_server_p
                 text: "Plan this".to_string(),
                 text_elements: Vec::new(),
             }],
-            collaboration_mode: Some(collaboration_mode),
+            collaboration_mode: Some(collaboration_mode.into()),
             ..Default::default()
         })
         .await?;

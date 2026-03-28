@@ -738,6 +738,35 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
 }
 
 #[test]
+fn request_user_input_is_hidden_in_ultra_work_execution() {
+    let config = test_config();
+    let model_info = ModelsManager::construct_model_info_offline_for_tests("gpt-5-codex", &config);
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        mode: None,
+        collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+            mode: ModeKind::UltraWork,
+            plan_phase: Some(PlanModePhase::Executing),
+            settings: codex_protocol::config_types::Settings {
+                model: "gpt-5-codex".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        }),
+    });
+    let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
+    assert_lacks_tool_name(&tools, "request_user_input");
+}
+
+#[test]
 fn request_permissions_requires_feature_flag() {
     let config = test_config();
     let model_info = ModelsManager::construct_model_info_offline_for_tests("gpt-5-codex", &config);

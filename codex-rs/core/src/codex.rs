@@ -6877,7 +6877,7 @@ struct ProposedPlanItemState {
     completed: bool,
 }
 
-/// Aggregated state used only while streaming a plan-mode response.
+/// Aggregated state used only while streaming a planning-mode response.
 /// Includes per-item parsers, deferred agent message bookkeeping, and the plan item lifecycle.
 struct PlanModeStreamState {
     hidden_review_enabled: bool,
@@ -7015,7 +7015,7 @@ impl ProposedPlanItemState {
     }
 }
 
-/// In plan mode we defer agent message starts until the parser emits non-plan
+/// In planning modes we defer agent message starts until the parser emits non-plan
 /// text. The parser buffers each line until it can rule out a tag prefix, so
 /// plan-only outputs never show up as empty assistant messages.
 async fn maybe_emit_pending_agent_message_start(
@@ -7336,7 +7336,7 @@ async fn maybe_complete_plan_item_from_message(
     Ok(None)
 }
 
-/// Emit a completed agent message in plan mode, respecting deferred starts.
+/// Emit a completed agent message in a planning-mode turn, respecting deferred starts.
 async fn emit_agent_message_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
@@ -7378,7 +7378,7 @@ async fn emit_agent_message_in_plan_mode(
     state.started_agent_message_items.remove(&agent_message_id);
 }
 
-/// Emit completion for a plan-mode turn item, handling agent messages specially.
+/// Emit completion for a planning-mode turn item, handling agent messages specially.
 async fn emit_turn_item_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
@@ -7399,7 +7399,7 @@ async fn emit_turn_item_in_plan_mode(
     }
 }
 
-/// Handle a completed assistant response item in plan mode, returning true if handled.
+/// Handle a completed assistant response item in a planning-mode turn, returning true if handled.
 async fn handle_assistant_item_done_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,

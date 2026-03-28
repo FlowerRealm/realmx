@@ -8208,7 +8208,7 @@ impl ChatWidget {
         }
     }
 
-    /// Cycle to the next collaboration mode variant (Plan -> Default -> Plan).
+    /// Cycle to the next visible collaboration mode preset.
     fn cycle_collaboration_mode(&mut self) {
         if !self.collaboration_modes_enabled() {
             return;

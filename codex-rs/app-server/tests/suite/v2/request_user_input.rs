@@ -58,15 +58,18 @@ async fn request_user_input_round_trip() -> Result<()> {
             }],
             model: Some("mock-model".to_string()),
             effort: Some(ReasoningEffort::Medium),
-            collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Plan,
-                plan_phase: Some(PlanModePhase::Planning),
-                settings: Settings {
-                    model: "mock-model".to_string(),
-                    reasoning_effort: Some(ReasoningEffort::Medium),
-                    developer_instructions: None,
-                },
-            }),
+            collaboration_mode: Some(
+                CollaborationMode {
+                    mode: ModeKind::Plan,
+                    plan_phase: Some(PlanModePhase::Planning),
+                    settings: Settings {
+                        model: "mock-model".to_string(),
+                        reasoning_effort: Some(ReasoningEffort::Medium),
+                        developer_instructions: None,
+                    },
+                }
+                .into(),
+            ),
             ..Default::default()
         })
         .await?;

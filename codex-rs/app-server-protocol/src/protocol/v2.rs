@@ -14,7 +14,7 @@ use codex_protocol::approvals::NetworkApprovalProtocol as CoreNetworkApprovalPro
 use codex_protocol::approvals::NetworkPolicyAmendment as CoreNetworkPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyRuleAction as CoreNetworkPolicyRuleAction;
 use codex_protocol::config_types::ApprovalsReviewer as CoreApprovalsReviewer;
-use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::CollaborationMode as CoreCollaborationMode;
 use codex_protocol::config_types::CollaborationModeMask as CoreCollaborationModeMask;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModeKind;
@@ -23,6 +23,7 @@ use codex_protocol::config_types::PlanModePhase;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode as CoreSandboxMode;
 use codex_protocol::config_types::ServiceTier;
+use codex_protocol::config_types::Settings as CoreCollaborationModeSettings;
 use codex_protocol::config_types::Verbosity;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::config_types::WebSearchToolConfig;
@@ -1819,6 +1820,72 @@ pub struct ModelListResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct CollaborationModeListParams {}
+
+/// EXPERIMENTAL - collaboration mode settings for turn/start.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CollaborationModeSettings {
+    pub model: String,
+    #[ts(optional = false)]
+    #[serde(alias = "reasoning_effort")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[ts(optional = false)]
+    #[serde(alias = "developer_instructions")]
+    pub developer_instructions: Option<String>,
+}
+
+impl From<CoreCollaborationModeSettings> for CollaborationModeSettings {
+    fn from(value: CoreCollaborationModeSettings) -> Self {
+        Self {
+            model: value.model,
+            reasoning_effort: value.reasoning_effort,
+            developer_instructions: value.developer_instructions,
+        }
+    }
+}
+
+impl From<CollaborationModeSettings> for CoreCollaborationModeSettings {
+    fn from(value: CollaborationModeSettings) -> Self {
+        Self {
+            model: value.model,
+            reasoning_effort: value.reasoning_effort,
+            developer_instructions: value.developer_instructions,
+        }
+    }
+}
+
+/// EXPERIMENTAL - collaboration mode override for turn/start.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CollaborationMode {
+    pub mode: ModeKind,
+    #[ts(optional = false)]
+    #[serde(alias = "plan_phase")]
+    pub plan_phase: Option<PlanModePhase>,
+    pub settings: CollaborationModeSettings,
+}
+
+impl From<CoreCollaborationMode> for CollaborationMode {
+    fn from(value: CoreCollaborationMode) -> Self {
+        Self {
+            mode: value.mode,
+            plan_phase: value.plan_phase,
+            settings: value.settings.into(),
+        }
+    }
+}
+
+impl From<CollaborationMode> for CoreCollaborationMode {
+    fn from(value: CollaborationMode) -> Self {
+        Self {
+            mode: value.mode,
+            plan_phase: value.plan_phase,
+            settings: value.settings.into(),
+        }
+    }
+}
 
 /// EXPERIMENTAL - collaboration mode preset metadata for clients.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -6002,6 +6069,60 @@ mod tests {
             CollabAgentState {
                 status: CollabAgentStatus::Interrupted,
                 message: None,
+            }
+        );
+    }
+
+    #[test]
+    fn collaboration_mode_wire_uses_camel_case_fields() {
+        let mode = CollaborationMode {
+            mode: ModeKind::UltraWork,
+            plan_phase: Some(PlanModePhase::Executing),
+            settings: CollaborationModeSettings {
+                model: "gpt-5-codex".to_string(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                developer_instructions: None,
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(&mode).expect("serialize collaboration mode"),
+            json!({
+                "mode": "ultra_work",
+                "planPhase": "executing",
+                "settings": {
+                    "model": "gpt-5-codex",
+                    "reasoningEffort": "high",
+                    "developerInstructions": null
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn collaboration_mode_wire_accepts_legacy_snake_case_aliases() {
+        let mode: CollaborationMode = serde_json::from_value(json!({
+            "mode": "ultra_work",
+            "plan_phase": "executing",
+            "settings": {
+                "model": "gpt-5-codex",
+                "reasoning_effort": "high",
+                "developer_instructions": null
+            }
+        }))
+        .expect("deserialize collaboration mode");
+
+        let core: CoreCollaborationMode = mode.into();
+        assert_eq!(
+            core,
+            CoreCollaborationMode {
+                mode: ModeKind::UltraWork,
+                plan_phase: Some(PlanModePhase::Executing),
+                settings: CoreCollaborationModeSettings {
+                    model: "gpt-5-codex".to_string(),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    developer_instructions: None,
+                },
             }
         );
     }

@@ -6391,7 +6391,7 @@ impl CodexMessageProcessor {
             plan_workflow_enabled: thread.enabled(Feature::PlanWorkflow),
         };
         let collaboration_mode = params.collaboration_mode.map(|mode| {
-            self.normalize_turn_start_collaboration_mode(mode, collaboration_modes_config)
+            self.normalize_turn_start_collaboration_mode(mode.into(), collaboration_modes_config)
         });
 
         // Map v2 input items to core input items.

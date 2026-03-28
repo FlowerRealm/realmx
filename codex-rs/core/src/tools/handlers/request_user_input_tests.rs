@@ -46,16 +46,16 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
         request_user_input_tool_description(false),
-        "Request user input for one to three short questions and wait for the response. This tool is only available in Plan or Ultra Work mode.".to_string()
+        "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode or Ultra Work planning mode.".to_string()
     );
     assert_eq!(
         request_user_input_tool_description(true),
-        "Request user input for one to three short questions and wait for the response. This tool is only available in Default, Plan, or Ultra Work mode.".to_string()
+        "Request user input for one to three short questions and wait for the response. This tool is only available in Default mode, Plan mode, or Ultra Work planning mode.".to_string()
     );
 }
 
 #[test]
-fn request_user_input_unavailable_message_mentions_plan_execution_phase() {
+fn request_user_input_unavailable_message_mentions_ultra_work_execution_phase() {
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::UltraWork,
         plan_phase: Some(PlanModePhase::Executing),

@@ -331,9 +331,6 @@ impl ToolsConfig {
             include_js_repl && features.enabled(Feature::JsReplToolsOnly);
         let include_collab_tools = features.enabled(Feature::Collab);
         let include_agent_jobs = features.enabled(Feature::SpawnCsv);
-        let include_request_user_input = !matches!(session_source, SessionSource::SubAgent(_));
-        let include_default_mode_request_user_input =
-            include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
         let normalized_collaboration_mode = collaboration_mode
             .clone()
             .map(|mode| mode.normalized())
@@ -351,6 +348,12 @@ impl ToolsConfig {
                     .normalized()
                 })
             });
+        let include_request_user_input = !matches!(session_source, SessionSource::SubAgent(_))
+            && !normalized_collaboration_mode.as_ref().is_some_and(
+                codex_protocol::config_types::CollaborationMode::is_ultra_work_execution_mode,
+            );
+        let include_default_mode_request_user_input =
+            include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
         let plan_workflow_enabled = features.enabled(Feature::PlanWorkflow);
         let plan_workspace_enabled = plan_workflow_enabled
             && normalized_collaboration_mode.as_ref().is_some_and(

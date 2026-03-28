@@ -567,7 +567,7 @@ async fn turn_start_accepts_collaboration_mode_override_v2() -> Result<()> {
             effort: Some(ReasoningEffort::Low),
             summary: Some(ReasoningSummary::Auto),
             output_schema: None,
-            collaboration_mode: Some(collaboration_mode),
+            collaboration_mode: Some(collaboration_mode.into()),
             ..Default::default()
         })
         .await?;
@@ -655,7 +655,7 @@ async fn turn_start_uses_thread_feature_overrides_for_collaboration_mode_instruc
             effort: Some(ReasoningEffort::Low),
             summary: Some(ReasoningSummary::Auto),
             output_schema: None,
-            collaboration_mode: Some(collaboration_mode),
+            collaboration_mode: Some(collaboration_mode.into()),
             ..Default::default()
         })
         .await?;
@@ -751,7 +751,7 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
                 text: "Plan first".to_string(),
                 text_elements: Vec::new(),
             }],
-            collaboration_mode: Some(plan_mode),
+            collaboration_mode: Some(plan_mode.into()),
             ..Default::default()
         })
         .await?;
@@ -773,7 +773,7 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
                 text: "Back to default".to_string(),
                 text_elements: Vec::new(),
             }],
-            collaboration_mode: Some(default_mode),
+            collaboration_mode: Some(default_mode.into()),
             ..Default::default()
         })
         .await?;
@@ -856,7 +856,7 @@ async fn turn_start_ultra_work_executing_uses_execution_preset_instructions_v2()
                 text: "Execute now".to_string(),
                 text_elements: Vec::new(),
             }],
-            collaboration_mode: Some(execute_mode),
+            collaboration_mode: Some(execute_mode.into()),
             ..Default::default()
         })
         .await?;

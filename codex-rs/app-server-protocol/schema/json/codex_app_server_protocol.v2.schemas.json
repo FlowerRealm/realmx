@@ -2354,12 +2354,12 @@
       "type": "string"
     },
     "CollaborationMode": {
-      "description": "Collaboration mode for a Codex session.",
+      "description": "EXPERIMENTAL - collaboration mode override for turn/start.",
       "properties": {
         "mode": {
           "$ref": "#/definitions/ModeKind"
         },
-        "plan_phase": {
+        "planPhase": {
           "anyOf": [
             {
               "$ref": "#/definitions/PlanModePhase"
@@ -2370,7 +2370,7 @@
           ]
         },
         "settings": {
-          "$ref": "#/definitions/Settings"
+          "$ref": "#/definitions/CollaborationModeSettings"
         }
       },
       "required": [
@@ -2431,6 +2431,34 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "CollaborationModeSettings": {
+      "description": "EXPERIMENTAL - collaboration mode settings for turn/start.",
+      "properties": {
+        "developerInstructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "model"
       ],
       "type": "object"
     },
@@ -9100,34 +9128,6 @@
           "type": "object"
         }
       ]
-    },
-    "Settings": {
-      "description": "Settings for a collaboration mode.",
-      "properties": {
-        "developer_instructions": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "model": {
-          "type": "string"
-        },
-        "reasoning_effort": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReasoningEffort"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "model"
-      ],
-      "type": "object"
     },
     "SkillDependencies": {
       "properties": {

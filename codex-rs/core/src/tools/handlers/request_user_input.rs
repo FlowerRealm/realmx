@@ -16,18 +16,28 @@ fn request_user_input_is_available(mode: ModeKind, default_mode_request_user_inp
         || (default_mode_request_user_input && mode == ModeKind::Default)
 }
 
+fn request_user_input_mode_label(mode: ModeKind) -> &'static str {
+    match mode {
+        ModeKind::UltraWork => "Ultra Work planning mode",
+        ModeKind::Plan => "Plan mode",
+        ModeKind::Default => "Default mode",
+        ModeKind::PairProgramming => "Pair Programming mode",
+        ModeKind::Execute => "Ultra Work execution phase",
+    }
+}
+
 fn format_allowed_modes(default_mode_request_user_input: bool) -> String {
     let mode_names: Vec<&str> = TUI_VISIBLE_COLLABORATION_MODES
         .into_iter()
         .filter(|mode| request_user_input_is_available(*mode, default_mode_request_user_input))
-        .map(ModeKind::display_name)
+        .map(request_user_input_mode_label)
         .collect();
 
     match mode_names.as_slice() {
         [] => "no modes".to_string(),
-        [mode] => format!("{mode} mode"),
-        [first, second] => format!("{first} or {second} mode"),
-        [first, second, third] => format!("{first}, {second}, or {third} mode"),
+        [mode] => (*mode).to_string(),
+        [first, second] => format!("{first} or {second}"),
+        [first, second, third] => format!("{first}, {second}, or {third}"),
         [..] => format!("modes: {}", mode_names.join(", ")),
     }
 }

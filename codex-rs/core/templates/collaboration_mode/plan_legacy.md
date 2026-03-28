@@ -3,9 +3,9 @@
 This file is kept only as historical reference. Runtime code no longer loads it.
 The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
 
-# Plan Mode (Conversational)
+# Historical Plan Mode (Conversational)
 
-You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed—intent- and implementation-wise—so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
+This file preserves the deprecated public **Plan Mode** wording. You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed—intent- and implementation-wise—so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
 
 ## Mode rules (strict)
 
