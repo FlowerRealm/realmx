@@ -1915,7 +1915,7 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
         "expected at most one post-compaction continuation request"
     );
 
-    let compact_request = compact_mock.single_request();
+    let _compact_request = compact_mock.single_request();
     if let Some(second_turn_request) = second_turn_request_mock.last_request() {
         assert_request_contains_realtime_end(&second_turn_request);
         if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
@@ -2082,7 +2082,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
     .await?;
     let codex = harness.test().codex.clone();
 
-    let first_turn_request_mock = responses::mount_sse_once(
+    let _first_turn_request_mock = responses::mount_sse_once(
         harness.server(),
         responses::sse(vec![
             responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
@@ -2090,7 +2090,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
         ]),
     )
     .await;
-    let second_turn_request_mock = responses::mount_sse_once(
+    let _second_turn_request_mock = responses::mount_sse_once(
         harness.server(),
         responses::sse(vec![
             responses::ev_assistant_message("m2", "REMOTE_SECOND_REPLY"),
@@ -2441,7 +2441,7 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
 
     assert_eq!(compact_mock.requests().len(), 1);
     let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
+    let _compact_body = compact_request.body_json().to_string();
     if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
         let post_compact_body = post_compact_request.body_json().to_string();
         assert!(
@@ -2523,7 +2523,7 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
         "expected at most one post-compaction request"
     );
 
-    let compact_request = compact_mock.single_request();
+    let _compact_request = compact_mock.single_request();
     if let Some(post_compact_turn_request) = post_compact_turn_request_mock.last_request() {
         let post_compact_body = post_compact_turn_request.body_json().to_string();
         assert!(

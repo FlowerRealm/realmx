@@ -13,7 +13,6 @@ use rmcp::transport::auth::OAuthState;
 use tiny_http::Response;
 use tiny_http::Server;
 use tokio::sync::oneshot;
-use tokio::task::AbortHandle;
 use tokio::time::timeout;
 use urlencoding::decode;
 
@@ -82,6 +81,61 @@ pub async fn perform_oauth_login(
     callback_port: Option<u16>,
     callback_url: Option<&str>,
 ) -> Result<()> {
+    perform_oauth_login_with_browser_output(
+        server_name,
+        server_url,
+        store_mode,
+        http_headers,
+        env_http_headers,
+        scopes,
+        oauth_resource,
+        callback_port,
+        callback_url,
+        /*emit_browser_url*/ true,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn perform_oauth_login_silent(
+    server_name: &str,
+    server_url: &str,
+    store_mode: OAuthCredentialsStoreMode,
+    http_headers: Option<HashMap<String, String>>,
+    env_http_headers: Option<HashMap<String, String>>,
+    scopes: &[String],
+    oauth_resource: Option<&str>,
+    callback_port: Option<u16>,
+    callback_url: Option<&str>,
+) -> Result<()> {
+    perform_oauth_login_with_browser_output(
+        server_name,
+        server_url,
+        store_mode,
+        http_headers,
+        env_http_headers,
+        scopes,
+        oauth_resource,
+        callback_port,
+        callback_url,
+        /*emit_browser_url*/ false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn perform_oauth_login_with_browser_output(
+    server_name: &str,
+    server_url: &str,
+    store_mode: OAuthCredentialsStoreMode,
+    http_headers: Option<HashMap<String, String>>,
+    env_http_headers: Option<HashMap<String, String>>,
+    scopes: &[String],
+    oauth_resource: Option<&str>,
+    callback_port: Option<u16>,
+    callback_url: Option<&str>,
+    emit_browser_url: bool,
+) -> Result<()> {
     let headers = OauthHeaders {
         http_headers,
         env_http_headers,
@@ -99,7 +153,7 @@ pub async fn perform_oauth_login(
         /*timeout_secs*/ None,
     )
     .await?
-    .finish()
+    .finish(emit_browser_url)
     .await
 }
 
@@ -135,12 +189,12 @@ pub async fn perform_oauth_login_return_url(
     .await?;
 
     let authorization_url = flow.authorization_url();
-    let (completion, cancel_handle) = flow.spawn();
+    let (cancel_handle, completion) = flow.spawn();
 
     Ok(OauthLoginHandle::new(
         authorization_url,
-        completion,
         cancel_handle,
+        completion,
     ))
 }
 
@@ -249,37 +303,22 @@ fn parse_oauth_callback(path: &str, expected_callback_path: &str) -> CallbackOut
     CallbackOutcome::Invalid
 }
 
-#[derive(Clone)]
-pub struct OauthLoginCancelHandle {
-    abort_handle: AbortHandle,
-}
-
-impl OauthLoginCancelHandle {
-    fn new(abort_handle: AbortHandle) -> Self {
-        Self { abort_handle }
-    }
-
-    pub fn cancel(&self) {
-        self.abort_handle.abort();
-    }
-}
-
 pub struct OauthLoginHandle {
     authorization_url: String,
-    completion: oneshot::Receiver<Result<()>>,
     cancel_handle: OauthLoginCancelHandle,
+    completion: oneshot::Receiver<Result<()>>,
 }
 
 impl OauthLoginHandle {
     fn new(
         authorization_url: String,
-        completion: oneshot::Receiver<Result<()>>,
         cancel_handle: OauthLoginCancelHandle,
+        completion: oneshot::Receiver<Result<()>>,
     ) -> Self {
         Self {
             authorization_url,
-            completion,
             cancel_handle,
+            completion,
         }
     }
 
@@ -291,18 +330,31 @@ impl OauthLoginHandle {
         self.cancel_handle.clone()
     }
 
-    pub fn cancel(&self) {
-        self.cancel_handle.cancel();
-    }
-
-    pub fn into_parts(self) -> (String, oneshot::Receiver<Result<()>>) {
-        (self.authorization_url, self.completion)
+    pub fn into_parts(
+        self,
+    ) -> (
+        String,
+        OauthLoginCancelHandle,
+        oneshot::Receiver<Result<()>>,
+    ) {
+        (self.authorization_url, self.cancel_handle, self.completion)
     }
 
     pub async fn wait(self) -> Result<()> {
         self.completion
             .await
             .map_err(|err| anyhow!("OAuth login task was cancelled: {err}"))?
+    }
+}
+
+#[derive(Clone)]
+pub struct OauthLoginCancelHandle {
+    abort_handle: tokio::task::AbortHandle,
+}
+
+impl OauthLoginCancelHandle {
+    pub fn cancel(&self) {
+        self.abort_handle.abort();
     }
 }
 
@@ -449,16 +501,23 @@ impl OauthLoginFlow {
         self.auth_url.clone()
     }
 
-    async fn finish(mut self) -> Result<()> {
+    async fn finish(mut self, emit_browser_url: bool) -> Result<()> {
         if self.launch_browser {
             let server_name = &self.server_name;
             let auth_url = &self.auth_url;
-            println!(
-                "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
-            );
+            if emit_browser_url {
+                println!(
+                    "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
+                );
+            }
 
             if webbrowser::open(auth_url).is_err() {
-                println!("(Browser launch failed; please copy the URL above manually.)");
+                if !emit_browser_url {
+                    eprintln!(
+                        "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
+                    );
+                }
+                eprintln!("(Browser launch failed; please copy the URL above manually.)");
             }
         }
 
@@ -506,12 +565,12 @@ impl OauthLoginFlow {
         result
     }
 
-    fn spawn(self) -> (oneshot::Receiver<Result<()>>, OauthLoginCancelHandle) {
+    fn spawn(self) -> (OauthLoginCancelHandle, oneshot::Receiver<Result<()>>) {
         let server_name_for_logging = self.server_name.clone();
         let (tx, rx) = oneshot::channel();
 
-        let task = tokio::spawn(async move {
-            let result = self.finish().await;
+        let join_handle = tokio::spawn(async move {
+            let result = self.finish(/*emit_browser_url*/ false).await;
 
             if let Err(err) = &result {
                 eprintln!(
@@ -521,9 +580,13 @@ impl OauthLoginFlow {
 
             let _ = tx.send(result);
         });
-        let cancel_handle = OauthLoginCancelHandle::new(task.abort_handle());
 
-        (rx, cancel_handle)
+        (
+            OauthLoginCancelHandle {
+                abort_handle: join_handle.abort_handle(),
+            },
+            rx,
+        )
     }
 }
 
@@ -547,13 +610,9 @@ fn append_query_param(url: &str, key: &str, value: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::time::Duration;
-    use tokio::sync::oneshot;
 
     use super::CallbackOutcome;
     use super::OAuthProviderError;
-    use super::OauthLoginCancelHandle;
-    use super::OauthLoginHandle;
     use super::append_query_param;
     use super::callback_path_from_redirect_uri;
     use super::parse_oauth_callback;
@@ -629,28 +688,5 @@ mod tests {
         let url = append_query_param("not a url", "resource", Some("api/resource"));
 
         assert_eq!(url, "not a url?resource=api%2Fresource");
-    }
-
-    #[tokio::test]
-    async fn oauth_login_handle_cancel_aborts_background_task() {
-        let (tx, rx) = oneshot::channel();
-        let task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            let _ = tx.send(Ok(()));
-        });
-        let cancel_handle = OauthLoginCancelHandle::new(task.abort_handle());
-        let handle = OauthLoginHandle::new(
-            "https://auth.example.test/oauth".to_string(),
-            rx,
-            cancel_handle,
-        );
-
-        handle.cancel();
-
-        let err = handle.wait().await.expect_err("login should be cancelled");
-        assert_eq!(
-            err.to_string(),
-            "OAuth login task was cancelled: channel closed"
-        );
     }
 }

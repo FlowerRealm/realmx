@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::Prompt;
 use crate::codex::Session;
 use crate::codex::TurnContext;
-use crate::codex::TurnToolCache;
 use crate::codex::built_tools;
 use crate::compact::InitialContextInjection;
 use crate::compact::insert_initial_context_before_last_real_user_or_summary;
@@ -97,14 +96,12 @@ async fn run_remote_compact_task_inner_impl(
         .collect();
 
     let prompt_input = history.for_prompt(&turn_context.model_info.input_modalities);
-    let mut tool_cache = TurnToolCache::default();
     let tool_router = built_tools(
         sess.as_ref(),
         turn_context.as_ref(),
         &prompt_input,
         &HashSet::new(),
         /*skills_outcome*/ None,
-        &mut tool_cache,
         &CancellationToken::new(),
     )
     .await?;
@@ -200,7 +197,7 @@ pub(crate) async fn process_compacted_history(
 /// - `developer` messages because remote output can include stale/duplicated
 ///   instruction content.
 /// - non-user-content `user` messages (session prefix/instruction wrappers),
-///   keeping only real user messages as parsed by `parse_turn_item`.
+///   while preserving real user messages and persisted hook prompts.
 ///
 /// This intentionally keeps:
 /// - `assistant` messages (future remote compaction models may emit them)
@@ -212,7 +209,7 @@ fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
         ResponseItem::Message { role, .. } if role == "user" => {
             matches!(
                 crate::event_mapping::parse_turn_item(item),
-                Some(TurnItem::UserMessage(_))
+                Some(TurnItem::UserMessage(_) | TurnItem::HookPrompt(_))
             )
         }
         ResponseItem::Message { role, .. } if role == "assistant" => true,

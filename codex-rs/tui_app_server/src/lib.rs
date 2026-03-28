@@ -21,6 +21,7 @@ use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadSortKey as AppServerThreadSortKey;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_cloud_requirements::cloud_requirements_loader_for_storage;
+use codex_core::auth::AuthConfig;
 use codex_core::auth::enforce_login_restrictions;
 use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::Config;
@@ -38,7 +39,6 @@ use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
 use codex_core::read_session_meta_line;
 use codex_core::state_db::get_state_db;
-use codex_core::terminal::Multiplexer;
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::AltScreenMode;
@@ -47,7 +47,10 @@ use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
+use codex_protocol::protocol::TurnContextItem;
 use codex_state::log_db;
+use codex_terminal_detection::Multiplexer;
+use codex_terminal_detection::terminal_info;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
@@ -78,6 +81,19 @@ mod app_server_session;
 mod ascii_animation;
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
 mod audio_device;
+#[cfg(all(not(target_os = "linux"), not(feature = "voice-input")))]
+mod audio_device {
+    use crate::app_event::RealtimeAudioDeviceKind;
+
+    pub(crate) fn list_realtime_audio_device_names(
+        kind: RealtimeAudioDeviceKind,
+    ) -> Result<Vec<String>, String> {
+        Err(format!(
+            "Failed to load realtime {} devices: voice input is unavailable in this build",
+            kind.noun()
+        ))
+    }
+}
 mod bottom_pane;
 mod chatwidget;
 mod cli;
@@ -100,6 +116,7 @@ pub mod insert_history;
 mod key_hint;
 mod line_truncation;
 pub mod live_wrap;
+mod local_chatgpt_auth;
 mod markdown;
 mod markdown_render;
 mod markdown_stream;
@@ -124,6 +141,7 @@ mod status_indicator_widget;
 mod streaming;
 mod style;
 mod terminal_palette;
+mod terminal_title;
 mod text_formatting;
 mod theme_picker;
 mod tooltips;
@@ -231,6 +249,8 @@ mod wrapping;
 
 #[cfg(test)]
 pub mod test_backend;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::onboarding::onboarding_screen::run_onboarding_app;
@@ -265,7 +285,10 @@ async fn start_embedded_app_server(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AppServerTarget {
     Embedded,
-    Remote(String),
+    Remote {
+        websocket_url: String,
+        auth_token: Option<String>,
+    },
 }
 
 fn remote_addr_has_explicit_port(addr: &str, parsed: &Url) -> bool {
@@ -297,6 +320,16 @@ fn remote_addr_has_explicit_port(addr: &str, parsed: &Url) -> bool {
     host_and_port == format!("{expected_host}:{explicit_default_port}")
 }
 
+fn websocket_url_supports_auth_token(parsed: &Url) -> bool {
+    match (parsed.scheme(), parsed.host()) {
+        ("wss", Some(_)) => true,
+        ("ws", Some(url::Host::Domain(domain))) => domain.eq_ignore_ascii_case("localhost"),
+        ("ws", Some(url::Host::Ipv4(addr))) => addr.is_loopback(),
+        ("ws", Some(url::Host::Ipv6(addr))) => addr.is_loopback(),
+        _ => false,
+    }
+}
+
 pub fn normalize_remote_addr(addr: &str) -> color_eyre::Result<String> {
     let parsed = match Url::parse(addr) {
         Ok(parsed) => parsed,
@@ -321,9 +354,24 @@ pub fn normalize_remote_addr(addr: &str) -> color_eyre::Result<String> {
     );
 }
 
-async fn connect_remote_app_server(websocket_url: String) -> color_eyre::Result<AppServerClient> {
+fn validate_remote_auth_token_transport(websocket_url: &str) -> color_eyre::Result<()> {
+    let parsed = Url::parse(websocket_url).map_err(color_eyre::Report::new)?;
+    if websocket_url_supports_auth_token(&parsed) {
+        return Ok(());
+    }
+
+    color_eyre::eyre::bail!(
+        "remote auth tokens require `wss://` or loopback `ws://` URLs; got `{websocket_url}`"
+    )
+}
+
+async fn connect_remote_app_server(
+    websocket_url: String,
+    auth_token: Option<String>,
+) -> color_eyre::Result<AppServerClient> {
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
         websocket_url,
+        auth_token,
         client_name: "codex-tui".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
@@ -355,9 +403,10 @@ async fn start_app_server(
         )
         .await
         .map(AppServerClient::InProcess),
-        AppServerTarget::Remote(websocket_url) => {
-            connect_remote_app_server(websocket_url.clone()).await
-        }
+        AppServerTarget::Remote {
+            websocket_url,
+            auth_token,
+        } => connect_remote_app_server(websocket_url.clone(), auth_token.clone()).await,
     }
 }
 
@@ -543,14 +592,18 @@ async fn lookup_latest_session_target_with_app_server(
 
 fn latest_session_lookup_params(
     is_remote: bool,
-    _config: &Config,
+    config: &Config,
     cwd_filter: Option<&Path>,
 ) -> ThreadListParams {
     ThreadListParams {
         cursor: None,
         limit: Some(1),
         sort_key: Some(AppServerThreadSortKey::UpdatedAt),
-        model_providers: None,
+        model_providers: if is_remote {
+            None
+        } else {
+            Some(vec![config.model_provider_id.clone()])
+        },
         source_kinds: Some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
         archived: Some(false),
         cwd: if is_remote {
@@ -567,11 +620,18 @@ pub async fn run_main(
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
     remote: Option<String>,
+    remote_auth_token: Option<String>,
 ) -> std::io::Result<AppExitInfo> {
     let remote_url = remote;
+    if let (Some(websocket_url), Some(_)) = (remote_url.as_deref(), remote_auth_token.as_ref()) {
+        validate_remote_auth_token_transport(websocket_url).map_err(std::io::Error::other)?;
+    }
     let app_server_target = remote_url
         .clone()
-        .map(AppServerTarget::Remote)
+        .map(|websocket_url| AppServerTarget::Remote {
+            websocket_url,
+            auth_token: remote_auth_token.clone(),
+        })
         .unwrap_or(AppServerTarget::Embedded);
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
@@ -717,6 +777,7 @@ pub async fn run_main(
         cwd,
         model_provider: model_provider_override.clone(),
         config_profile: cli.config_profile.clone(),
+        codex_self_exe: arg0_paths.codex_self_exe.clone(),
         codex_linux_sandbox_exe: arg0_paths.codex_linux_sandbox_exe.clone(),
         main_execve_wrapper_exe: arg0_paths.main_execve_wrapper_exe.clone(),
         show_raw_agent_reasoning: cli.oss.then_some(true),
@@ -757,7 +818,12 @@ pub async fn run_main(
 
     if matches!(app_server_target, AppServerTarget::Embedded) {
         #[allow(clippy::print_stderr)]
-        if let Err(err) = enforce_login_restrictions(&config) {
+        if let Err(err) = enforce_login_restrictions(&AuthConfig {
+            codex_home: config.codex_home.clone(),
+            auth_credentials_store_mode: config.cli_auth_credentials_store_mode,
+            forced_login_method: config.forced_login_method,
+            forced_chatgpt_workspace_id: config.forced_chatgpt_workspace_id.clone(),
+        }) {
             eprintln!("{err}");
             std::process::exit(1);
         }
@@ -876,6 +942,7 @@ pub async fn run_main(
         cloud_requirements,
         feedback,
         remote_url,
+        remote_auth_token,
     )
     .await
     .map_err(|err| std::io::Error::other(err.to_string()))
@@ -893,8 +960,9 @@ async fn run_ratatui_app(
     mut cloud_requirements: CloudRequirementsLoader,
     feedback: codex_feedback::CodexFeedback,
     remote_url: Option<String>,
+    remote_auth_token: Option<String>,
 ) -> color_eyre::Result<AppExitInfo> {
-    let remote_mode = matches!(&app_server_target, AppServerTarget::Remote(_));
+    let remote_mode = matches!(&app_server_target, AppServerTarget::Remote { .. });
     color_eyre::install()?;
 
     tooltips::announcement::prewarm();
@@ -912,6 +980,7 @@ async fn run_ratatui_app(
     terminal.clear()?;
 
     let mut tui = Tui::new(terminal);
+    let mut terminal_restore_guard = TerminalRestoreGuard::new();
 
     #[cfg(not(debug_assertions))]
     {
@@ -922,7 +991,7 @@ async fn run_ratatui_app(
             match update_prompt::run_update_prompt_if_needed(&mut tui, &initial_config).await? {
                 UpdatePromptOutcome::Continue => {}
                 UpdatePromptOutcome::RunUpdate(action) => {
-                    crate::tui::restore()?;
+                    terminal_restore_guard.restore()?;
                     return Ok(AppExitInfo {
                         token_usage: codex_protocol::protocol::TokenUsage::default(),
                         thread_id: None,
@@ -990,7 +1059,7 @@ async fn run_ratatui_app(
         )
         .await?;
         if onboarding_result.should_exit {
-            restore();
+            terminal_restore_guard.restore_silently();
             session_log::log_session_end();
             let _ = tui.terminal.clear();
             return Ok(AppExitInfo {
@@ -1036,7 +1105,7 @@ async fn run_ratatui_app(
 
     let mut missing_session_exit = |id_str: &str, action: &str| {
         error!("Error finding conversation path: {id_str}");
-        restore();
+        terminal_restore_guard.restore_silently();
         session_log::log_session_end();
         let _ = tui.terminal.clear();
         Ok(AppExitInfo {
@@ -1111,7 +1180,7 @@ async fn run_ratatui_app(
             .await?
             {
                 resume_picker::SessionSelection::Exit => {
-                    restore();
+                    terminal_restore_guard.restore_silently();
                     session_log::log_session_end();
                     return Ok(AppExitInfo {
                         token_usage: codex_protocol::protocol::TokenUsage::default(),
@@ -1163,7 +1232,7 @@ async fn run_ratatui_app(
         .await?
         {
             resume_picker::SessionSelection::Exit => {
-                restore();
+                terminal_restore_guard.restore_silently();
                 session_log::log_session_end();
                 return Ok(AppExitInfo {
                     token_usage: codex_protocol::protocol::TokenUsage::default(),
@@ -1194,7 +1263,7 @@ async fn run_ratatui_app(
     let fallback_cwd = match action_and_target_session_if_resume_or_fork {
         Some((action, target_session)) => {
             if remote_mode {
-                Some(current_cwd.clone())
+                Some(current_cwd.to_path_buf())
             } else {
                 match resolve_cwd_for_resume_or_fork(
                     &mut tui,
@@ -1209,7 +1278,7 @@ async fn run_ratatui_app(
                 {
                     ResolveCwdOutcome::Continue(cwd) => cwd,
                     ResolveCwdOutcome::Exit => {
-                        restore();
+                        terminal_restore_guard.restore_silently();
                         session_log::log_session_end();
                         return Ok(AppExitInfo {
                             token_usage: codex_protocol::protocol::TokenUsage::default(),
@@ -1277,7 +1346,7 @@ async fn run_ratatui_app(
     {
         Ok(app_server) => app_server,
         Err(err) => {
-            restore();
+            terminal_restore_guard.restore_silently();
             session_log::log_session_end();
             return Err(err);
         }
@@ -1297,10 +1366,11 @@ async fn run_ratatui_app(
         should_show_trust_screen, // Proxy to: is it a first run in this directory?
         should_prompt_windows_sandbox_nux_at_startup,
         remote_url,
+        remote_auth_token,
     )
     .await;
 
-    restore();
+    terminal_restore_guard.restore_silently();
     // Mark the end of the recorded session.
     session_log::log_session_end();
     // ignore error when collecting usage – report underlying error instead
@@ -1337,7 +1407,7 @@ pub(crate) async fn read_session_cwd(
     // changes, but the rollout is an append-only JSONL log and rewriting the head
     // would be error-prone.
     let path = path?;
-    if let Some(cwd) = parse_latest_turn_context_cwd(path).await {
+    if let Some(cwd) = read_latest_turn_context(path).await.map(|item| item.cwd) {
         return Some(cwd);
     }
     match read_session_meta_line(path).await {
@@ -1354,7 +1424,23 @@ pub(crate) async fn read_session_cwd(
     }
 }
 
-async fn parse_latest_turn_context_cwd(path: &Path) -> Option<PathBuf> {
+pub(crate) async fn read_session_model(
+    config: &Config,
+    thread_id: ThreadId,
+    path: Option<&Path>,
+) -> Option<String> {
+    if let Some(state_db_ctx) = get_state_db(config).await
+        && let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await
+        && let Some(model) = metadata.model
+    {
+        return Some(model);
+    }
+
+    let path = path?;
+    read_latest_turn_context(path).await.map(|item| item.model)
+}
+
+async fn read_latest_turn_context(path: &Path) -> Option<TurnContextItem> {
     let text = tokio::fs::read_to_string(path).await.ok()?;
     for line in text.lines().rev() {
         let trimmed = line.trim();
@@ -1365,7 +1451,7 @@ async fn parse_latest_turn_context_cwd(path: &Path) -> Option<PathBuf> {
             continue;
         };
         if let RolloutItem::TurnContext(item) = rollout_line.item {
-            return Some(item.cwd);
+            return Some(item);
         }
     }
     None
@@ -1426,6 +1512,38 @@ fn restore() {
     }
 }
 
+struct TerminalRestoreGuard {
+    active: bool,
+}
+
+impl TerminalRestoreGuard {
+    fn new() -> Self {
+        Self { active: true }
+    }
+
+    #[cfg_attr(debug_assertions, allow(dead_code))]
+    fn restore(&mut self) -> color_eyre::Result<()> {
+        if self.active {
+            crate::tui::restore()?;
+            self.active = false;
+        }
+        Ok(())
+    }
+
+    fn restore_silently(&mut self) {
+        if self.active {
+            restore();
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for TerminalRestoreGuard {
+    fn drop(&mut self) {
+        self.restore_silently();
+    }
+}
+
 /// Determine whether to use the terminal's alternate screen buffer.
 ///
 /// The alternate screen buffer provides a cleaner fullscreen experience without polluting
@@ -1450,7 +1568,7 @@ fn determine_alt_screen_mode(no_alt_screen: bool, tui_alternate_screen: AltScree
             AltScreenMode::Always => true,
             AltScreenMode::Never => false,
             AltScreenMode::Auto => {
-                let terminal_info = codex_core::terminal::terminal_info();
+                let terminal_info = terminal_info();
                 !matches!(terminal_info.multiplexer, Some(Multiplexer::Zellij { .. }))
             }
         }
@@ -1552,7 +1670,7 @@ mod tests {
     use codex_core::config::ConfigBuilder;
     use codex_core::config::ConfigOverrides;
     use codex_core::config::ProjectConfig;
-    use codex_core::features::Feature;
+    use codex_features::Feature;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::RolloutItem;
     use codex_protocol::protocol::RolloutLine;
@@ -1647,6 +1765,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn remote_auth_token_transport_accepts_loopback_ws() {
+        validate_remote_auth_token_transport("ws://127.0.0.1:4500/")
+            .expect("loopback ws should be allowed for auth tokens");
+        validate_remote_auth_token_transport("ws://localhost:4500/")
+            .expect("localhost ws should be allowed for auth tokens");
+        validate_remote_auth_token_transport("ws://[::1]:4500/")
+            .expect("ipv6 loopback ws should be allowed for auth tokens");
+    }
+
+    #[test]
+    fn remote_auth_token_transport_accepts_secure_wss() {
+        validate_remote_auth_token_transport("wss://example.com:443/")
+            .expect("wss should be allowed for auth tokens");
+    }
+
+    #[test]
+    fn remote_auth_token_transport_rejects_non_loopback_ws() {
+        let err = validate_remote_auth_token_transport("ws://example.com:4500/")
+            .expect_err("non-loopback ws should be rejected for auth tokens");
+        assert!(
+            err.to_string()
+                .contains("remote auth tokens require `wss://` or loopback `ws://` URLs")
+        );
+    }
+
     #[tokio::test]
     async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
     -> std::io::Result<()> {
@@ -1656,7 +1800,7 @@ mod tests {
 
         let params = latest_session_lookup_params(false, &config, Some(cwd.as_path()));
 
-        assert_eq!(params.model_providers, None);
+        assert_eq!(params.model_providers, Some(vec![config.model_provider_id]));
         assert_eq!(params.cwd, Some(cwd.to_string_lossy().to_string()));
         Ok(())
     }

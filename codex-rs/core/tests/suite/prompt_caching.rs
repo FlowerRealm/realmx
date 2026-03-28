@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used)]
-use codex_core::features::Feature;
+
+use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use codex_core::shell::Shell;
 use codex_core::shell::default_user_shell;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::ReasoningSummary;
@@ -14,7 +16,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::UserInput;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use core_test_support::TempDirExt;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
@@ -88,21 +90,6 @@ fn assert_tool_names(body: &serde_json::Value, expected_names: &[&str]) {
     );
 }
 
-fn tool_names(body: &serde_json::Value) -> Vec<String> {
-    body["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| {
-            tool.get("name")
-                .and_then(|value| value.as_str())
-                .or_else(|| tool.get("type").and_then(|value| value.as_str()))
-                .unwrap()
-                .to_string()
-        })
-        .collect()
-}
-
 fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n")
 }
@@ -138,7 +125,10 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
                 .web_search_mode
                 .set(WebSearchMode::Cached)
                 .expect("test web_search_mode should satisfy constraints");
-            let _ = config.features.enable(Feature::CollaborationModes);
+            config
+                .features
+                .enable(Feature::CollaborationModes)
+                .expect("test config should allow feature update");
         })
         .build(&server)
         .await?;
@@ -176,17 +166,43 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
+    let mut expected_tools_names = if cfg!(windows) {
+        vec!["shell_command"]
+    } else {
+        vec!["exec_command", "write_stdin"]
+    };
+    expected_tools_names.extend([
+        "update_plan",
+        "request_user_input",
+        "apply_patch",
+        "web_search",
+        "view_image",
+        "spawn_agent",
+        "send_input",
+        "resume_agent",
+        "wait_agent",
+        "close_agent",
+    ]);
     let body0 = req1.single_request().body_json();
 
-    assert_eq!(body0["instructions"], serde_json::json!(base_instructions),);
+    let expected_instructions = if expected_tools_names.contains(&"apply_patch") {
+        base_instructions
+    } else {
+        [base_instructions, APPLY_PATCH_TOOL_INSTRUCTIONS.to_string()].join("\n")
+    };
+
+    assert_eq!(
+        body0["instructions"],
+        serde_json::json!(expected_instructions),
+    );
+    assert_tool_names(&body0, &expected_tools_names);
 
     let body1 = req2.single_request().body_json();
-    assert_eq!(body1["instructions"], serde_json::json!(base_instructions),);
     assert_eq!(
-        tool_names(&body1),
-        tool_names(&body0),
-        "expected tool definitions to stay consistent across requests",
+        body1["instructions"],
+        serde_json::json!(expected_instructions),
     );
+    assert_tool_names(&body1, &expected_tools_names);
 
     Ok(())
 }
@@ -211,8 +227,14 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
     let TestCodex { codex, .. } = test_codex()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
-            let _ = config.features.disable(Feature::ApplyPatchFreeform);
-            let _ = config.features.enable(Feature::CollaborationModes);
+            config
+                .features
+                .disable(Feature::ApplyPatchFreeform)
+                .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::CollaborationModes)
+                .expect("test config should allow feature update");
             config.model = Some("gpt-5".to_string());
         })
         .build(&server)
@@ -283,7 +305,10 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
     let TestCodex { codex, config, .. } = test_codex()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
-            let _ = config.features.enable(Feature::CollaborationModes);
+            config
+                .features
+                .enable(Feature::CollaborationModes)
+                .expect("test config should allow feature update");
         })
         .build(&server)
         .await?;
@@ -516,7 +541,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
         body.get("reasoning")
             .and_then(|reasoning| reasoning.get("effort"))
             .and_then(|value| value.as_str()),
-        None
+        Some("high")
     );
     let input = body["input"]
         .as_array()
@@ -664,7 +689,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
     let new_cwd = TempDir::new().unwrap();
     let writable = TempDir::new().unwrap();
     let new_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: vec![AbsolutePathBuf::try_from(writable.path()).unwrap()],
+        writable_roots: vec![writable.abs()],
         read_only_access: Default::default(),
         network_access: true,
         exclude_tmpdir_env_var: true,
@@ -678,6 +703,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
             }],
             cwd: new_cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: new_policy.clone(),
             model: "o3".to_string(),
             effort: Some(ReasoningEffort::High),
@@ -788,8 +814,9 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: default_cwd.clone(),
+            cwd: default_cwd.to_path_buf(),
             approval_policy: default_approval_policy,
+            approvals_reviewer: None,
             sandbox_policy: default_sandbox_policy.clone(),
             model: default_model.clone(),
             effort: default_effort,
@@ -808,8 +835,9 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: default_cwd.clone(),
+            cwd: default_cwd.to_path_buf(),
             approval_policy: default_approval_policy,
+            approvals_reviewer: None,
             sandbox_policy: default_sandbox_policy.clone(),
             model: default_model.clone(),
             effort: default_effort,
@@ -912,8 +940,9 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: default_cwd.clone(),
+            cwd: default_cwd.to_path_buf(),
             approval_policy: default_approval_policy,
+            approvals_reviewer: None,
             sandbox_policy: default_sandbox_policy.clone(),
             model: default_model,
             effort: default_effort,
@@ -932,8 +961,9 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: default_cwd.clone(),
+            cwd: default_cwd.to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: "o3".to_string(),
             effort: Some(ReasoningEffort::High),

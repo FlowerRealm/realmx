@@ -6,13 +6,14 @@ use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::RefreshStrategy;
-use assert_matches::assert_matches;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelsResponse;
+use core_test_support::PathExt;
 use core_test_support::responses::mount_models_once;
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::MockServer;
@@ -34,6 +35,7 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
         request_max_retries: Some(0),
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     }
@@ -93,7 +95,15 @@ fn drops_from_last_user_only() {
         .cloned()
         .map(RolloutItem::ResponseItem)
         .collect();
-    let truncated = truncate_before_nth_user_message(InitialHistory::Forked(initial), 1);
+    let truncated = truncate_before_nth_user_message(
+        InitialHistory::Forked(initial),
+        1,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
     let got_items = truncated.get_rollout_items();
     let expected_items = vec![
         RolloutItem::ResponseItem(items[0].clone()),
@@ -110,8 +120,19 @@ fn drops_from_last_user_only() {
         .cloned()
         .map(RolloutItem::ResponseItem)
         .collect();
-    let truncated2 = truncate_before_nth_user_message(InitialHistory::Forked(initial2), 2);
-    assert_matches!(truncated2, InitialHistory::New);
+    let truncated2 = truncate_before_nth_user_message(
+        InitialHistory::Forked(initial2.clone()),
+        2,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
+    assert_eq!(
+        serde_json::to_value(truncated2.get_rollout_items()).unwrap(),
+        serde_json::to_value(initial2).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -129,7 +150,15 @@ async fn ignores_session_prefix_messages_when_truncating() {
         .map(RolloutItem::ResponseItem)
         .collect();
 
-    let truncated = truncate_before_nth_user_message(InitialHistory::Forked(rollout_items), 1);
+    let truncated = truncate_before_nth_user_message(
+        InitialHistory::Forked(rollout_items),
+        1,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
     let got_items = truncated.get_rollout_items();
 
     let expected: Vec<RolloutItem> = vec![
@@ -150,13 +179,16 @@ async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.codex_home = temp_dir.path().join("codex-home");
-    config.cwd = config.codex_home.clone();
+    config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.codex_home.clone(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
     let thread_1 = manager
         .start_thread(config.clone())
@@ -189,7 +221,7 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.codex_home = temp_dir.path().join("codex-home");
-    config.cwd = config.codex_home.clone();
+    config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
     config.model_catalog = None;
     config
@@ -206,6 +238,9 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
         auth_manager,
         SessionSource::Exec,
         CollaborationModesConfig::default(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
 
     let _ = manager.list_models(RefreshStrategy::Online).await;
@@ -250,7 +285,7 @@ async fn new_uses_current_model_provider_for_model_refresh() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.codex_home = temp_dir.path().join("codex-home");
-    config.cwd = config.codex_home.clone();
+    config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
     config.model_catalog = None;
     config.model_provider_id = "custom-provider".to_string();
@@ -266,6 +301,9 @@ async fn new_uses_current_model_provider_for_model_refresh() {
         auth_manager,
         SessionSource::Exec,
         CollaborationModesConfig::default(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
 
     let models = manager.list_models(RefreshStrategy::Online).await;

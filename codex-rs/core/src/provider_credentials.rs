@@ -228,10 +228,10 @@ pub fn rename_provider_api_key(
 
 fn clear_resolved_provider_api_key(codex_home: &Path, provider_id: &str) -> Result<bool> {
     let Some((scope, _)) = resolve_provider_api_key(codex_home, provider_id)? else {
-        return Ok(clear_legacy_provider_api_key_from_config(
+        return clear_legacy_provider_api_key_from_config(
             codex_home,
             provider_id,
-        )?);
+        );
     };
 
     logout_for_scope(codex_home, &scope, PROVIDER_API_KEY_STORE_MODE).map_err(config_error)
@@ -440,6 +440,7 @@ mod tests {
             request_max_retries: None,
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: true,
             supports_websockets: false,
         }
@@ -462,6 +463,7 @@ mod tests {
             request_max_retries: None,
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
         }
@@ -643,9 +645,9 @@ mod tests {
     #[tokio::test]
     async fn resolve_provider_credential_prefers_auth_json_api_key_over_stale_in_memory_provider() {
         let codex_home = tempdir().expect("temp dir");
-        let mut config_provider = config_provider();
-        config_provider.api_key = None;
-        write_provider_config(codex_home.path(), config_provider);
+        let mut stored_provider = config_provider();
+        stored_provider.api_key = None;
+        write_provider_config(codex_home.path(), stored_provider);
         store_provider_api_key(codex_home.path(), "acme", "new-secret").expect("store api key");
 
         let mut stale_provider = config_provider();
@@ -690,9 +692,9 @@ mod tests {
     fn detect_provider_credential_mode_does_not_use_stale_in_memory_api_key_when_disk_key_is_cleared()
      {
         let codex_home = tempdir().expect("temp dir");
-        let mut config_provider = config_provider();
-        config_provider.api_key = None;
-        write_provider_config(codex_home.path(), config_provider);
+        let mut stored_provider = config_provider();
+        stored_provider.api_key = None;
+        write_provider_config(codex_home.path(), stored_provider);
 
         let mut stale_provider = config_provider();
         stale_provider.api_key = Some("old-secret".to_string());

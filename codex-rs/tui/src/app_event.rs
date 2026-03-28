@@ -10,27 +10,27 @@
 
 use std::path::PathBuf;
 
-use crate::bottom_pane::ApprovalRequest;
-use crate::bottom_pane::StatusLineItem;
-use crate::history_cell::HistoryCell;
-use crate::provider_flow::ProviderField;
-use crate::provider_flow::ProviderFlowLocation;
-use crate::provider_flow::ProviderFlowNavigation;
-use crate::provider_flow::ProviderFlowSource;
-use crate::provider_flow::ProviderScreen;
-use crate::provider_usage::ProviderUsageRefreshResult;
-use crate::settings::data::SettingsScope;
-use crate::settings::data::SettingsScreen;
+use codex_app_server_protocol::PluginInstallResponse;
+use codex_app_server_protocol::PluginListResponse;
+use codex_app_server_protocol::PluginReadParams;
+use codex_app_server_protocol::PluginReadResponse;
+use codex_app_server_protocol::PluginUninstallResponse;
 use codex_chatgpt::connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::ApprovalPreset;
 
+use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::StatusLineItem;
+use crate::bottom_pane::TerminalTitleItem;
+use crate::history_cell::HistoryCell;
+
 use codex_core::config::types::ApprovalsReviewer;
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ServiceTier;
@@ -138,23 +138,10 @@ pub(crate) enum AppEvent {
     /// Result of refreshing rate limits
     RateLimitSnapshotFetched(RateLimitSnapshot),
 
-    /// Result of refreshing provider usage snapshot.
-    ProviderUsageSnapshotFetched(Option<ProviderUsageRefreshResult>),
-
     /// Result of prefetching connectors.
     ConnectorsLoaded {
         result: Result<ConnectorsSnapshot, String>,
         is_final: bool,
-    },
-
-    /// Result of loading model picker entries for the active provider.
-    ModelPickerLoaded {
-        result: Result<Vec<ModelPreset>, String>,
-    },
-
-    /// Result of refreshing models for the active provider.
-    ActiveProviderModelsRefreshed {
-        result: Result<Vec<ModelPreset>, String>,
     },
 
     /// Result of computing a `/diff` command.
@@ -180,6 +167,84 @@ pub(crate) enum AppEvent {
     RefreshConnectors {
         force_refetch: bool,
     },
+
+    /// Fetch plugin marketplace state for the provided working directory.
+    FetchPluginsList {
+        cwd: PathBuf,
+    },
+
+    /// Result of fetching plugin marketplace state.
+    PluginsLoaded {
+        cwd: PathBuf,
+        result: Result<PluginListResponse, String>,
+    },
+
+    /// Replace the plugins popup with a plugin-detail loading state.
+    OpenPluginDetailLoading {
+        plugin_display_name: String,
+    },
+
+    /// Fetch detail for a specific plugin from a marketplace.
+    FetchPluginDetail {
+        cwd: PathBuf,
+        params: PluginReadParams,
+    },
+
+    /// Result of fetching plugin detail.
+    PluginDetailLoaded {
+        cwd: PathBuf,
+        result: Result<PluginReadResponse, String>,
+    },
+
+    /// Replace the plugins popup with an install loading state.
+    OpenPluginInstallLoading {
+        plugin_display_name: String,
+    },
+
+    /// Replace the plugins popup with an uninstall loading state.
+    OpenPluginUninstallLoading {
+        plugin_display_name: String,
+    },
+
+    /// Install a specific plugin from a marketplace.
+    FetchPluginInstall {
+        cwd: PathBuf,
+        marketplace_path: AbsolutePathBuf,
+        plugin_name: String,
+        plugin_display_name: String,
+    },
+
+    /// Result of installing a plugin.
+    PluginInstallLoaded {
+        cwd: PathBuf,
+        marketplace_path: AbsolutePathBuf,
+        plugin_name: String,
+        plugin_display_name: String,
+        result: Result<PluginInstallResponse, String>,
+    },
+
+    /// Uninstall a specific plugin by canonical plugin id.
+    FetchPluginUninstall {
+        cwd: PathBuf,
+        plugin_id: String,
+        plugin_display_name: String,
+    },
+
+    /// Result of uninstalling a plugin.
+    PluginUninstallLoaded {
+        cwd: PathBuf,
+        plugin_id: String,
+        plugin_display_name: String,
+        result: Result<PluginUninstallResponse, String>,
+    },
+
+    /// Advance the post-install plugin app-auth flow.
+    PluginInstallAuthAdvance {
+        refresh_connectors: bool,
+    },
+
+    /// Abandon the post-install plugin app-auth flow.
+    PluginInstallAuthAbandon,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
 
@@ -214,78 +279,6 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
-    /// Remove a custom provider entry.
-    RemoveModelProvider {
-        id: String,
-    },
-
-    /// Open the provider usage script editor for a provider.
-    OpenProviderUsageScriptEditor {
-        id: String,
-        return_to: Option<ProviderFlowLocation>,
-    },
-
-    /// Open a /provider screen.
-    OpenProviderFlow {
-        source: ProviderFlowSource,
-        scope: SettingsScope,
-        screen: ProviderScreen,
-    },
-
-    /// Open the write-scope picker inside /provider.
-    OpenProviderScopePicker {
-        source: ProviderFlowSource,
-        current_scope: SettingsScope,
-        current_screen: ProviderScreen,
-    },
-
-    /// Open a single-field editor inside /provider.
-    OpenProviderFieldEditor {
-        location: ProviderFlowLocation,
-        provider_id: Option<String>,
-        field: ProviderField,
-    },
-
-    /// Update the in-memory create draft for /provider.
-    UpdateProviderCreateDraft {
-        field: ProviderField,
-        value: String,
-    },
-
-    /// Persist the current /provider create draft as a new custom provider.
-    SaveProviderCreateDraft {
-        source: ProviderFlowSource,
-        scope: SettingsScope,
-    },
-
-    /// Persist a single-field edit for an existing provider.
-    SaveProviderFieldEdit {
-        location: ProviderFlowLocation,
-        provider_id: String,
-        field: ProviderField,
-        value: String,
-    },
-
-    /// Persist a project-local provider usage script.
-    PersistProviderUsageScript {
-        provider_id: String,
-        script: String,
-        return_to: Option<ProviderFlowLocation>,
-    },
-
-    /// Delete a project-local provider usage script.
-    DeleteProviderUsageScript {
-        provider_id: String,
-        return_to: Option<ProviderFlowLocation>,
-    },
-
-    /// Persist the default provider selection and refresh runtime config.
-    PersistDefaultModelProvider {
-        id: String,
-        scope: SettingsScope,
-        navigation: ProviderFlowNavigation,
-    },
-
     /// Persist the selected personality to the appropriate config.
     PersistPersonalitySelection {
         personality: Personality,
@@ -294,6 +287,11 @@ pub(crate) enum AppEvent {
     /// Persist the selected service tier to the appropriate config.
     PersistServiceTierSelection {
         service_tier: Option<ServiceTier>,
+    },
+
+    /// Open the device picker for a realtime microphone or speaker.
+    OpenRealtimeAudioDeviceSelection {
+        kind: RealtimeAudioDeviceKind,
     },
 
     /// Persist the selected realtime microphone or speaker to top-level config.
@@ -309,34 +307,6 @@ pub(crate) enum AppEvent {
     /// Restart the selected realtime microphone or speaker locally.
     RestartRealtimeAudioDevice {
         kind: RealtimeAudioDeviceKind,
-    },
-
-    /// Open a /settings screen.
-    OpenSettings {
-        scope: SettingsScope,
-        screen: SettingsScreen,
-        selected_item_key: Option<String>,
-    },
-
-    /// Open the write-scope picker inside /settings.
-    OpenSettingsScopePicker {
-        current_scope: SettingsScope,
-        current_screen: SettingsScreen,
-    },
-
-    /// Open an editor for one config key inside /settings.
-    OpenSettingEditor {
-        key_path: String,
-        scope: SettingsScope,
-        screen: SettingsScreen,
-    },
-
-    /// Persist a value change made from /settings.
-    SaveSettingValue {
-        key_path: String,
-        scope: SettingsScope,
-        screen: SettingsScreen,
-        value: Option<toml::Value>,
     },
 
     /// Open the reasoning selection popup after picking a model.
@@ -566,6 +536,16 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
+    /// Apply a user-confirmed terminal-title item ordering/selection.
+    TerminalTitleSetup {
+        items: Vec<TerminalTitleItem>,
+    },
+    /// Apply a temporary terminal-title preview while the setup UI is open.
+    TerminalTitleSetupPreview {
+        items: Vec<TerminalTitleItem>,
+    },
+    /// Dismiss the terminal-title setup UI without changing config.
+    TerminalTitleSetupCancelled,
 
     /// Apply a user-confirmed syntax theme selection.
     SyntaxThemeSelected {

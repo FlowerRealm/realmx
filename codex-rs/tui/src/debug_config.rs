@@ -442,9 +442,9 @@ mod tests {
             absolute_path("/etc/codex/config.toml")
         };
         let project_folder = if cfg!(windows) {
-            absolute_path("C:\\repo\\.realmx")
+            absolute_path("C:\\repo\\.codex")
         } else {
-            absolute_path("/repo/.realmx")
+            absolute_path("/repo/.codex")
         };
 
         let layers = vec![
@@ -528,6 +528,7 @@ mod tests {
             allowed_approval_policies: Some(vec![AskForApproval::OnRequest]),
             allowed_sandbox_modes: Some(vec![SandboxModeRequirement::ReadOnly]),
             allowed_web_search_modes: Some(vec![WebSearchModeRequirement::Cached]),
+            guardian_developer_instructions: None,
             feature_requirements: None,
             mcp_servers: Some(BTreeMap::from([(
                 "docs".to_string(),
@@ -544,9 +545,9 @@ mod tests {
         };
 
         let user_file = if cfg!(windows) {
-            absolute_path("C:\\users\\alice\\.realmx\\config.toml")
+            absolute_path("C:\\users\\alice\\.codex\\config.toml")
         } else {
-            absolute_path("/home/alice/.realmx/config.toml")
+            absolute_path("/home/alice/.codex/config.toml")
         };
         let stack = ConfigLayerStack::new(
             vec![ConfigLayerEntry::new(
@@ -655,6 +656,7 @@ approval_policy = "never"
             allowed_approval_policies: None,
             allowed_sandbox_modes: None,
             allowed_web_search_modes: Some(Vec::new()),
+            guardian_developer_instructions: None,
             feature_requirements: None,
             mcp_servers: None,
             apps: None,

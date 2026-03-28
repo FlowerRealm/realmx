@@ -38,9 +38,11 @@ pub(crate) struct CommandPopup {
 pub(crate) struct CommandPopupFlags {
     pub(crate) collaboration_modes_enabled: bool,
     pub(crate) connectors_enabled: bool,
+    pub(crate) plugins_command_enabled: bool,
     pub(crate) fast_command_enabled: bool,
     pub(crate) personality_command_enabled: bool,
     pub(crate) realtime_conversation_enabled: bool,
+    pub(crate) audio_device_selection_enabled: bool,
     pub(crate) windows_degraded_sandbox_active: bool,
 }
 
@@ -49,9 +51,11 @@ impl From<CommandPopupFlags> for slash_commands::BuiltinCommandFlags {
         Self {
             collaboration_modes_enabled: value.collaboration_modes_enabled,
             connectors_enabled: value.connectors_enabled,
+            plugins_command_enabled: value.plugins_command_enabled,
             fast_command_enabled: value.fast_command_enabled,
             personality_command_enabled: value.personality_command_enabled,
             realtime_conversation_enabled: value.realtime_conversation_enabled,
+            audio_device_selection_enabled: value.audio_device_selection_enabled,
             allow_elevate_sandbox: value.windows_degraded_sandbox_active,
         }
     }
@@ -64,6 +68,7 @@ impl CommandPopup {
             slash_commands::builtins_for_input(flags.into())
                 .into_iter()
                 .filter(|(name, _)| !name.starts_with("debug"))
+                .filter(|(_, cmd)| *cmd != SlashCommand::Apps)
                 .collect();
         // Exclude prompts that collide with builtin command names and sort by name.
         let exclude: HashSet<String> = builtins.iter().map(|(n, _)| (*n).to_string()).collect();
@@ -507,9 +512,11 @@ mod tests {
             CommandPopupFlags {
                 collaboration_modes_enabled: true,
                 connectors_enabled: false,
+                plugins_command_enabled: false,
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
+                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -528,9 +535,11 @@ mod tests {
             CommandPopupFlags {
                 collaboration_modes_enabled: true,
                 connectors_enabled: false,
+                plugins_command_enabled: false,
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
+                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -549,9 +558,11 @@ mod tests {
             CommandPopupFlags {
                 collaboration_modes_enabled: true,
                 connectors_enabled: false,
+                plugins_command_enabled: false,
                 fast_command_enabled: false,
                 personality_command_enabled: false,
                 realtime_conversation_enabled: false,
+                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -578,9 +589,11 @@ mod tests {
             CommandPopupFlags {
                 collaboration_modes_enabled: true,
                 connectors_enabled: false,
+                plugins_command_enabled: false,
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: false,
+                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
@@ -593,24 +606,35 @@ mod tests {
     }
 
     #[test]
-    fn settings_command_is_still_visible() {
+    fn settings_command_hidden_when_audio_device_selection_is_disabled() {
         let mut popup = CommandPopup::new(
             Vec::new(),
             CommandPopupFlags {
                 collaboration_modes_enabled: false,
                 connectors_enabled: false,
+                plugins_command_enabled: false,
                 fast_command_enabled: false,
                 personality_command_enabled: true,
                 realtime_conversation_enabled: true,
+                audio_device_selection_enabled: false,
                 windows_degraded_sandbox_active: false,
             },
         );
-        popup.on_composer_text_change("/settings".to_string());
+        popup.on_composer_text_change("/aud".to_string());
 
-        match popup.selected_item() {
-            Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "settings"),
-            other => panic!("expected settings to be selected for exact match, got {other:?}"),
-        }
+        let cmds: Vec<&str> = popup
+            .filtered_items()
+            .into_iter()
+            .filter_map(|item| match item {
+                CommandItem::Builtin(cmd) => Some(cmd.command()),
+                CommandItem::UserPrompt(_) => None,
+            })
+            .collect();
+
+        assert!(
+            !cmds.contains(&"settings"),
+            "expected '/settings' to be hidden when audio device selection is disabled, got {cmds:?}"
+        );
     }
 
     #[test]

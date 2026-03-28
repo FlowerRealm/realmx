@@ -504,10 +504,11 @@ impl ModelsManager {
             .auth_manager
             .auth_for_provider(Some(provider_id.as_str()))
             .await;
-        let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
+        let api_auth_mode = auth.as_ref().map(CodexAuth::api_auth_mode);
+        let telemetry_auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let provider_generation = self.provider_generation.load(Ordering::SeqCst);
         let provider = self.provider.read().await.clone();
-        let api_provider = provider.to_api_provider(auth_mode)?;
+        let api_provider = provider.to_api_provider(api_auth_mode)?;
         let api_auth = auth_provider_from_auth(
             &self.codex_home,
             &provider_id,
@@ -518,7 +519,7 @@ impl ModelsManager {
         .await?;
         let transport = ReqwestTransport::new(build_reqwest_client());
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+            auth_mode: telemetry_auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
             auth_header_attached: api_auth.auth_header_attached(),
             auth_header_name: api_auth.auth_header_name(),
         });
@@ -639,8 +640,8 @@ impl ModelsManager {
         let chatgpt_mode = self.provider_id.try_read().ok().is_some_and(|provider_id| {
             matches!(
                 self.auth_manager
-                    .auth_mode_for_provider(Some(provider_id.as_str())),
-                Some(AuthMode::Chatgpt)
+                    .get_api_auth_mode_for_provider(Some(provider_id.as_str())),
+                Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
             )
         });
         presets = ModelPreset::filter_by_auth(presets, chatgpt_mode);

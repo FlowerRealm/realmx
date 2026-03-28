@@ -2,12 +2,10 @@
 source: tui/src/chatwidget/tests.rs
 expression: popup
 ---
-  Select Microphone
-  Saved devices apply to realtime voice only.
+  Settings
+  Configure settings for Codex.
 
-› 1. System default (current)  Use your operating
-                               system default device.
-  2. Built-in Mic
-  3. USB Mic
+› 1. Microphone  Current: System default
+  2. Speaker     Current: System default
 
   Press enter to confirm or esc to go back
