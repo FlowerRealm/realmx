@@ -2518,7 +2518,7 @@ impl App {
                             "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
                         )
                     });
-                app_event_tx.send(AppEvent::StartupModelsRefreshed { result });
+                app_event_tx.send(AppEvent::ActiveProviderModelsRefreshed { result });
             });
         }
 
@@ -3051,14 +3051,15 @@ impl App {
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }
-            AppEvent::StartupModelsRefreshed { result } => match result {
+            AppEvent::ActiveProviderModelsRefreshed { result } => match result {
                 Ok(models) => {
                     self.model_catalog.replace_models(models);
-                    self.chat_widget.on_startup_models_refreshed(Ok(()));
+                    self.chat_widget.on_active_provider_models_refreshed(Ok(()));
                     self.refresh_status_line();
                 }
                 Err(err) => {
-                    self.chat_widget.on_startup_models_refreshed(Err(err));
+                    self.chat_widget
+                        .on_active_provider_models_refreshed(Err(err));
                 }
             },
             AppEvent::UpdateReasoningEffort(effort) => {

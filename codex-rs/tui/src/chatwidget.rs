@@ -9410,7 +9410,10 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    pub(crate) fn on_startup_models_refreshed(&mut self, result: Result<Vec<ModelPreset>, String>) {
+    pub(crate) fn on_active_provider_models_refreshed(
+        &mut self,
+        result: Result<Vec<ModelPreset>, String>,
+    ) {
         match result {
             Ok(_) => {
                 self.refresh_model_display();

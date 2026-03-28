@@ -223,6 +223,18 @@ pub enum ExitReason {
     Fatal(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActiveProviderModelsRefreshPolicy {
+    Refresh,
+    Skip,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActiveProviderModelsRefreshTrigger {
+    Startup,
+    ProviderChange,
+}
+
 fn session_summary(
     token_usage: TokenUsage,
     thread_id: Option<ThreadId>,
@@ -863,7 +875,33 @@ impl App {
         Ok(())
     }
 
-    async fn refresh_config_after_provider_change(&mut self) -> Result<()> {
+    fn spawn_active_provider_models_refresh(&self, trigger: ActiveProviderModelsRefreshTrigger) {
+        let thread_manager = Arc::clone(&self.server);
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = thread_manager
+                .refresh_models_for_active_provider()
+                .await
+                .map_err(|err| match trigger {
+                    ActiveProviderModelsRefreshTrigger::Startup => {
+                        format!(
+                            "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
+                        )
+                    }
+                    ActiveProviderModelsRefreshTrigger::ProviderChange => {
+                        format!(
+                            "Failed to refresh models from the active provider after switching providers; continuing with the current model list: {err}"
+                        )
+                    }
+                });
+            app_event_tx.send(AppEvent::ActiveProviderModelsRefreshed { result });
+        });
+    }
+
+    async fn refresh_config_after_provider_change(
+        &mut self,
+        refresh_policy: ActiveProviderModelsRefreshPolicy,
+    ) -> Result<()> {
         let mut config = self.rebuild_config_for_cwd(self.config.cwd.clone()).await?;
         self.apply_runtime_policy_overrides(&mut config);
         self.server
@@ -879,6 +917,11 @@ impl App {
         self.config = config;
         self.active_profile = self.config.active_profile.clone();
         self.refresh_status_line();
+        if refresh_policy == ActiveProviderModelsRefreshPolicy::Refresh {
+            self.spawn_active_provider_models_refresh(
+                ActiveProviderModelsRefreshTrigger::ProviderChange,
+            );
+        }
         Ok(())
     }
 
@@ -887,8 +930,10 @@ impl App {
         source: ProviderFlowSource,
         scope: SettingsScope,
         screen: ProviderScreen,
+        refresh_policy: ActiveProviderModelsRefreshPolicy,
     ) -> Result<()> {
-        self.refresh_config_after_provider_change().await?;
+        self.refresh_config_after_provider_change(refresh_policy)
+            .await?;
         self.chat_widget.open_provider_flow(source, scope, screen);
         Ok(())
     }
@@ -908,8 +953,13 @@ impl App {
             }
             ProviderFlowNavigation::ReturnToRoot { source, scope } => {
                 let _ = self.chat_widget.dismiss_active_bottom_view();
-                self.open_provider_flow_after_refresh(source, scope, ProviderScreen::Root)
-                    .await?;
+                self.open_provider_flow_after_refresh(
+                    source,
+                    scope,
+                    ProviderScreen::Root,
+                    ActiveProviderModelsRefreshPolicy::Refresh,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -942,7 +992,12 @@ impl App {
             .await
         {
             Ok(()) => {
-                if let Err(err) = self.refresh_config_after_provider_change().await {
+                if let Err(err) = self
+                    .refresh_config_after_provider_change(
+                        ActiveProviderModelsRefreshPolicy::Refresh,
+                    )
+                    .await
+                {
                     self.chat_widget.add_error_message(format!(
                         "Provider switched but failed to reload config: {err}"
                     ));
@@ -1040,6 +1095,7 @@ impl App {
             source,
             scope.normalized(self.active_profile.as_deref()),
             ProviderScreen::Detail { provider_id },
+            ActiveProviderModelsRefreshPolicy::Skip,
         )
         .await
     }
@@ -1073,6 +1129,11 @@ impl App {
         validate_provider_id(&id, &data.rows, Some(&provider_id))
             .map_err(|err| color_eyre::eyre::eyre!(err))?;
         let next_provider_id = id.clone();
+        let refresh_policy = if self.config.model_provider_id == provider_id {
+            ActiveProviderModelsRefreshPolicy::Refresh
+        } else {
+            ActiveProviderModelsRefreshPolicy::Skip
+        };
         self.persist_model_provider(
             Some(provider_id.clone()),
             id,
@@ -1086,6 +1147,7 @@ impl App {
             ProviderScreen::Detail {
                 provider_id: next_provider_id,
             },
+            refresh_policy,
         )
         .await?;
         Ok(())
@@ -2798,21 +2860,7 @@ impl App {
             }
         }
 
-        {
-            let thread_manager = thread_manager.clone();
-            let app_event_tx = app.app_event_tx.clone();
-            tokio::spawn(async move {
-                let result = thread_manager
-                    .refresh_models_for_startup()
-                    .await
-                    .map_err(|err| {
-                        format!(
-                            "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
-                        )
-                    });
-                app_event_tx.send(AppEvent::StartupModelsRefreshed { result });
-            });
-        }
+        app.spawn_active_provider_models_refresh(ActiveProviderModelsRefreshTrigger::Startup);
 
         let tui_events = tui.event_stream();
         tokio::pin!(tui_events);
@@ -3334,8 +3382,8 @@ impl App {
             AppEvent::ModelPickerLoaded { result } => {
                 self.chat_widget.on_model_picker_loaded(result);
             }
-            AppEvent::StartupModelsRefreshed { result } => {
-                self.chat_widget.on_startup_models_refreshed(result);
+            AppEvent::ActiveProviderModelsRefreshed { result } => {
+                self.chat_widget.on_active_provider_models_refreshed(result);
                 self.refresh_status_line();
             }
             AppEvent::UpdateReasoningEffort(effort) => {
@@ -3878,7 +3926,15 @@ impl App {
                     .await
                 {
                     Ok(()) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                        let refresh_policy = if self.config.model_provider_id == id {
+                            ActiveProviderModelsRefreshPolicy::Refresh
+                        } else {
+                            ActiveProviderModelsRefreshPolicy::Skip
+                        };
+                        if let Err(err) = self
+                            .refresh_config_after_provider_change(refresh_policy)
+                            .await
+                        {
                             self.chat_widget.add_error_message(format!(
                                 "Provider removed but failed to reload config: {err}"
                             ));
@@ -3908,7 +3964,12 @@ impl App {
             .await
             {
                 Ok(path) => {
-                    if let Err(err) = self.refresh_config_after_provider_change().await {
+                    if let Err(err) = self
+                        .refresh_config_after_provider_change(
+                            ActiveProviderModelsRefreshPolicy::Skip,
+                        )
+                        .await
+                    {
                         self.chat_widget.add_error_message(format!(
                             "Usage script saved but failed to reload config: {err}"
                         ));
@@ -3947,7 +4008,12 @@ impl App {
                 .await
                 {
                     Ok(path) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
+                        if let Err(err) = self
+                            .refresh_config_after_provider_change(
+                                ActiveProviderModelsRefreshPolicy::Skip,
+                            )
+                            .await
+                        {
                             self.chat_widget.add_error_message(format!(
                                 "Usage script deleted but failed to reload config: {err}"
                             ));
@@ -7755,7 +7821,7 @@ guardian_approval = true
         )
         .await;
 
-        let mut app = make_test_app().await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         app.chat_widget.set_config(app.config.clone());
@@ -7792,7 +7858,8 @@ guardian_approval = true
             .await
             .expect("persist provider edits");
 
-        app.refresh_config_after_provider_change().await?;
+        app.refresh_config_after_provider_change(ActiveProviderModelsRefreshPolicy::Refresh)
+            .await?;
 
         assert_eq!(app.config.model_provider_id, "custom-provider");
         assert_eq!(
@@ -7803,10 +7870,28 @@ guardian_approval = true
             thread.config_snapshot().await.model_provider_id,
             "custom-provider"
         );
+
+        let result = time::timeout(Duration::from_secs(2), async {
+            loop {
+                match app_event_rx.recv().await {
+                    Some(AppEvent::ActiveProviderModelsRefreshed { result }) => break result,
+                    Some(_) => continue,
+                    None => panic!("app event channel closed while waiting for model refresh"),
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for active provider models refresh");
+        assert!(
+            matches!(&result, Ok(models) if models.iter().any(|preset| preset.model == dynamic_slug)),
+            "provider change should refresh models from the new provider"
+        );
+        app.chat_widget.on_active_provider_models_refreshed(result);
+
         let available_models = app
             .server
             .get_models_manager()
-            .list_models(RefreshStrategy::OnlineIfUncached)
+            .list_models(RefreshStrategy::Offline)
             .await;
         assert!(
             available_models
@@ -7815,6 +7900,24 @@ guardian_approval = true
             "provider change should swap the active models manager to the new provider"
         );
         assert_eq!(models_mock.requests().len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refresh_config_after_provider_change_can_skip_active_provider_refresh() -> Result<()> {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+
+        app.refresh_config_after_provider_change(ActiveProviderModelsRefreshPolicy::Skip)
+            .await?;
+
+        assert!(
+            time::timeout(Duration::from_millis(50), app_event_rx.recv())
+                .await
+                .is_err(),
+            "skipping active provider refresh should not enqueue a refresh event"
+        );
         Ok(())
     }
 

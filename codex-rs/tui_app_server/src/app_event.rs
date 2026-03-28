@@ -141,8 +141,8 @@ pub(crate) enum AppEvent {
         is_final: bool,
     },
 
-    /// Result of refreshing startup models for the active provider.
-    StartupModelsRefreshed {
+    /// Result of refreshing models for the active provider.
+    ActiveProviderModelsRefreshed {
         result: Result<Vec<ModelPreset>, String>,
     },
 

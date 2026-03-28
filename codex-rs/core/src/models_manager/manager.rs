@@ -295,9 +295,9 @@ impl ModelsManager {
         Ok(self.build_available_models(remote_models))
     }
 
-    /// Force a network refresh and return the latest picker-ready presets.
+    /// Force a network refresh and return the latest picker-ready presets for the active provider.
     #[instrument(level = "info", skip(self))]
-    pub async fn refresh_models_for_startup_result(&self) -> CoreResult<Vec<ModelPreset>> {
+    pub async fn refresh_models_for_active_provider_result(&self) -> CoreResult<Vec<ModelPreset>> {
         self.list_models_result(RefreshStrategy::Online).await
     }
 

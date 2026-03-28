@@ -152,8 +152,8 @@ pub(crate) enum AppEvent {
         result: Result<Vec<ModelPreset>, String>,
     },
 
-    /// Result of refreshing startup models for the active provider.
-    StartupModelsRefreshed {
+    /// Result of refreshing models for the active provider.
+    ActiveProviderModelsRefreshed {
         result: Result<Vec<ModelPreset>, String>,
     },
 
