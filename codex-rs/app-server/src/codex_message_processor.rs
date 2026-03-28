@@ -442,13 +442,6 @@ enum EnsureConversationListenerResult {
     ConnectionClosed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RefreshTokenRequestOutcome {
-    NotAttemptedOrSucceeded,
-    FailedTransiently,
-    FailedPermanently,
-}
-
 pub(crate) struct CodexMessageProcessorArgs {
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) thread_manager: Arc<ThreadManager>,

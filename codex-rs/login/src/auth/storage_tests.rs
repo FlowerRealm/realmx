@@ -23,7 +23,7 @@ async fn file_storage_load_returns_auth_store_json() -> anyhow::Result<()> {
         tokens: None,
         last_refresh: Some(Utc::now()),
     };
-    let auth_store_json = auth_store(auth_dot_json.clone());
+    let auth_store_json = auth_store(auth_dot_json);
 
     storage
         .save(&auth_store_json)
