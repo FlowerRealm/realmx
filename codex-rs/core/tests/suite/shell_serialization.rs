@@ -434,7 +434,7 @@ Output:
 4
 5
 6
-.*…46 tokens truncated….*
+.*…178 chars truncated….*
 396
 397
 398

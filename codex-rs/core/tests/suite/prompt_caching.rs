@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-
-use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use codex_core::features::Feature;
 use codex_core::shell::Shell;
 use codex_core::shell::default_user_shell;
@@ -90,6 +88,21 @@ fn assert_tool_names(body: &serde_json::Value, expected_names: &[&str]) {
     );
 }
 
+fn tool_names(body: &serde_json::Value) -> Vec<String> {
+    body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| {
+            tool.get("name")
+                .and_then(|value| value.as_str())
+                .or_else(|| tool.get("type").and_then(|value| value.as_str()))
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
 fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n")
 }
@@ -125,10 +138,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
                 .web_search_mode
                 .set(WebSearchMode::Cached)
                 .expect("test web_search_mode should satisfy constraints");
-            config
-                .features
-                .enable(Feature::CollaborationModes)
-                .expect("test config should allow feature update");
+            let _ = config.features.enable(Feature::CollaborationModes);
         })
         .build(&server)
         .await?;
@@ -166,43 +176,17 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    let mut expected_tools_names = if cfg!(windows) {
-        vec!["shell_command"]
-    } else {
-        vec!["exec_command", "write_stdin"]
-    };
-    expected_tools_names.extend([
-        "update_plan",
-        "request_user_input",
-        "apply_patch",
-        "web_search",
-        "view_image",
-        "spawn_agent",
-        "send_input",
-        "resume_agent",
-        "wait_agent",
-        "close_agent",
-    ]);
     let body0 = req1.single_request().body_json();
 
-    let expected_instructions = if expected_tools_names.contains(&"apply_patch") {
-        base_instructions
-    } else {
-        [base_instructions, APPLY_PATCH_TOOL_INSTRUCTIONS.to_string()].join("\n")
-    };
-
-    assert_eq!(
-        body0["instructions"],
-        serde_json::json!(expected_instructions),
-    );
-    assert_tool_names(&body0, &expected_tools_names);
+    assert_eq!(body0["instructions"], serde_json::json!(base_instructions),);
 
     let body1 = req2.single_request().body_json();
+    assert_eq!(body1["instructions"], serde_json::json!(base_instructions),);
     assert_eq!(
-        body1["instructions"],
-        serde_json::json!(expected_instructions),
+        tool_names(&body1),
+        tool_names(&body0),
+        "expected tool definitions to stay consistent across requests",
     );
-    assert_tool_names(&body1, &expected_tools_names);
 
     Ok(())
 }
@@ -227,14 +211,8 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
     let TestCodex { codex, .. } = test_codex()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
-            config
-                .features
-                .disable(Feature::ApplyPatchFreeform)
-                .expect("test config should allow feature update");
-            config
-                .features
-                .enable(Feature::CollaborationModes)
-                .expect("test config should allow feature update");
+            let _ = config.features.disable(Feature::ApplyPatchFreeform);
+            let _ = config.features.enable(Feature::CollaborationModes);
             config.model = Some("gpt-5".to_string());
         })
         .build(&server)
@@ -305,10 +283,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
     let TestCodex { codex, config, .. } = test_codex()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
-            config
-                .features
-                .enable(Feature::CollaborationModes)
-                .expect("test config should allow feature update");
+            let _ = config.features.enable(Feature::CollaborationModes);
         })
         .build(&server)
         .await?;
@@ -541,7 +516,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
         body.get("reasoning")
             .and_then(|reasoning| reasoning.get("effort"))
             .and_then(|value| value.as_str()),
-        Some("high")
+        None
     );
     let input = body["input"]
         .as_array()

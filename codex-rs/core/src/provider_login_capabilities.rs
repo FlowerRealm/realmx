@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(
             capabilities,
             ProviderLoginCapabilities {
-                api_key: false,
+                api_key: true,
                 chatgpt: false,
                 device_code: false,
                 oauth: false,

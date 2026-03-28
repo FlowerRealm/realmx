@@ -272,7 +272,11 @@ pub(crate) async fn handle_start(
 ) -> CodexResult<()> {
     let config = sess.get_config().await;
     let provider = sess.provider().await;
-    let auth = sess.services.auth_manager.auth().await;
+    let auth = sess
+        .services
+        .auth_manager
+        .auth_for_provider(Some(config.model_provider_id.as_str()))
+        .await;
     let realtime_api_key = realtime_api_key(
         &config.codex_home,
         &config.model_provider_id,

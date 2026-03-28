@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_core::AuthManager;
+use codex_core::AuthScope;
 use codex_core::ModelProviderInfo;
 use codex_core::OAuthCredentialsStoreMode;
 use codex_core::OauthLoginHandle;
@@ -8,7 +9,7 @@ use codex_core::ProviderCredentialMode;
 use codex_core::activate_provider_api_key;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
-use codex_core::auth::login_with_api_key;
+use codex_core::auth::login_with_api_key_for_scope;
 use codex_core::auth::read_openai_api_key_from_env;
 use codex_core::detect_provider_credential_mode;
 use codex_core::perform_oauth_login_return_url;
@@ -166,7 +167,7 @@ impl KeyboardHandler for AuthModeWidget {
                 self.select_option_by_index(/*index*/ 2);
             }
             KeyCode::Char('4') => {
-                self.select_option_by_index(3);
+                self.select_option_by_index(/*index*/ 3);
             }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
@@ -259,7 +260,9 @@ impl AuthModeWidget {
             &self.codex_home,
             &self.provider_id,
             &self.provider,
-            self.auth_manager.auth_cached().as_ref(),
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.provider_id.as_str()))
+                .as_ref(),
             self.oauth_credentials_store_mode,
         ) {
             Ok(Some(mode)) => LoginStatus::AuthMode(mode),
@@ -675,7 +678,7 @@ impl AuthModeWidget {
                 "✓ API key configured".fg(Color::Green).into(),
                 "".into(),
                 format!(
-                    "  Stored a secure API key for provider `{}`.",
+                    "  Stored an API key for provider `{}` in config.toml.",
                     self.provider_id
                 )
                 .into(),
@@ -909,10 +912,11 @@ impl AuthModeWidget {
             return;
         }
         let result = if self.uses_openai_auth() {
-            login_with_api_key(
+            login_with_api_key_for_scope(
                 &self.codex_home,
+                &AuthScope::provider(self.provider_id.clone()),
                 &api_key,
-                self.cli_auth_credentials_store_mode,
+                AuthCredentialsStoreMode::File,
             )
         } else {
             activate_provider_api_key(
@@ -990,7 +994,7 @@ impl AuthModeWidget {
                 provider.env_http_headers.clone(),
                 &scopes,
                 oauth_resource.as_deref(),
-                None,
+                /*timeout_secs*/ None,
                 callback_port,
                 callback_uri.as_deref(),
             )
@@ -1056,12 +1060,13 @@ impl AuthModeWidget {
         }
 
         self.error = None;
-        let opts = ServerOptions::new(
+        let mut opts = ServerOptions::new(
             self.codex_home.clone(),
             CLIENT_ID.to_string(),
             self.forced_chatgpt_workspace_id.clone(),
             self.cli_auth_credentials_store_mode,
         );
+        opts.auth_scope = AuthScope::provider(self.provider_id.clone());
 
         match run_login_server(opts) {
             Ok(child) => {
@@ -1109,12 +1114,13 @@ impl AuthModeWidget {
         }
 
         self.error = None;
-        let opts = ServerOptions::new(
+        let mut opts = ServerOptions::new(
             self.codex_home.clone(),
             CLIENT_ID.to_string(),
             self.forced_chatgpt_workspace_id.clone(),
             self.cli_auth_credentials_store_mode,
         );
+        opts.auth_scope = AuthScope::provider(self.provider_id.clone());
         headless_chatgpt_login::start_headless_chatgpt_login(self, opts);
     }
 }
@@ -1339,11 +1345,12 @@ mod tests {
     fn pick_mode_renders_back_option_snapshot() {
         let (widget, _tmp) = widget_for_provider();
 
+        #[rustfmt::skip]
         insta::assert_snapshot!(
-                                                                                                                                                                                    render(&widget, 72, 18),
-                                                                                                                                                                                    @r"
-Connect Acme AI before continuing.
-Use an API key to continue.
+            render(&widget, 72, 18),
+            @r"
+  Connect Acme AI before continuing.
+  Use an API key to continue.
 > 1. Provide your own API key
      Store a provider-specific key securely on this machine
   2. Back to provider selection
@@ -1351,7 +1358,7 @@ Use an API key to continue.
   Press Enter to continue
   Press Esc to go back
 "
-                                                                                                                                                                                );
+        );
     }
 
     #[test]
@@ -1363,17 +1370,18 @@ Use an API key to continue.
                 shutdown_flag: None,
             });
 
+        #[rustfmt::skip]
         insta::assert_snapshot!(
-                                                                                                                                                                                    render(&widget, 72, 18),
-                                                                                                                                                                                    @r"
-Finish signing in via your browser
+            render(&widget, 72, 18),
+            @r"
+  Finish signing in via your browser
   If the link doesn't open automatically, open the following link to
 authenticate:
-  https://auth.acme.test/oauth
+  h
   Complete the OAuth flow in your browser, then return here.
 < Back to sign-in options (Esc)
 "
-                                                                                                                                                                                );
+        );
     }
 
     #[test]
@@ -1384,19 +1392,20 @@ authenticate:
             prepopulated_from_env: false,
         });
 
+        #[rustfmt::skip]
         insta::assert_snapshot!(
-                                                                                                                                                                                    render(&widget, 72, 18),
-                                                                                                                                                                                    @r"
+            render(&widget, 72, 18),
+            @r"
 > Use your own API key for Acme AI
   Paste or type your provider API key below. It will be stored securely
 on this machine.
-╭API key──────────────────────────────────────────────────────────────╮
-│Paste or type your API key                                          │
-╰─────────────────────────────────────────────────────────────────────╯
+╭API key───────────────────────────────────────────────────────────────╮
+│Paste or type your API key                                            │
+╰──────────────────────────────────────────────────────────────────────╯
 < Back to sign-in options (Esc)
   Press Enter to save
 "
-                                                                                                                                                                                );
+        );
     }
 
     #[test]
@@ -1408,14 +1417,15 @@ on this machine.
                 cancel: Some(Arc::new(Notify::new())),
             });
 
+        #[rustfmt::skip]
         insta::assert_snapshot!(
-                                                                                                                                                                                    render(&widget, 72, 20),
-                                                                                                                                                                                    @r"
-Finish signing in via your browser
+            render(&widget, 72, 20),
+            @r"
+  Preparing device code login
   Requesting a one-time code...
 < Back to sign-in options (Esc)
 "
-                                                                                                                                                                                );
+        );
     }
 
     /// Collects all buffer cell symbols that contain the OSC 8 open sequence

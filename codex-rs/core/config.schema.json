@@ -807,10 +807,10 @@
     "ModelProviderAuthStrategy": {
       "enum": [
         "none",
-        "open_ai",
+        "openai",
         "api_key",
-        "o_auth",
-        "o_auth_or_api_key"
+        "oauth",
+        "oauth_or_api_key"
       ],
       "type": "string"
     },

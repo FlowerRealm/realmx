@@ -41,11 +41,16 @@ use self::realtime::PendingSteerCompareKey;
 use crate::app_event::RealtimeAudioDeviceKind;
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
 use crate::audio_device::list_realtime_audio_device_names;
-use crate::bottom_pane::ProviderManagerView;
 use crate::bottom_pane::ProviderUsageScriptEditorView;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::StatusLinePreviewData;
 use crate::bottom_pane::StatusLineSetupView;
+use crate::provider_flow::ProviderField;
+use crate::provider_flow::ProviderFlowLocation;
+use crate::provider_flow::ProviderFlowSource;
+use crate::provider_flow::ProviderScreen;
+use crate::provider_flow_view::PROVIDER_DETAIL_VIEW_ID;
+use crate::provider_flow_view::PROVIDER_ROOT_VIEW_ID;
 use crate::provider_usage::ProviderUsageRefreshResult;
 use crate::provider_usage::ProviderUsageSnapshot;
 use crate::provider_usage::can_edit_provider_usage_scripts;
@@ -657,6 +662,7 @@ pub(crate) struct ChatWidget {
     /// where the overlay may briefly treat new tail content as already cached.
     active_cell_revision: u64,
     config: Config,
+    provider_create_draft: crate::provider_flow::ProviderDraft,
     /// The unmasked collaboration mode settings (always Default mode).
     ///
     /// Masks are applied on top of this base mode to derive the effective mode.
@@ -1422,7 +1428,7 @@ impl ChatWidget {
             self.show_welcome_banner,
             startup_tooltip_override,
             self.auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .and_then(|auth| auth.account_plan_type()),
             show_fast_status,
         );
@@ -1513,7 +1519,7 @@ impl ChatWidget {
     ) {
         if let Some(chatgpt_user_id) = self
             .auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .and_then(|auth| auth.get_chatgpt_user_id())
         {
             tracing::info!(target: "feedback_tags", chatgpt_user_id);
@@ -1552,12 +1558,20 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_provider_manager(&mut self) {
-        let view = ProviderManagerView::new(&self.config, self.app_event_tx.clone());
-        self.bottom_pane.show_view(Box::new(view));
-        self.request_redraw();
+        self.open_provider_flow(
+            ProviderFlowSource::SlashCommand,
+            crate::settings::data::SettingsScope::default_for(
+                self.config.active_profile.as_deref(),
+            ),
+            ProviderScreen::Root,
+        );
     }
 
-    pub(crate) fn open_provider_usage_script_editor(&mut self, id: String) {
+    pub(crate) fn open_provider_usage_script_editor(
+        &mut self,
+        id: String,
+        return_to: Option<ProviderFlowLocation>,
+    ) {
         if !can_edit_provider_usage_scripts(&self.config) {
             self.add_error_message(
                 "Usage scripts can only be edited inside a trusted project.".to_string(),
@@ -1567,7 +1581,8 @@ impl ChatWidget {
 
         match provider_usage_editor_state(&self.config, &id) {
             Ok(state) => {
-                let view = ProviderUsageScriptEditorView::new(state, self.app_event_tx.clone());
+                let view =
+                    ProviderUsageScriptEditorView::new(state, self.app_event_tx.clone(), return_to);
                 self.bottom_pane.show_view(Box::new(view));
                 self.request_redraw();
             }
@@ -1579,10 +1594,102 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn open_provider_flow(
+        &mut self,
+        source: ProviderFlowSource,
+        scope: crate::settings::data::SettingsScope,
+        screen: ProviderScreen,
+    ) {
+        let mut params = crate::provider_flow_view::build_provider_view_params(
+            &self.config,
+            &self.provider_create_draft,
+            source,
+            scope,
+            &screen,
+        );
+        let view_id = match &screen {
+            ProviderScreen::Root => PROVIDER_ROOT_VIEW_ID,
+            ProviderScreen::Detail { .. } | ProviderScreen::Create => PROVIDER_DETAIL_VIEW_ID,
+        };
+        let selected_idx = self.bottom_pane.selected_index_for_active_view(view_id);
+        if let Some(selected_idx) = selected_idx {
+            params.initial_selected_idx = Some(selected_idx);
+            self.bottom_pane
+                .replace_selection_view_if_active(view_id, params);
+        } else {
+            self.bottom_pane.show_selection_view(params);
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_provider_scope_picker(
+        &mut self,
+        source: ProviderFlowSource,
+        current_scope: crate::settings::data::SettingsScope,
+        current_screen: ProviderScreen,
+    ) {
+        let params = crate::provider_flow_view::build_provider_scope_picker_params(
+            source,
+            current_scope,
+            current_screen,
+            self.config.active_profile.as_deref(),
+        );
+        self.bottom_pane.show_selection_view(params);
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_provider_field_editor(
+        &mut self,
+        location: ProviderFlowLocation,
+        provider_id: Option<String>,
+        field: ProviderField,
+    ) {
+        match crate::provider_flow_view::build_provider_field_editor(
+            &self.config,
+            &self.provider_create_draft,
+            location,
+            provider_id,
+            field,
+            self.app_event_tx.clone(),
+        ) {
+            Ok(view) => {
+                self.bottom_pane.show_view(Box::new(view));
+                self.request_redraw();
+            }
+            Err(err) => {
+                self.add_error_message(format!("Failed to open provider field editor: {err}"));
+            }
+        }
+    }
+
+    pub(crate) fn dismiss_active_bottom_view(&mut self) -> bool {
+        self.bottom_pane.dismiss_active_view()
+    }
+
+    pub(crate) fn dismiss_views_with_id(&mut self, view_id: &'static str) -> bool {
+        self.bottom_pane.dismiss_views_with_id(view_id)
+    }
+
+    pub(crate) fn dismiss_model_selection_flow(&mut self) -> bool {
+        self.dismiss_views_with_id(MODEL_SELECTION_VIEW_ID)
+    }
+
+    pub(crate) fn update_provider_create_draft(&mut self, field: ProviderField, value: String) {
+        self.provider_create_draft.update_field(field, value);
+    }
+
+    pub(crate) fn provider_create_draft(&self) -> &crate::provider_flow::ProviderDraft {
+        &self.provider_create_draft
+    }
+
+    pub(crate) fn clear_provider_create_draft(&mut self) {
+        self.provider_create_draft = crate::provider_flow::ProviderDraft::new();
+    }
+
     pub(crate) fn open_feedback_consent(&mut self, category: crate::app_event::FeedbackCategory) {
         if let Some(chatgpt_user_id) = self
             .auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .and_then(|auth| auth.get_chatgpt_user_id())
         {
             tracing::info!(target: "feedback_tags", chatgpt_user_id);
@@ -3683,6 +3790,7 @@ impl ChatWidget {
             active_cell,
             active_cell_revision: 0,
             config,
+            provider_create_draft: crate::provider_flow::ProviderDraft::new(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -3872,6 +3980,7 @@ impl ChatWidget {
             active_cell,
             active_cell_revision: 0,
             config,
+            provider_create_draft: crate::provider_flow::ProviderDraft::new(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -4053,6 +4162,7 @@ impl ChatWidget {
             active_cell: None,
             active_cell_revision: 0,
             config,
+            provider_create_draft: crate::provider_flow::ProviderDraft::new(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -5970,21 +6080,14 @@ impl ChatWidget {
 
     fn configured_status_line_items(&self) -> Vec<String> {
         if let Some(items) = self.config.tui_status_line.clone() {
-            let mut normalized = Vec::new();
+            let mut deduped = Vec::new();
             let mut seen = HashSet::new();
             for id in items {
-                let normalized_id = match id.as_str() {
-                    "provider-usage-remaining"
-                    | "provider-usage-used"
-                    | "su8-remaining"
-                    | "su8-today-used" => StatusLineItem::RemoteUsage.to_string(),
-                    _ => id,
-                };
-                if seen.insert(normalized_id.clone()) {
-                    normalized.push(normalized_id);
+                if seen.insert(id.clone()) {
+                    deduped.push(id);
                 }
             }
-            return normalized;
+            return deduped;
         }
 
         let mut items = DEFAULT_STATUS_LINE_ITEMS
@@ -6335,12 +6438,15 @@ impl ChatWidget {
         let base_url = self.config.chatgpt_base_url.clone();
         let app_event_tx = self.app_event_tx.clone();
         let auth_manager = Arc::clone(&self.auth_manager);
+        let provider_id = self.config.model_provider_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
 
             loop {
-                if let Some(auth) = auth_manager.auth().await
+                if let Some(auth) = auth_manager
+                    .auth_for_provider(Some(provider_id.as_str()))
+                    .await
                     && auth.is_chatgpt_auth()
                 {
                     for snapshot in fetch_rate_limits(base_url.clone(), auth).await {
@@ -6360,7 +6466,7 @@ impl ChatWidget {
         }
 
         self.auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .as_ref()
             .is_some_and(CodexAuth::is_chatgpt_auth)
     }
@@ -6383,13 +6489,23 @@ impl ChatWidget {
         let config = self.config.clone();
         let auth_manager = Arc::clone(&self.auth_manager);
         let app_event_tx = self.app_event_tx.clone();
+        let provider_id = self.config.model_provider_id.clone();
 
         let handle = tokio::spawn(async move {
+            let auth = auth_manager
+                .auth_for_provider(Some(provider_id.as_str()))
+                .await;
+            let snapshot = fetch_provider_usage_snapshot(config.clone(), auth).await;
+            app_event_tx.send(AppEvent::ProviderUsageSnapshotFetched(snapshot));
+
             let mut interval = tokio::time::interval(poll_interval);
+            interval.tick().await;
 
             loop {
                 interval.tick().await;
-                let auth = auth_manager.auth().await;
+                let auth = auth_manager
+                    .auth_for_provider(Some(provider_id.as_str()))
+                    .await;
                 let snapshot = fetch_provider_usage_snapshot(config.clone(), auth).await;
                 app_event_tx.send(AppEvent::ProviderUsageSnapshotFetched(snapshot));
             }
@@ -6404,7 +6520,6 @@ impl ChatWidget {
 
     fn provider_usage_enabled(&self) -> bool {
         crate::provider_usage::provider_usage_enabled(&self.config)
-            || crate::provider_usage_compat::is_legacy_su8_provider(&self.config.model_provider_id)
     }
 
     fn lower_cost_preset(&self) -> Option<ModelPreset> {
@@ -7329,6 +7444,7 @@ impl ChatWidget {
         ));
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some(MODEL_SELECTION_VIEW_ID),
             header: Box::new(header),
             footer_hint: Some(standard_popup_hint_line()),
             items,
@@ -8291,7 +8407,7 @@ impl ChatWidget {
             && matches!(service_tier, Some(ServiceTier::Fast))
             && self
                 .auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .as_ref()
                 .is_some_and(CodexAuth::is_chatgpt_auth)
     }
@@ -9294,7 +9410,10 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    pub(crate) fn on_startup_models_refreshed(&mut self, result: Result<Vec<ModelPreset>, String>) {
+    pub(crate) fn on_active_provider_models_refreshed(
+        &mut self,
+        result: Result<Vec<ModelPreset>, String>,
+    ) {
         match result {
             Ok(_) => {
                 self.refresh_model_display();

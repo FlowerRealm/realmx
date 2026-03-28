@@ -105,6 +105,12 @@ pub(crate) type OnSelectionChangedCallback =
 /// Ctrl+C).  Used by the theme picker to restore the pre-open theme.
 pub(crate) type OnCancelCallback = Option<Box<dyn Fn(&AppEventSender) + Send + Sync>>;
 
+pub(crate) struct SelectionShortcutAction {
+    pub binding: KeyBinding,
+    pub actions: Vec<SelectionAction>,
+    pub dismiss_on_select: bool,
+}
+
 /// One row in a [`ListSelectionView`] selection list.
 ///
 /// This is the source-of-truth model for row state before filtering and
@@ -116,6 +122,7 @@ pub(crate) struct SelectionItem {
     pub name: String,
     pub name_prefix_spans: Vec<Span<'static>>,
     pub display_shortcut: Option<KeyBinding>,
+    pub shortcut_action: Option<SelectionShortcutAction>,
     pub description: Option<String>,
     pub selected_description: Option<String>,
     pub is_current: bool,
@@ -440,32 +447,63 @@ impl ListSelectionView {
     }
 
     fn accept(&mut self) {
-        let selected_item = self
+        let selected_actual_idx = self
             .state
             .selected_idx
             .and_then(|idx| self.filtered_indices.get(idx))
-            .and_then(|actual_idx| self.items.get(*actual_idx));
-        if let Some(item) = selected_item
-            && item.disabled_reason.is_none()
-            && !item.is_disabled
-        {
-            if let Some(idx) = self.state.selected_idx
-                && let Some(actual_idx) = self.filtered_indices.get(idx)
-            {
-                self.last_selected_actual_idx = Some(*actual_idx);
-            }
-            for act in &item.actions {
-                act(&self.app_event_tx);
-            }
-            if item.dismiss_on_select {
-                self.complete = true;
-            }
-        } else if selected_item.is_none() {
+            .copied();
+        let Some(selected_actual_idx) = selected_actual_idx else {
             if let Some(cb) = &self.on_cancel {
                 cb(&self.app_event_tx);
             }
             self.complete = true;
+            return;
+        };
+        let dismiss_on_select = {
+            let Some(item) = self.items.get(selected_actual_idx) else {
+                return;
+            };
+            if item.disabled_reason.is_some() || item.is_disabled {
+                return;
+            }
+            for act in &item.actions {
+                act(&self.app_event_tx);
+            }
+            item.dismiss_on_select
+        };
+        self.last_selected_actual_idx = Some(selected_actual_idx);
+        if dismiss_on_select {
+            self.complete = true;
         }
+    }
+
+    fn handle_selected_shortcut(&mut self, key_event: KeyEvent) -> bool {
+        let Some(selected_actual_idx) = self.selected_actual_idx() else {
+            return false;
+        };
+        let dismiss_on_select = {
+            let Some(item) = self.items.get(selected_actual_idx) else {
+                return false;
+            };
+            if item.disabled_reason.is_some() || item.is_disabled {
+                return false;
+            }
+            let Some(shortcut) = item.shortcut_action.as_ref() else {
+                return false;
+            };
+            if !shortcut.binding.is_press(key_event) {
+                return false;
+            }
+            for act in &shortcut.actions {
+                act(&self.app_event_tx);
+            }
+            shortcut.dismiss_on_select
+        };
+        self.last_selected_actual_idx = Some(selected_actual_idx);
+        if dismiss_on_select {
+            self.complete = true;
+        }
+        true
     }
 
     #[cfg(test)]
@@ -576,6 +614,9 @@ impl ListSelectionView {
 
 impl BottomPaneView for ListSelectionView {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if self.handle_selected_shortcut(key_event) {
+            return;
+        }
         match key_event {
             // Some terminals (or configurations) send Control key chords as
             // C0 control characters without reporting the CONTROL modifier.
@@ -1323,6 +1364,39 @@ mod tests {
             Ok(AppEvent::OpenApprovalsPopup) => {}
             Ok(other) => panic!("expected OpenApprovalsPopup cancel event, got {other:?}"),
             Err(err) => panic!("expected cancel callback event, got {err}"),
+        }
+    }
+
+    #[test]
+    fn shortcut_action_triggers_without_dismissing_in_searchable_list() {
+        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![SelectionItem {
+                    name: "Provider".to_string(),
+                    dismiss_on_select: true,
+                    shortcut_action: Some(SelectionShortcutAction {
+                        binding: crate::key_hint::plain(KeyCode::Char('e')),
+                        actions: vec![Box::new(|tx| tx.send(AppEvent::OpenApprovalsPopup))],
+                        dismiss_on_select: false,
+                    }),
+                    ..Default::default()
+                }],
+                is_searchable: true,
+                ..Default::default()
+            },
+            tx,
+        );
+
+        view.handle_key_event(KeyEvent::from(KeyCode::Char('e')));
+
+        assert!(!view.is_complete());
+        assert_eq!(view.search_query, "");
+        match rx.try_recv() {
+            Ok(AppEvent::OpenApprovalsPopup) => {}
+            Ok(other) => panic!("expected OpenApprovalsPopup shortcut event, got {other:?}"),
+            Err(err) => panic!("expected shortcut callback event, got {err}"),
         }
     }
 

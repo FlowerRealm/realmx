@@ -4,14 +4,13 @@
 //! We prefer this to using a crate feature to avoid building multiple
 //! permutations of the crate.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::AuthManager;
 use crate::CodexAuth;

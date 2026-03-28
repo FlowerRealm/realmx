@@ -44,7 +44,6 @@ use crate::git_info::resolve_root_git_project_for_trust;
 use crate::memories::memory_root;
 use crate::model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use crate::model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use crate::model_provider_info::ModelProviderAuthStrategy;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
@@ -56,7 +55,8 @@ use crate::project_doc::LOCAL_PROJECT_DOC_FILENAME;
 use crate::protocol::AskForApproval;
 use crate::protocol::ReadOnlyAccess;
 use crate::protocol::SandboxPolicy;
-use crate::provider_credentials::store_provider_api_key;
+use crate::provider_id::validate_model_provider_id;
+use crate::provider_id::validate_model_provider_reference;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
@@ -618,9 +618,6 @@ impl ConfigBuilder {
             fallback_cwd,
         } = self;
         let codex_home = codex_home.map_or_else(find_codex_home, std::io::Result::Ok)?;
-        if let Err(err) = maybe_migrate_inline_model_provider_api_keys(&codex_home).await {
-            tracing::warn!(error = %err, "failed to migrate inline model provider api keys");
-        }
         if let Err(err) = maybe_migrate_smart_approvals_alias(&codex_home).await {
             tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
         }
@@ -776,55 +773,6 @@ async fn maybe_migrate_smart_approvals_alias(codex_home: &Path) -> std::io::Resu
     Ok(true)
 }
 
-async fn maybe_migrate_inline_model_provider_api_keys(codex_home: &Path) -> std::io::Result<bool> {
-    let config_path = codex_home.join(CONFIG_TOML_FILE);
-    if !tokio::fs::try_exists(&config_path).await? {
-        return Ok(false);
-    }
-
-    let config_contents = tokio::fs::read_to_string(&config_path).await?;
-    let Ok(config_toml) = toml::from_str::<ConfigToml>(&config_contents) else {
-        return Ok(false);
-    };
-
-    let mut edits = Vec::new();
-    for (id, provider) in &config_toml.model_providers {
-        let Some(api_key) = provider.inline_api_key() else {
-            continue;
-        };
-
-        store_provider_api_key(codex_home, id, &api_key)
-            .map_err(|err| std::io::Error::other(err.to_string()))?;
-
-        let mut migrated = provider.clone();
-        migrated.api_key = None;
-        if migrated.auth_strategy == ModelProviderAuthStrategy::None
-            && provider.resolved_auth_strategy() == ModelProviderAuthStrategy::ApiKey
-        {
-            migrated.auth_strategy = ModelProviderAuthStrategy::ApiKey;
-        }
-        edits.push(ConfigEdit::SetModelProvider {
-            id: id.clone(),
-            provider: migrated,
-        });
-    }
-
-    if edits.is_empty() {
-        return Ok(false);
-    }
-
-    ConfigEditsBuilder::new(codex_home)
-        .with_edits(edits)
-        .apply()
-        .await
-        .map_err(|err| {
-            std::io::Error::other(format!(
-                "failed to migrate inline model provider api keys: {err}"
-            ))
-        })?;
-    Ok(true)
-}
-
 impl Config {
     /// This is the preferred way to create an instance of [Config].
     pub async fn load_with_cli_overrides(
@@ -886,9 +834,6 @@ pub async fn load_config_as_toml_with_cli_overrides(
     cwd: &AbsolutePathBuf,
     cli_overrides: Vec<(String, TomlValue)>,
 ) -> std::io::Result<ConfigToml> {
-    if let Err(err) = maybe_migrate_inline_model_provider_api_keys(codex_home).await {
-        tracing::warn!(error = %err, "failed to migrate inline model provider api keys");
-    }
     if let Err(err) = maybe_migrate_smart_approvals_alias(codex_home).await {
         tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
     }
@@ -917,9 +862,12 @@ pub(crate) fn deserialize_config_toml_with_base(
     // This guard ensures that any relative paths that is deserialized into an
     // [AbsolutePathBuf] is resolved against `config_base_dir`.
     let _guard = AbsolutePathBufGuard::new(config_base_dir);
-    root_value
+    let cfg: ConfigToml = root_value
         .try_into()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    validate_model_provider_configuration(&cfg)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(cfg)
 }
 
 fn load_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> {
@@ -1989,6 +1937,51 @@ Built-in providers cannot be overridden. Rename your custom provider (for exampl
     }
 }
 
+fn validate_model_provider_ids(
+    model_providers: &HashMap<String, ModelProviderInfo>,
+) -> Result<(), String> {
+    let mut invalid = model_providers
+        .keys()
+        .filter_map(|id| {
+            validate_model_provider_id(id)
+                .err()
+                .map(|err| format!("`{id}` ({err})"))
+        })
+        .collect::<Vec<_>>();
+    invalid.sort_unstable();
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "model_providers contains invalid provider IDs: {}",
+            invalid.join(", ")
+        ))
+    }
+}
+
+fn validate_model_provider_references(cfg: &ConfigToml) -> Result<(), String> {
+    if let Some(model_provider) = cfg.model_provider.as_deref() {
+        validate_model_provider_reference(model_provider)
+            .map_err(|err| format!("model_provider is invalid: {err}"))?;
+    }
+
+    for (profile_name, profile) in &cfg.profiles {
+        if let Some(model_provider) = profile.model_provider.as_deref() {
+            validate_model_provider_reference(model_provider).map_err(|err| {
+                format!("profiles.{profile_name}.model_provider is invalid: {err}")
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_model_provider_configuration(cfg: &ConfigToml) -> Result<(), String> {
+    validate_model_provider_ids(&cfg.model_providers)?;
+    validate_reserved_model_provider_ids(&cfg.model_providers)?;
+    validate_model_provider_references(cfg)
+}
+
 fn deserialize_model_providers<'de, D>(
     deserializer: D,
 ) -> Result<HashMap<String, ModelProviderInfo>, D::Error>
@@ -1996,6 +1989,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let model_providers = HashMap::<String, ModelProviderInfo>::deserialize(deserializer)?;
+    validate_model_provider_ids(&model_providers).map_err(serde::de::Error::custom)?;
     validate_reserved_model_provider_ids(&model_providers).map_err(serde::de::Error::custom)?;
     Ok(model_providers)
 }
@@ -2121,7 +2115,7 @@ impl Config {
         codex_home: PathBuf,
         config_layer_stack: ConfigLayerStack,
     ) -> std::io::Result<Self> {
-        validate_reserved_model_provider_ids(&cfg.model_providers)
+        validate_model_provider_configuration(&cfg)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
         // Ensure that every field of ConfigRequirements is applied to the final
         // Config.

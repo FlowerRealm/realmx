@@ -13,7 +13,14 @@ use std::path::PathBuf;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::history_cell::HistoryCell;
+use crate::provider_flow::ProviderField;
+use crate::provider_flow::ProviderFlowLocation;
+use crate::provider_flow::ProviderFlowNavigation;
+use crate::provider_flow::ProviderFlowSource;
+use crate::provider_flow::ProviderScreen;
 use crate::provider_usage::ProviderUsageRefreshResult;
+use crate::settings::data::SettingsScope;
+use crate::settings::data::SettingsScreen;
 use codex_chatgpt::connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_protocol::ThreadId;
@@ -22,10 +29,6 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_utils_approval_presets::ApprovalPreset;
 
-use crate::settings::data::SettingsScope;
-use crate::settings::data::SettingsScreen;
-
-use codex_core::ModelProviderInfo;
 use codex_core::config::types::ApprovalsReviewer;
 use codex_core::features::Feature;
 use codex_protocol::config_types::CollaborationModeMask;
@@ -68,13 +71,6 @@ pub(crate) enum WindowsSandboxEnableMode {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
-}
-
-#[derive(Debug)]
-pub(crate) enum ProviderApiKeyInput {
-    KeepExisting,
-    Set(String),
-    Clear,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -156,8 +152,8 @@ pub(crate) enum AppEvent {
         result: Result<Vec<ModelPreset>, String>,
     },
 
-    /// Result of refreshing startup models for the active provider.
-    StartupModelsRefreshed {
+    /// Result of refreshing models for the active provider.
+    ActiveProviderModelsRefreshed {
         result: Result<Vec<ModelPreset>, String>,
     },
 
@@ -218,14 +214,6 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
-    /// Persist a custom provider entry under `[model_providers.<id>]`.
-    PersistModelProvider {
-        original_id: Option<String>,
-        id: String,
-        provider: ModelProviderInfo,
-        api_key_input: ProviderApiKeyInput,
-    },
-
     /// Remove a custom provider entry.
     RemoveModelProvider {
         id: String,
@@ -234,22 +222,68 @@ pub(crate) enum AppEvent {
     /// Open the provider usage script editor for a provider.
     OpenProviderUsageScriptEditor {
         id: String,
+        return_to: Option<ProviderFlowLocation>,
+    },
+
+    /// Open a /provider screen.
+    OpenProviderFlow {
+        source: ProviderFlowSource,
+        scope: SettingsScope,
+        screen: ProviderScreen,
+    },
+
+    /// Open the write-scope picker inside /provider.
+    OpenProviderScopePicker {
+        source: ProviderFlowSource,
+        current_scope: SettingsScope,
+        current_screen: ProviderScreen,
+    },
+
+    /// Open a single-field editor inside /provider.
+    OpenProviderFieldEditor {
+        location: ProviderFlowLocation,
+        provider_id: Option<String>,
+        field: ProviderField,
+    },
+
+    /// Update the in-memory create draft for /provider.
+    UpdateProviderCreateDraft {
+        field: ProviderField,
+        value: String,
+    },
+
+    /// Persist the current /provider create draft as a new custom provider.
+    SaveProviderCreateDraft {
+        source: ProviderFlowSource,
+        scope: SettingsScope,
+    },
+
+    /// Persist a single-field edit for an existing provider.
+    SaveProviderFieldEdit {
+        location: ProviderFlowLocation,
+        provider_id: String,
+        field: ProviderField,
+        value: String,
     },
 
     /// Persist a project-local provider usage script.
     PersistProviderUsageScript {
         provider_id: String,
         script: String,
+        return_to: Option<ProviderFlowLocation>,
     },
 
     /// Delete a project-local provider usage script.
     DeleteProviderUsageScript {
         provider_id: String,
+        return_to: Option<ProviderFlowLocation>,
     },
 
     /// Persist the default provider selection and refresh runtime config.
     PersistDefaultModelProvider {
         id: String,
+        scope: SettingsScope,
+        navigation: ProviderFlowNavigation,
     },
 
     /// Persist the selected personality to the appropriate config.

@@ -8914,6 +8914,13 @@
               "null"
             ]
           },
+          "forceRefresh": {
+            "description": "Controls whether the server should refresh remote models before listing.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "includeHidden": {
             "description": "When true, include models that are hidden from the default picker list.",
             "type": [

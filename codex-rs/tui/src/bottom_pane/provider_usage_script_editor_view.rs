@@ -1,5 +1,6 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::provider_flow::ProviderFlowLocation;
 use crate::provider_usage::ProviderUsageEditorState;
 use crate::render::renderable::Renderable;
 use crossterm::event::KeyCode;
@@ -31,10 +32,15 @@ pub(crate) struct ProviderUsageScriptEditorView {
     complete: bool,
     error: Option<String>,
     delete_pending_confirmation: bool,
+    return_to: Option<ProviderFlowLocation>,
 }
 
 impl ProviderUsageScriptEditorView {
-    pub(crate) fn new(state: ProviderUsageEditorState, app_event_tx: AppEventSender) -> Self {
+    pub(crate) fn new(
+        state: ProviderUsageEditorState,
+        app_event_tx: AppEventSender,
+        return_to: Option<ProviderFlowLocation>,
+    ) -> Self {
         let mut textarea = TextArea::new();
         textarea.set_text_clearing_elements(&state.initial_contents);
         Self {
@@ -48,6 +54,7 @@ impl ProviderUsageScriptEditorView {
             complete: false,
             error: None,
             delete_pending_confirmation: false,
+            return_to,
         }
     }
 
@@ -63,6 +70,7 @@ impl ProviderUsageScriptEditorView {
             .send(AppEvent::PersistProviderUsageScript {
                 provider_id: self.provider_id.clone(),
                 script,
+                return_to: self.return_to.clone(),
             });
         self.complete = true;
     }
@@ -82,6 +90,7 @@ impl ProviderUsageScriptEditorView {
 
         self.app_event_tx.send(AppEvent::DeleteProviderUsageScript {
             provider_id: self.provider_id.clone(),
+            return_to: self.return_to.clone(),
         });
         self.complete = true;
     }
@@ -297,7 +306,7 @@ mod tests {
     fn delete_shortcut_requires_confirmation() {
         let (tx, mut rx) = unbounded_channel();
         let mut view =
-            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx), None);
 
         view.handle_key_event(key_event(KeyCode::Char('r'), KeyModifiers::CONTROL));
 
@@ -312,17 +321,22 @@ mod tests {
 
         assert!(view.complete);
         let event = rx.try_recv().expect("expected delete event");
-        let AppEvent::DeleteProviderUsageScript { provider_id } = event else {
+        let AppEvent::DeleteProviderUsageScript {
+            provider_id,
+            return_to,
+        } = event
+        else {
             panic!("expected delete provider usage script event");
         };
         assert_eq!(provider_id, "openai");
+        assert_eq!(return_to, None);
     }
 
     #[test]
     fn delete_confirmation_is_cleared_by_other_input() {
         let (tx, mut rx) = unbounded_channel();
         let mut view =
-            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx), None);
 
         view.handle_key_event(key_event(KeyCode::Char('r'), KeyModifiers::CONTROL));
         view.handle_key_event(key_event(KeyCode::Char('x'), KeyModifiers::NONE));
@@ -345,7 +359,7 @@ mod tests {
     fn delete_confirmation_snapshot() {
         let (tx, _rx) = unbounded_channel();
         let mut view =
-            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx), None);
         view.handle_key_event(key_event(KeyCode::Char('r'), KeyModifiers::CONTROL));
 
         assert_snapshot!(
@@ -358,7 +372,7 @@ mod tests {
     fn save_shortcut_submits_event_and_closes_editor() {
         let (tx, mut rx) = unbounded_channel();
         let mut view =
-            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx));
+            ProviderUsageScriptEditorView::new(editor_state(true), AppEventSender::new(tx), None);
 
         view.handle_key_event(key_event(KeyCode::Char('s'), KeyModifiers::CONTROL));
 
@@ -367,11 +381,13 @@ mod tests {
         let AppEvent::PersistProviderUsageScript {
             provider_id,
             script,
+            return_to,
         } = event
         else {
             panic!("expected persist provider usage script event");
         };
         assert_eq!(provider_id, "openai");
         assert!(script.contains("https://example.test"));
+        assert_eq!(return_to, None);
     }
 }

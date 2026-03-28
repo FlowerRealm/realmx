@@ -543,18 +543,14 @@ async fn lookup_latest_session_target_with_app_server(
 
 fn latest_session_lookup_params(
     is_remote: bool,
-    config: &Config,
+    _config: &Config,
     cwd_filter: Option<&Path>,
 ) -> ThreadListParams {
     ThreadListParams {
         cursor: None,
         limit: Some(1),
         sort_key: Some(AppServerThreadSortKey::UpdatedAt),
-        model_providers: if is_remote {
-            None
-        } else {
-            Some(vec![config.model_provider_id.clone()])
-        },
+        model_providers: None,
         source_kinds: Some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
         archived: Some(false),
         cwd: if is_remote {
@@ -1660,7 +1656,7 @@ mod tests {
 
         let params = latest_session_lookup_params(false, &config, Some(cwd.as_path()));
 
-        assert_eq!(params.model_providers, Some(vec![config.model_provider_id]));
+        assert_eq!(params.model_providers, None);
         assert_eq!(params.cwd, Some(cwd.to_string_lossy().to_string()));
         Ok(())
     }

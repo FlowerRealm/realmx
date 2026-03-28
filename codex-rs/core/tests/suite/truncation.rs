@@ -247,8 +247,8 @@ Output:
 4
 5
 6
-.*…137224 tokens truncated.*
-99999
+.*…\d+ chars truncated…
+.*99999
 100000
 $"#;
     assert_regex_match(truncated_pattern, &output);
@@ -303,7 +303,7 @@ async fn tool_call_output_truncated_only_once() -> Result<()> {
         .function_call_output_text(call_id)
         .context("function_call_output present for shell call")?;
 
-    let truncation_markers = output.matches("tokens truncated").count();
+    let truncation_markers = output.matches("chars truncated").count();
 
     assert_eq!(
         truncation_markers, 1,
@@ -399,7 +399,7 @@ async fn mcp_tool_call_output_exceeds_limit_truncated_for_model() -> Result<()> 
         "MCP output should not include line-based truncation header: {output}"
     );
 
-    let truncated_pattern = r#"(?s)^\{"echo":\s*"ECHOING: long-message-with-newlines-.*tokens truncated.*long-message-with-newlines-.*$"#;
+    let truncated_pattern = r#"(?s)^\{"echo":"ECHOING: long-message-with-newlines-.*chars truncated.*long-message-with-newlines-.*","env":null\}$"#;
     assert_regex_match(truncated_pattern, &output);
     assert!(output.len() < 2500, "{}", output.len());
 
@@ -558,7 +558,7 @@ async fn token_policy_marker_reports_tokens() -> Result<()> {
         .function_call_output_text(call_id)
         .context("shell output present")?;
 
-    let pattern = r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nTotal output lines: 150\nOutput:\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19.*tokens truncated.*129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n$";
+    let pattern = r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nTotal output lines: 150\nOutput:\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19.*chars truncated.*126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n$";
 
     assert_regex_match(pattern, &output);
 

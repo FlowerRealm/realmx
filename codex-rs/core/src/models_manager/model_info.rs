@@ -101,7 +101,7 @@ fn fallback_model_info(
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
-    fallback_model_info(slug, ModelVisibility::None, None)
+    fallback_model_info(slug, ModelVisibility::None, /*description*/ None)
 }
 
 /// Build a minimal, picker-visible descriptor for a model discovered remotely.

@@ -31,6 +31,7 @@ use pretty_assertions::assert_eq;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -4086,6 +4087,103 @@ wire_api = "responses"
         .get("example")
         .expect("example provider should exist");
     assert_eq!(provider.api_key.as_deref(), Some("secret-inline"));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn load_config_does_not_read_provider_api_key_from_legacy_secrets() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let _guard = codex_secrets::test_support::set_test_keyring_store(
+        codex_home.path().to_path_buf(),
+        std::sync::Arc::new(codex_keyring_store::tests::MockKeyringStore::default()),
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[model_providers.example]
+name = "Example"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#,
+    )?;
+
+    let secrets = codex_secrets::SecretsManager::new(
+        codex_home.path().to_path_buf(),
+        codex_secrets::SecretsBackendKind::Local,
+    );
+    let secret_name = codex_secrets::SecretName::new("MODEL_PROVIDER_EXAMPLE_123456789ABC_API_KEY")
+        .map_err(std::io::Error::other)?;
+    secrets
+        .set(
+            &codex_secrets::SecretScope::Global,
+            &secret_name,
+            "legacy-secret",
+        )
+        .map_err(std::io::Error::other)?;
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await?;
+
+    let provider = config
+        .model_providers
+        .get("example")
+        .expect("example provider should exist");
+    assert_eq!(provider.api_key, None);
+
+    let serialized = std::fs::read_to_string(codex_home.path().join(CONFIG_TOML_FILE))?;
+    assert!(!serialized.contains("legacy-secret"));
+    assert!(!serialized.contains("api_key ="));
+    Ok(())
+}
+
+#[test]
+fn config_rejects_invalid_provider_id_key() {
+    let err = toml::from_str::<ConfigToml>(
+        r#"[model_providers."openai.custom"]
+name = "Example"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#,
+    )
+    .expect_err("provider id with dots should fail");
+
+    assert!(
+        err.to_string()
+            .contains("Provider ID must use ASCII letters, digits, '-' or '_'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn config_rejects_invalid_model_provider_reference() {
+    let err = deserialize_config_toml_with_base(
+        toml::from_str::<TomlValue>(r#"model_provider = "openai.custom""#).expect("parse toml"),
+        Path::new("/tmp"),
+    )
+    .expect_err("invalid model_provider reference should fail");
+
+    assert!(
+        err.to_string().contains(
+            "model_provider is invalid: Provider ID must use ASCII letters, digits, '-' or '_'"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn config_accepts_uppercase_provider_id_key() {
+    let cfg: ConfigToml = toml::from_str(
+        r#"[model_providers.OpenAI_Custom]
+name = "Example"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#,
+    )
+    .expect("uppercase provider config should parse");
+
+    assert!(cfg.model_providers.contains_key("OpenAI_Custom"));
 }
 
 fn create_test_fixture() -> std::io::Result<PrecedenceTestFixture> {

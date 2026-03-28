@@ -1,0 +1,17 @@
+---
+source: tui/src/provider_flow_view.rs
+assertion_line: 926
+expression: scope_picker_summary(&params)
+---
+title: Default Provider Scope
+subtitle: Choose where /provider writes the default provider selection.
+item: User config
+  description: Set the default provider in your top-level config.toml.
+  current: false
+  disabled: false
+  disabled_reason: 
+item: Active profile
+  description: Set the default provider under [profiles.dev].
+  current: true
+  disabled: false
+  disabled_reason:

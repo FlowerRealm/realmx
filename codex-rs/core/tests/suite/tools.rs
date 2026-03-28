@@ -234,20 +234,19 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         )
         .await?;
 
-    let output_text = mock
-        .function_call_output_text(call_id)
+    let request = mock
+        .requests()
+        .into_iter()
+        .find(|request| {
+            request
+                .any_tool_call_output_content_and_success(call_id)
+                .is_some()
+        })
+        .context("shell output request present")?;
+    let (body_opt, success) = request
+        .any_tool_call_output_content_and_success(call_id)
         .context("shell output present")?;
-    let exit_code_line = output_text
-        .lines()
-        .next()
-        .context("exit code line present")?;
-    let exit_code = exit_code_line
-        .strip_prefix("Exit code: ")
-        .context("exit code prefix present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
-    let body = output_text;
+    let body = body_opt.context("shell output text present")?;
 
     let body_lower = body.to_lowercase();
     // Required for multi-OS.
@@ -273,9 +272,16 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
         !body_lower.contains("failed in sandbox"),
         "expected original tool output, found fallback message: {body}"
     );
+    let body_json: Value = serde_json::from_str(&body)?;
+    assert_eq!(
+        body_json["metadata"]["exit_code"].as_i64(),
+        Some(2),
+        "sandbox denial should preserve a non-zero exit code in structured output: {body}"
+    );
     assert_ne!(
-        exit_code, 0,
-        "sandbox denial should surface a non-zero exit code"
+        success,
+        Some(true),
+        "sandbox denial should not be reported as a successful tool output"
     );
 
     Ok(())

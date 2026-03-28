@@ -22,7 +22,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::UserInput;
-use core_test_support::responses::ev_apply_patch_function_call;
+use core_test_support::responses::ev_apply_patch_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -31,6 +31,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
+use core_test_support::test_codex::ApplyPatchModelOutput;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -111,6 +112,10 @@ const DEFAULT_UNIFIED_EXEC_JUSTIFICATION: &str =
     "Requires escalated permissions to bypass the sandbox in tests.";
 
 impl ActionKind {
+    const fn requires_apply_patch_tool(&self) -> bool {
+        matches!(self, Self::ApplyPatchFunction { .. })
+    }
+
     async fn prepare(
         &self,
         test: &TestCodex,
@@ -191,7 +196,10 @@ impl ActionKind {
                 let (path, patch_path) = target.resolve_for_patch(test);
                 let _ = fs::remove_file(&path);
                 let patch = build_add_file_patch(&patch_path, content);
-                Ok((ev_apply_patch_function_call(call_id, &patch), None))
+                Ok((
+                    ev_apply_patch_call(call_id, &patch, ApplyPatchModelOutput::Freeform),
+                    None,
+                ))
             }
             ActionKind::ApplyPatchShell { target, content } => {
                 let (path, patch_path) = target.resolve_for_patch(test);
@@ -601,6 +609,13 @@ fn parse_result(item: &Value) -> CommandResult {
             }
         }
     }
+}
+
+fn result_output_item(
+    request: &core_test_support::responses::ResponsesRequest,
+    call_id: &str,
+) -> Value {
+    request.any_tool_call_output(call_id)
 }
 
 async fn expect_exec_approval(
@@ -1591,12 +1606,20 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let approval_policy = scenario.approval_policy;
     let sandbox_policy = scenario.sandbox_policy.clone();
     let features = scenario.features.clone();
+    let include_apply_patch_tool = scenario.action.requires_apply_patch_tool();
     let model_override = scenario.model_override;
     let model = model_override.unwrap_or("gpt-5.1");
 
     let mut builder = test_codex().with_model(model).with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy.clone());
+        config.include_apply_patch_tool = include_apply_patch_tool;
+        if include_apply_patch_tool {
+            config
+                .features
+                .enable(Feature::ApplyPatchFreeform)
+                .expect("test config should allow feature update");
+        }
         for feature in features {
             config
                 .features
@@ -1690,7 +1713,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
         }
     }
 
-    let output_item = results_mock.single_request().function_call_output(call_id);
+    let output_item = result_output_item(&results_mock.single_request(), call_id);
     let result = parse_result(&output_item);
     scenario.expectation.verify(&test, &result)?;
 
@@ -1718,6 +1741,11 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
+            config.include_apply_patch_tool = true;
+            config
+                .features
+                .enable(Feature::ApplyPatchFreeform)
+                .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
 
@@ -1737,7 +1765,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         &server,
         sse(vec![
             ev_response_created("resp-1"),
-            ev_apply_patch_function_call(call_id_1, &patch_add),
+            ev_apply_patch_call(call_id_1, &patch_add, ApplyPatchModelOutput::Freeform),
             ev_completed("resp-1"),
         ]),
     )
@@ -1772,7 +1800,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
         &server,
         sse(vec![
             ev_response_created("resp-3"),
-            ev_apply_patch_function_call(call_id_2, &patch_update),
+            ev_apply_patch_call(call_id_2, &patch_update, ApplyPatchModelOutput::Freeform),
             ev_completed("resp-3"),
         ]),
     )
@@ -1907,11 +1935,10 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
         "unexpected policy contents: {policy_contents}"
     );
 
-    let first_output = parse_result(
-        &first_results
-            .single_request()
-            .function_call_output(call_id_first),
-    );
+    let first_output = parse_result(&result_output_item(
+        &first_results.single_request(),
+        call_id_first,
+    ));
     assert_eq!(first_output.exit_code.unwrap_or(0), 0);
     assert!(
         first_output.stdout.is_empty(),
@@ -1965,11 +1992,10 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
 
     wait_for_completion_without_approval(&test).await;
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id_second),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id_second,
+    ));
     assert_eq!(second_output.exit_code.unwrap_or(0), 0);
     assert!(
         second_output.stdout.is_empty(),
@@ -2049,7 +2075,7 @@ async fn matched_prefix_rule_runs_unsandboxed_under_zsh_fork() -> Result<()> {
 
     wait_for_completion_without_approval(&test).await;
 
-    let result = parse_result(&results.single_request().function_call_output(call_id));
+    let result = parse_result(&result_output_item(&results.single_request(), call_id));
     assert_eq!(result.exit_code.unwrap_or(0), 0);
     assert!(
         outside_path.exists(),
@@ -2210,11 +2236,10 @@ async fn approving_fallback_rule_for_compound_command_works() -> Result<()> {
 
     wait_for_completion_without_approval(&test).await;
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id,
+    ));
     assert_eq!(second_output.exit_code.unwrap_or(0), 0);
     assert!(
         second_output.stdout.is_empty(),
@@ -2429,11 +2454,10 @@ allow_local_binding = true
         "unexpected policy contents: {policy_contents}"
     );
 
-    let first_output = parse_result(
-        &first_results
-            .single_request()
-            .function_call_output(call_id_first),
-    );
+    let first_output = parse_result(&result_output_item(
+        &first_results.single_request(),
+        call_id_first,
+    ));
     Expectation::CommandFailure {
         output_contains: "",
     }
@@ -2512,11 +2536,10 @@ allow_local_binding = true
         }
     }
 
-    let second_output = parse_result(
-        &second_results
-            .single_request()
-            .function_call_output(call_id_second),
-    );
+    let second_output = parse_result(&result_output_item(
+        &second_results.single_request(),
+        call_id_second,
+    ));
     Expectation::CommandFailure {
         output_contains: "",
     }

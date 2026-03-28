@@ -38,10 +38,31 @@ pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no
 pub enum ModelProviderAuthStrategy {
     #[default]
     None,
+    #[serde(rename = "openai", alias = "open_ai")]
     OpenAi,
     ApiKey,
+    #[serde(rename = "oauth", alias = "o_auth")]
     OAuth,
+    #[serde(rename = "oauth_or_api_key", alias = "o_auth_or_api_key")]
     OAuthOrApiKey,
+}
+
+impl ModelProviderAuthStrategy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::OpenAi => "openai",
+            Self::ApiKey => "api_key",
+            Self::OAuth => "oauth",
+            Self::OAuthOrApiKey => "oauth_or_api_key",
+        }
+    }
+}
+
+impl fmt::Display for ModelProviderAuthStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -101,9 +122,6 @@ pub struct ModelProviderInfo {
     /// Optional OAuth configuration for generic provider login.
     pub oauth: Option<ModelProviderOAuthConfig>,
     /// API key stored directly in config.toml for this provider.
-    ///
-    /// Deprecated: legacy compatibility only. Runtime credentials should be
-    /// stored outside config and are automatically migrated on load.
     pub api_key: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
@@ -322,9 +340,7 @@ impl ModelProviderInfo {
     }
 
     pub fn sanitized_for_config_persistence(&self) -> Self {
-        let mut provider = self.clone();
-        provider.api_key = None;
-        provider
+        self.clone()
     }
 
     /// Effective maximum number of request retries for this provider.

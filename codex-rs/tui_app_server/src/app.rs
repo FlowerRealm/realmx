@@ -839,7 +839,7 @@ impl App {
         &mut self,
         app_server: &mut AppServerSession,
     ) -> Result<()> {
-        let available_models = app_server.list_models(/* include_hidden */ true).await?;
+        let available_models = app_server.list_models(/*include_hidden*/ true).await?;
         self.model_catalog.replace_models(available_models);
         self.chat_widget.refresh_model_catalog();
         Ok(())
@@ -2511,14 +2511,14 @@ impl App {
             let app_event_tx = app.app_event_tx.clone();
             tokio::spawn(async move {
                 let result = startup_refresh_client
-                    .list_models(/* include_hidden */ true, /* force_refresh */ true)
+                    .list_models(/*include_hidden*/ true, /*force_refresh*/ true)
                     .await
                     .map_err(|err| {
                         format!(
                             "Failed to refresh models from the active provider at startup; continuing with the current model list: {err}"
                         )
                     });
-                app_event_tx.send(AppEvent::StartupModelsRefreshed { result });
+                app_event_tx.send(AppEvent::ActiveProviderModelsRefreshed { result });
             });
         }
 
@@ -3051,14 +3051,15 @@ impl App {
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }
-            AppEvent::StartupModelsRefreshed { result } => match result {
+            AppEvent::ActiveProviderModelsRefreshed { result } => match result {
                 Ok(models) => {
                     self.model_catalog.replace_models(models);
-                    self.chat_widget.on_startup_models_refreshed(Ok(()));
+                    self.chat_widget.on_active_provider_models_refreshed(Ok(()));
                     self.refresh_status_line();
                 }
                 Err(err) => {
-                    self.chat_widget.on_startup_models_refreshed(Err(err));
+                    self.chat_widget
+                        .on_active_provider_models_refreshed(Err(err));
                 }
             },
             AppEvent::UpdateReasoningEffort(effort) => {

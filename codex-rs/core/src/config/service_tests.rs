@@ -417,6 +417,39 @@ async fn reserved_builtin_provider_override_rejected() {
 }
 
 #[tokio::test]
+async fn invalid_provider_id_write_is_rejected() {
+    let tmp = tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join(CONFIG_TOML_FILE),
+        "model = \"user\"\nmodel_provider = \"openai.custom\"\n",
+    )
+    .unwrap();
+
+    let service = ConfigService::new_with_defaults(tmp.path().to_path_buf());
+    let error = service
+        .write_value(ConfigValueWriteParams {
+            file_path: Some(tmp.path().join(CONFIG_TOML_FILE).display().to_string()),
+            key_path: "model".to_string(),
+            value: serde_json::json!("gpt-5"),
+            merge_strategy: MergeStrategy::Replace,
+            expected_version: None,
+        })
+        .await
+        .expect_err("should reject invalid provider id");
+
+    assert_eq!(
+        error.write_error_code(),
+        Some(ConfigWriteErrorCode::ConfigValidationError)
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("Provider ID must use ASCII letters, digits, '-' or '_'"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
 async fn write_value_rejects_feature_requirement_conflict() {
     let tmp = tempdir().expect("tempdir");
     std::fs::write(tmp.path().join(CONFIG_TOML_FILE), "").unwrap();

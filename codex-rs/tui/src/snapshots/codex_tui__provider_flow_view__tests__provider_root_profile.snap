@@ -1,0 +1,49 @@
+---
+source: tui/src/provider_flow_view.rs
+assertion_line: 986
+expression: provider_view_focus_summary(&params)
+---
+title: Provider
+subtitle: Browse provider definitions and set the default provider for active profile `dev`.
+item: Default provider scope
+  current: false
+  disabled: false
+  selected_description: Switch where /provider saves the default provider selection. Provider definitions stay global.
+  shortcut: 
+  description: Currently writing model_provider under [profiles.dev].
+  disabled_reason: 
+item: acme
+  current: true
+  disabled: false
+  selected_description: Acme · https://acme.example/v1 · custom Current provider for this scope.
+  shortcut: KeyBinding { key: Char('e'), modifiers: KeyModifiers(0x0) }
+  description: custom, current · Acme · https://acme.example/v1
+  disabled_reason: 
+item: lmstudio
+  current: false
+  disabled: false
+  selected_description: gpt-oss · http://localhost:1234/v1 · built-in Available to set as the current provider for this scope.
+  shortcut: KeyBinding { key: Char('e'), modifiers: KeyModifiers(0x0) }
+  description: built-in · gpt-oss · http://localhost:1234/v1
+  disabled_reason: 
+item: ollama
+  current: false
+  disabled: false
+  selected_description: gpt-oss · http://localhost:11434/v1 · built-in Available to set as the current provider for this scope.
+  shortcut: KeyBinding { key: Char('e'), modifiers: KeyModifiers(0x0) }
+  description: built-in · gpt-oss · http://localhost:11434/v1
+  disabled_reason: 
+item: openai
+  current: false
+  disabled: false
+  selected_description: OpenAI · built-in Available to set as the current provider for this scope.
+  shortcut: KeyBinding { key: Char('e'), modifiers: KeyModifiers(0x0) }
+  description: built-in · OpenAI · <unset>
+  disabled_reason: 
+item: Create custom provider
+  current: false
+  disabled: false
+  selected_description: Create a custom provider definition, then optionally set it as the default for this scope.
+  shortcut: 
+  description: Add a new global [model_providers.<id>] entry.
+  disabled_reason: 

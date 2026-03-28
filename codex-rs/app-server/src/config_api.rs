@@ -614,7 +614,7 @@ model_provider = "openai"
         assert_eq!(response.status, codex_app_server_protocol::WriteStatus::Ok);
         assert_eq!(
             std::fs::read_to_string(user_config_path).expect("read config"),
-            "model_provider = \"custom\"\n"
+            "\nmodel_provider = \"custom\"\n"
         );
         assert!(
             reloader

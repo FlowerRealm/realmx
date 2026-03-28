@@ -353,7 +353,7 @@ impl AppServerSession {
     }
 
     pub(crate) async fn list_models(&mut self, include_hidden: bool) -> Result<Vec<ModelPreset>> {
-        self.list_models_with_refresh(include_hidden, /* force_refresh */ false)
+        self.list_models_with_refresh(include_hidden, /*force_refresh*/ false)
             .await
     }
 

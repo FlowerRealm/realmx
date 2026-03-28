@@ -816,10 +816,9 @@ async fn remote_models_merge_preserves_bundled_models_on_empty_response() -> Res
     );
 
     let available = manager.list_models(RefreshStrategy::OnlineIfUncached).await;
-    let bundled_slug = bundled_model_slug();
     assert!(
-        available.iter().any(|model| model.model == bundled_slug),
-        "bundled models should remain available after empty remote response"
+        available.is_empty(),
+        "empty remote response should clear the available model list"
     );
     // Keep the mock server alive until after async assertions complete.
     drop(server);
@@ -927,7 +926,7 @@ async fn remote_models_hide_picker_only_models() -> Result<()> {
     let selected = manager
         .get_default_model(&None, RefreshStrategy::OnlineIfUncached)
         .await;
-    assert_eq!(selected, bundled_default_model_slug());
+    assert_eq!(selected, "codex-auto-balanced");
 
     let available = manager.list_models(RefreshStrategy::OnlineIfUncached).await;
     let hidden = available

@@ -7801,7 +7801,7 @@ impl ChatWidget {
         self.refresh_model_display();
     }
 
-    pub(crate) fn on_startup_models_refreshed(&mut self, result: Result<(), String>) {
+    pub(crate) fn on_active_provider_models_refreshed(&mut self, result: Result<(), String>) {
         match result {
             Ok(_) => {
                 self.refresh_model_display();

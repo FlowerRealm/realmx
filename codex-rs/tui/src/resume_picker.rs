@@ -116,8 +116,7 @@ enum BackgroundEvent {
 /// new sessions appear during pagination.
 ///
 /// Filtering happens in two layers:
-/// 1. Provider and source filtering at the backend (only interactive CLI sessions
-///    for the current model provider).
+/// 1. Source filtering at the backend (only interactive CLI sessions).
 /// 2. Working-directory filtering at the picker (unless `--all` is passed).
 pub async fn run_resume_picker(
     tui: &mut Tui,
@@ -158,14 +157,13 @@ async fn run_session_picker(
         let tx = loader_tx.clone();
         let config = config.clone();
         tokio::spawn(async move {
-            let provider_filter = vec![request.default_provider.clone()];
             let page = RolloutRecorder::list_threads(
                 &config,
                 PAGE_SIZE,
                 request.cursor.as_ref(),
                 request.sort_key,
                 INTERACTIVE_SESSION_SOURCES,
-                Some(provider_filter.as_slice()),
+                /*model_providers*/ None,
                 request.default_provider.as_str(),
                 /*search_term*/ None,
             )

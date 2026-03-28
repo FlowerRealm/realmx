@@ -53,6 +53,29 @@ impl ApplyPatchRuntime {
         Self
     }
 
+    fn child_env() -> HashMap<String, String> {
+        const REQUIRED_ENV_KEYS: &[&str] = &[
+            // Preserve PATH because Bazel may resolve current_exe() to a launcher
+            // script whose shebang uses `/usr/bin/env bash`.
+            "PATH",
+            "RUNFILES_DIR",
+            "RUNFILES_MANIFEST_FILE",
+            "RUNFILES_MANIFEST_ONLY",
+            "TEST_SRCDIR",
+            "JAVA_RUNFILES",
+            "PYTHON_RUNFILES",
+        ];
+
+        REQUIRED_ENV_KEYS
+            .iter()
+            .filter_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| ((*key).to_string(), value))
+            })
+            .collect()
+    }
+
     fn build_guardian_review_request(
         req: &ApplyPatchRequest,
         call_id: &str,
@@ -93,8 +116,9 @@ impl ApplyPatchRuntime {
             ],
             cwd: req.action.cwd.clone(),
             expiration: req.timeout_ms.into(),
-            // Run apply_patch with a minimal environment for determinism and to avoid leaks.
-            env: HashMap::new(),
+            // Keep the environment minimal, but preserve Bazel runfiles variables so
+            // self-invocation can still resolve bundled resources under remote tests.
+            env: Self::child_env(),
             sandbox_permissions: req.sandbox_permissions,
             additional_permissions: req.additional_permissions.clone(),
             justification: None,

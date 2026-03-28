@@ -4,6 +4,7 @@
 // user-visible output must go through the appropriate abstraction (e.g.,
 // the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
+#![recursion_limit = "256"]
 
 mod analytics_client;
 pub mod api_bridge;
@@ -53,6 +54,7 @@ mod network_policy_decision;
 pub mod network_proxy_loader;
 mod original_image_detail;
 mod provider_credentials;
+mod provider_id;
 mod provider_login_capabilities;
 pub use mcp_connection_manager::MCP_SANDBOX_STATE_CAPABILITY;
 pub use mcp_connection_manager::MCP_SANDBOX_STATE_METHOD;
@@ -102,8 +104,12 @@ pub use provider_credentials::clear_provider_oauth_tokens;
 pub use provider_credentials::detect_provider_credential_mode;
 pub use provider_credentials::has_provider_oauth_tokens;
 pub use provider_credentials::read_provider_api_key;
+pub use provider_credentials::rename_provider_api_key;
 pub use provider_credentials::resolve_provider_credential;
 pub use provider_credentials::store_provider_api_key;
+pub use provider_id::model_provider_id_requirements;
+pub use provider_id::validate_model_provider_id;
+pub use provider_id::validate_model_provider_reference;
 pub use provider_login_capabilities::ProviderLoginCapabilities;
 pub use provider_login_capabilities::provider_login_capabilities;
 pub use provider_login_capabilities::provider_oauth_url;
@@ -126,6 +132,7 @@ pub type CodexConversation = CodexThread;
 // Re-export common auth types for workspace consumers
 pub use analytics_client::AnalyticsEventsClient;
 pub use auth::AuthManager;
+pub use auth::AuthScope;
 pub use auth::CodexAuth;
 pub mod default_client;
 pub mod project_doc;

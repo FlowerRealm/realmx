@@ -21,7 +21,7 @@ async fn refresh_without_id_token() {
     let codex_home = tempdir().unwrap();
     let fake_jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: None,
         },
@@ -35,6 +35,7 @@ async fn refresh_without_id_token() {
     );
     let updated = super::persist_tokens(
         &storage,
+        &AuthScope::Default,
         None,
         Some("new-access-token".to_string()),
         Some("new-refresh-token".to_string()),
@@ -70,10 +71,11 @@ fn login_with_api_key_overwrites_existing_auth_json() {
         .expect("login_with_api_key should succeed");
 
     let storage = FileAuthStorage::new(dir.path().to_path_buf());
-    let auth = storage
-        .try_read_auth_json(&auth_path)
+    let auth_store = storage
+        .try_read_auth_store_json(&auth_path)
         .expect("auth.json should parse");
-    assert_eq!(auth.openai_api_key.as_deref(), Some("sk-new"));
+    let auth = auth_store.default.expect("default auth should exist");
+    assert_eq!(auth.api_key.as_deref(), Some("sk-new"));
     assert!(auth.tokens.is_none(), "tokens should be cleared");
 }
 
@@ -91,7 +93,7 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
     let codex_home = tempdir().unwrap();
     let fake_jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: None,
         },
@@ -99,7 +101,7 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
     )
     .expect("failed to write auth file");
 
-    let auth = super::load_auth(codex_home.path(), false, AuthCredentialsStoreMode::File)
+    let auth = CodexAuth::from_auth_storage(codex_home.path(), AuthCredentialsStoreMode::File)
         .unwrap()
         .unwrap();
     assert_eq!(None, auth.api_key());
@@ -116,7 +118,7 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
     assert_eq!(
         AuthDotJson {
             auth_mode: None,
-            openai_api_key: None,
+            api_key: None,
             tokens: Some(TokenData {
                 id_token: IdTokenInfo {
                     email: Some("user@example.com".to_string()),
@@ -146,7 +148,7 @@ async fn loads_api_key_from_auth_json() {
     )
     .unwrap();
 
-    let auth = super::load_auth(dir.path(), false, AuthCredentialsStoreMode::File)
+    let auth = CodexAuth::from_auth_storage(dir.path(), AuthCredentialsStoreMode::File)
         .unwrap()
         .unwrap();
     assert_eq!(auth.auth_mode(), AuthMode::ApiKey);
@@ -160,7 +162,7 @@ fn logout_removes_auth_file() -> Result<(), std::io::Error> {
     let dir = tempdir()?;
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(ApiAuthMode::ApiKey),
-        openai_api_key: Some("sk-test-key".to_string()),
+        api_key: Some("sk-test-key".to_string()),
         tokens: None,
         last_refresh: None,
     };
@@ -200,7 +202,7 @@ fn unauthorized_recovery_reports_mode_and_step_names() {
 }
 
 struct AuthFileParams {
-    openai_api_key: Option<String>,
+    api_key: Option<String>,
     chatgpt_plan_type: Option<String>,
     chatgpt_account_id: Option<String>,
 }
@@ -243,7 +245,7 @@ fn write_auth_file(params: AuthFileParams, codex_home: &Path) -> std::io::Result
     let fake_jwt = format!("{header_b64}.{payload_b64}.{signature_b64}");
 
     let auth_json_data = json!({
-        "OPENAI_API_KEY": params.openai_api_key,
+        "api_key": params.api_key,
         "tokens": {
             "id_token": fake_jwt,
             "access_token": "test-access-token",
@@ -325,7 +327,7 @@ async fn enforce_login_restrictions_logs_out_for_workspace_mismatch() {
     let codex_home = tempdir().unwrap();
     let _jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: Some("org_another_org".to_string()),
         },
@@ -350,7 +352,7 @@ async fn enforce_login_restrictions_allows_matching_workspace() {
     let codex_home = tempdir().unwrap();
     let _jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: Some("org_mine".to_string()),
         },
@@ -404,7 +406,7 @@ fn plan_type_maps_known_plan() {
     let codex_home = tempdir().unwrap();
     let _jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: None,
         },
@@ -412,7 +414,7 @@ fn plan_type_maps_known_plan() {
     )
     .expect("failed to write auth file");
 
-    let auth = super::load_auth(codex_home.path(), false, AuthCredentialsStoreMode::File)
+    let auth = CodexAuth::from_auth_storage(codex_home.path(), AuthCredentialsStoreMode::File)
         .expect("load auth")
         .expect("auth available");
 
@@ -424,7 +426,7 @@ fn plan_type_maps_unknown_to_unknown() {
     let codex_home = tempdir().unwrap();
     let _jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("mystery-tier".to_string()),
             chatgpt_account_id: None,
         },
@@ -432,7 +434,7 @@ fn plan_type_maps_unknown_to_unknown() {
     )
     .expect("failed to write auth file");
 
-    let auth = super::load_auth(codex_home.path(), false, AuthCredentialsStoreMode::File)
+    let auth = CodexAuth::from_auth_storage(codex_home.path(), AuthCredentialsStoreMode::File)
         .expect("load auth")
         .expect("auth available");
 
@@ -444,7 +446,7 @@ fn missing_plan_type_maps_to_unknown() {
     let codex_home = tempdir().unwrap();
     let _jwt = write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: None,
             chatgpt_account_id: None,
         },
@@ -452,7 +454,7 @@ fn missing_plan_type_maps_to_unknown() {
     )
     .expect("failed to write auth file");
 
-    let auth = super::load_auth(codex_home.path(), false, AuthCredentialsStoreMode::File)
+    let auth = CodexAuth::from_auth_storage(codex_home.path(), AuthCredentialsStoreMode::File)
         .expect("load auth")
         .expect("auth available");
 

@@ -199,7 +199,7 @@ impl ModelsManager {
             model_catalog,
             collaboration_modes_config,
             OPENAI_PROVIDER_ID.to_string(),
-            ModelProviderInfo::create_openai_provider(/* base_url */ None),
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             OAuthCredentialsStoreMode::default(),
         )
     }
@@ -295,10 +295,15 @@ impl ModelsManager {
         Ok(self.build_available_models(remote_models))
     }
 
-    /// Force a network refresh and return the latest picker-ready presets.
+    /// Force a network refresh and return the latest picker-ready presets for the active provider.
     #[instrument(level = "info", skip(self))]
-    pub async fn refresh_models_for_startup_result(&self) -> CoreResult<Vec<ModelPreset>> {
+    pub async fn refresh_models_for_active_provider_result(&self) -> CoreResult<Vec<ModelPreset>> {
         self.list_models_result(RefreshStrategy::Online).await
+    }
+
+    /// Force a network refresh and return the latest picker-ready presets.
+    pub async fn refresh_models_for_startup_result(&self) -> CoreResult<Vec<ModelPreset>> {
+        self.refresh_models_for_active_provider_result().await
     }
 
     /// List collaboration mode presets.
@@ -494,10 +499,13 @@ impl ModelsManager {
     async fn fetch_and_update_models(&self) -> CoreResult<()> {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
-        let auth = self.auth_manager.auth().await;
+        let provider_id = self.provider_id.read().await.clone();
+        let auth = self
+            .auth_manager
+            .auth_for_provider(Some(provider_id.as_str()))
+            .await;
         let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let provider_generation = self.provider_generation.load(Ordering::SeqCst);
-        let provider_id = self.provider_id.read().await.clone();
         let provider = self.provider.read().await.clone();
         let api_provider = provider.to_api_provider(auth_mode)?;
         let api_auth = auth_provider_from_auth(
@@ -628,7 +636,13 @@ impl ModelsManager {
         remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
 
         let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
-        let chatgpt_mode = matches!(self.auth_manager.auth_mode(), Some(AuthMode::Chatgpt));
+        let chatgpt_mode = self.provider_id.try_read().ok().is_some_and(|provider_id| {
+            matches!(
+                self.auth_manager
+                    .auth_mode_for_provider(Some(provider_id.as_str())),
+                Some(AuthMode::Chatgpt)
+            )
+        });
         presets = ModelPreset::filter_by_auth(presets, chatgpt_mode);
 
         ModelPreset::mark_default_by_picker_visibility(&mut presets);

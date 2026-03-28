@@ -1942,6 +1942,7 @@ async fn make_chatwidget_manual_with_animation_mode(
         rate_limit_poller: None,
         provider_usage: None,
         provider_usage_poller: None,
+        provider_create_draft: crate::provider_flow::ProviderDraft::new(),
         adaptive_chunking: crate::streaming::chunking::AdaptiveChunkingPolicy::default(),
         stream_controller: None,
         plan_stream_controller: None,
@@ -6878,7 +6879,7 @@ fn render_bottom_first_row(chat: &ChatWidget, width: u16) -> String {
     String::new()
 }
 
-fn render_bottom_popup(chat: &ChatWidget, width: u16) -> String {
+pub(crate) fn render_bottom_popup(chat: &ChatWidget, width: u16) -> String {
     let height = chat.desired_height(width);
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
@@ -7810,8 +7811,9 @@ async fn model_selection_popup_shows_cached_models_before_remote_models_arrive()
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("codex-auto-fast"));
-    assert!(popup.contains("All models"));
+    assert!(popup.contains("Select Model and Effort"));
+    assert!(popup.contains("gpt-5.3-codex"));
+    assert!(popup.contains("gpt-5.4"));
     assert!(!popup.contains("Loading models..."));
 }
 
@@ -7915,7 +7917,8 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert!(popup.contains("codex-auto-fast"));
+    assert!(popup.contains("gpt-5.3-codex"));
+    assert!(popup.contains("gpt-5.4"));
     assert!(!popup.contains(remote_slug));
     assert!(!popup.contains("Loading models..."));
 
@@ -7933,8 +7936,9 @@ async fn model_picker_loaded_replaces_loading_popup_with_remote_models() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(popup.contains("codex-auto-fast"));
-    assert!(popup.contains(remote_slug));
-    assert!(popup.contains("gpt-5.4[1m]"));
+    assert!(!popup.contains("gpt-5.4"));
+    assert!(popup.contains("All models"));
+    assert!(!popup.contains(remote_slug));
     assert!(!popup.contains("Loading models..."));
 }
 
@@ -8058,6 +8062,36 @@ async fn settings_editor_escape_returns_to_settings_section() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
 
     assert_eq!(render_bottom_popup(&chat, 88), section_popup);
+}
+
+#[tokio::test]
+async fn provider_root_refresh_preserves_selected_row() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
+    chat.open_provider_flow(
+        crate::provider_flow::ProviderFlowSource::SlashCommand,
+        crate::settings::data::SettingsScope::Global,
+        crate::provider_flow::ProviderScreen::Root,
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+
+    assert_eq!(
+        chat.bottom_pane
+            .selected_index_for_active_view(crate::provider_flow_view::PROVIDER_ROOT_VIEW_ID),
+        Some(1)
+    );
+
+    chat.open_provider_flow(
+        crate::provider_flow::ProviderFlowSource::SlashCommand,
+        crate::settings::data::SettingsScope::Global,
+        crate::provider_flow::ProviderScreen::Root,
+    );
+
+    assert_eq!(
+        chat.bottom_pane
+            .selected_index_for_active_view(crate::provider_flow_view::PROVIDER_ROOT_VIEW_ID),
+        Some(1)
+    );
 }
 
 #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
@@ -8506,6 +8540,32 @@ async fn reasoning_popup_escape_returns_to_model_popup() {
     let after_escape = render_bottom_popup(&chat, 80);
     assert!(after_escape.contains("Select Model"));
     assert!(!after_escape.contains("Select Reasoning Level"));
+}
+
+#[tokio::test]
+async fn dismiss_model_selection_flow_closes_parent_and_child_views() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
+    chat.thread_id = Some(ThreadId::new());
+    let presets = chat
+        .models_manager
+        .try_list_models()
+        .expect("model presets should be available");
+    chat.open_model_popup_with_presets(presets);
+
+    let preset = get_available_model(&chat, "gpt-5.1-codex-max");
+    chat.open_reasoning_popup(preset);
+    assert!(render_bottom_popup(&chat, 80).contains("Select Reasoning Level"));
+
+    assert!(chat.dismiss_model_selection_flow());
+    let after = render_bottom_popup(&chat, 80);
+    assert!(
+        !after.contains("Select Reasoning Level"),
+        "expected reasoning popup to be dismissed, got:\n{after}"
+    );
+    assert!(
+        after.contains("Ask Codex to do anything"),
+        "expected to return to composer after dismissal, got:\n{after}"
+    );
 }
 
 #[tokio::test]
@@ -10846,16 +10906,6 @@ async fn remote_usage_appends_default_status_item() {
 }
 
 #[tokio::test]
-async fn legacy_su8_provider_appends_remote_usage_default_item() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.model_provider_id = "su8".to_string();
-
-    let items = chat.configured_status_line_items();
-
-    assert!(items.iter().any(|item| item == "remote-usage"));
-}
-
-#[tokio::test]
 async fn remote_usage_status_line_value_renders_summary() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.on_provider_usage_snapshot(Some(
@@ -10905,31 +10955,21 @@ async fn remote_usage_status_line_footer_snapshot() {
 }
 
 #[tokio::test]
-async fn legacy_remote_usage_ids_map_to_remote_usage() {
+async fn configured_status_line_items_only_dedupes_exact_ids() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.tui_status_line = Some(vec![
+        "remote-usage".to_string(),
+        "remote-usage".to_string(),
         "provider-usage-remaining".to_string(),
-        "provider-usage-used".to_string(),
-        "su8-remaining".to_string(),
-        "su8-today-used".to_string(),
     ]);
 
     assert_eq!(
         chat.configured_status_line_items(),
-        vec![StatusLineItem::RemoteUsage.to_string()]
+        vec![
+            "remote-usage".to_string(),
+            "provider-usage-remaining".to_string(),
+        ]
     );
-}
-
-#[tokio::test]
-async fn legacy_remote_usage_ids_keep_provider_usage_poller_enabled() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.model_provider_id = "su8".to_string();
-    chat.config.tui_status_line = Some(vec!["su8-remaining".to_string()]);
-
-    chat.prefetch_provider_usage();
-
-    assert!(chat.provider_usage_poller.is_some());
-    chat.stop_provider_usage_poller();
 }
 
 #[tokio::test]

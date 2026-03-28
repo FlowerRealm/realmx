@@ -13,6 +13,7 @@ use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 
 use super::data::SettingItemData;
+use super::data::SettingsItemAction;
 use super::data::SettingsRootItemData;
 use super::data::SettingsRootItemKind;
 use super::data::SettingsScope;
@@ -376,14 +377,7 @@ fn root_selection_item(item: &SettingsRootItemData, scope: SettingsScope) -> Sel
                 }) as SelectionAction]
             }
             SettingsRootItemKind::Setting(setting) => {
-                let key_path = setting.node.key_path.clone();
-                vec![Box::new(move |tx: &AppEventSender| {
-                    tx.send(AppEvent::OpenSettingEditor {
-                        key_path: key_path.clone(),
-                        scope,
-                        screen: SettingsScreen::Root,
-                    });
-                })]
+                setting_selection_actions(setting, scope, SettingsScreen::Root)
             }
         }
     };
@@ -405,17 +399,10 @@ fn setting_selection_item(
     scope: SettingsScope,
     screen: SettingsScreen,
 ) -> SelectionItem {
-    let key_path = item.node.key_path.clone();
     let actions: Vec<SelectionAction> = if item.disabled_reason.is_some() {
         Vec::new()
     } else {
-        vec![Box::new(move |tx: &AppEventSender| {
-            tx.send(AppEvent::OpenSettingEditor {
-                key_path: key_path.clone(),
-                scope,
-                screen: screen.clone(),
-            });
-        })]
+        setting_selection_actions(item, scope, screen)
     };
 
     SelectionItem {
@@ -427,6 +414,32 @@ fn setting_selection_item(
         search_value: Some(item.search_value.clone()),
         disabled_reason: item.disabled_reason.clone(),
         ..Default::default()
+    }
+}
+
+fn setting_selection_actions(
+    item: &SettingItemData,
+    scope: SettingsScope,
+    screen: SettingsScreen,
+) -> Vec<SelectionAction> {
+    match item.action {
+        SettingsItemAction::OpenProvider => vec![Box::new(move |tx: &AppEventSender| {
+            tx.send(AppEvent::OpenProviderFlow {
+                source: crate::provider_flow::ProviderFlowSource::SettingsModel,
+                scope,
+                screen: crate::provider_flow::ProviderScreen::Root,
+            });
+        })],
+        _ => {
+            let key_path = item.node.key_path.clone();
+            vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::OpenSettingEditor {
+                    key_path: key_path.clone(),
+                    scope,
+                    screen: screen.clone(),
+                });
+            })]
+        }
     }
 }
 
