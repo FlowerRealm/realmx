@@ -228,10 +228,7 @@ pub fn rename_provider_api_key(
 
 fn clear_resolved_provider_api_key(codex_home: &Path, provider_id: &str) -> Result<bool> {
     let Some((scope, _)) = resolve_provider_api_key(codex_home, provider_id)? else {
-        return clear_legacy_provider_api_key_from_config(
-            codex_home,
-            provider_id,
-        );
+        return clear_legacy_provider_api_key_from_config(codex_home, provider_id);
     };
 
     logout_for_scope(codex_home, &scope, PROVIDER_API_KEY_STORE_MODE).map_err(config_error)
