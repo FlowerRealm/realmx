@@ -30,15 +30,14 @@ const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567"
 const PROJECT_CONFIG_DIR_NAME: &str = ".realmx";
 
 #[tokio::test]
-async fn plugin_list_returns_invalid_request_for_invalid_marketplace_file() -> Result<()> {
+async fn plugin_list_skips_invalid_marketplace_file_and_reports_error() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
     std::fs::create_dir_all(repo_root.path().join(".git"))?;
     std::fs::create_dir_all(repo_root.path().join(".agents/plugins"))?;
-    std::fs::write(
-        repo_root.path().join(".agents/plugins/marketplace.json"),
-        "{not json",
-    )?;
+    let marketplace_path =
+        AbsolutePathBuf::try_from(repo_root.path().join(".agents/plugins/marketplace.json"))?;
+    std::fs::write(marketplace_path.as_path(), "{not json")?;
 
     let home = codex_home.path().to_string_lossy().into_owned();
     let mut mcp = McpProcess::new_with_env(
@@ -58,14 +57,32 @@ async fn plugin_list_returns_invalid_request_for_invalid_marketplace_file() -> R
         })
         .await?;
 
-    let err = timeout(
+    let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
+    let response: PluginListResponse = to_response(response)?;
 
-    assert_eq!(err.error.code, -32600);
-    assert!(err.error.message.contains("invalid marketplace file"));
+    assert!(
+        response
+            .marketplaces
+            .iter()
+            .all(|marketplace| { marketplace.path != marketplace_path }),
+        "invalid marketplace should be skipped"
+    );
+    assert_eq!(response.marketplace_load_errors.len(), 1);
+    assert_eq!(
+        response.marketplace_load_errors[0].marketplace_path,
+        marketplace_path
+    );
+    assert!(
+        response.marketplace_load_errors[0]
+            .message
+            .contains("invalid marketplace file"),
+        "unexpected error: {:?}",
+        response.marketplace_load_errors
+    );
     Ok(())
 }
 
@@ -153,7 +170,9 @@ async fn plugin_list_includes_install_and_enabled_state_from_config() -> Result<
         repo_root.path().join(".agents/plugins/marketplace.json"),
         r#"{
   "name": "codex-curated",
-  "display_name": "ChatGPT Official",
+  "interface": {
+    "displayName": "ChatGPT Official"
+  },
   "plugins": [
     {
       "name": "enabled-plugin",
@@ -683,7 +702,7 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
             .collect::<Vec<_>>(),
         vec![
             ("linear@openai-curated".to_string(), true, true),
-            ("gmail@openai-curated".to_string(), true, false),
+            ("gmail@openai-curated".to_string(), false, false),
             ("calendar@openai-curated".to_string(), false, false),
         ]
     );

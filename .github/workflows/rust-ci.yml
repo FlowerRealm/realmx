@@ -151,6 +151,8 @@ jobs:
       - uses: facebook/install-dotslash@v2
       - name: Run argument comment lint on codex-rs
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./tools/argument-comment-lint/run-prebuilt-linter.sh
 
   # --- CI to validate on different os/targets --------------------------------

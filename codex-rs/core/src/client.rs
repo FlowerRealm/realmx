@@ -1038,9 +1038,9 @@ impl ModelClientSession {
         }
 
         let auth_manager = self.client.state.auth_manager.clone();
-        let mut auth_recovery = auth_manager
-            .as_ref()
-            .map(super::auth::AuthManager::unauthorized_recovery);
+        let mut auth_recovery = auth_manager.as_ref().map(|manager| {
+            manager.unauthorized_recovery_for_provider(Some(self.client.state.provider_id.as_str()))
+        });
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;
@@ -1127,9 +1127,9 @@ impl ModelClientSession {
     ) -> Result<WebsocketStreamOutcome> {
         let auth_manager = self.client.state.auth_manager.clone();
 
-        let mut auth_recovery = auth_manager
-            .as_ref()
-            .map(super::auth::AuthManager::unauthorized_recovery);
+        let mut auth_recovery = auth_manager.as_ref().map(|manager| {
+            manager.unauthorized_recovery_for_provider(Some(self.client.state.provider_id.as_str()))
+        });
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;

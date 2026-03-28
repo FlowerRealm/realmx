@@ -442,6 +442,13 @@ enum EnsureConversationListenerResult {
     ConnectionClosed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefreshTokenRequestOutcome {
+    NotAttemptedOrSucceeded,
+    FailedTransiently,
+    FailedPermanently,
+}
+
 pub(crate) struct CodexMessageProcessorArgs {
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) thread_manager: Arc<ThreadManager>,
@@ -1674,17 +1681,17 @@ impl CodexMessageProcessor {
         }
     }
 
-    async fn refresh_token_if_requested(&self, do_refresh: bool) {
+    async fn refresh_token_if_requested(&self, do_refresh: bool) -> RefreshTokenRequestOutcome {
         if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
             .uses_openai_auth()
         {
-            return;
+            return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
         if self
             .auth_manager
             .is_external_auth_active_for_provider(Some(self.config.model_provider_id.as_str()))
         {
-            return;
+            return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
         if do_refresh
             && let Err(err) = self
@@ -1692,8 +1699,13 @@ impl CodexMessageProcessor {
                 .refresh_token_for_provider(Some(self.config.model_provider_id.as_str()))
                 .await
         {
+            if err.failed_reason().is_some() {
+                return RefreshTokenRequestOutcome::FailedPermanently;
+            }
             tracing::warn!("failed to refresh token while getting account: {err}");
+            return RefreshTokenRequestOutcome::FailedTransiently;
         }
+        RefreshTokenRequestOutcome::NotAttemptedOrSucceeded
     }
 
     async fn get_auth_status(&self, request_id: ConnectionRequestId, params: GetAuthStatusParams) {
@@ -1704,27 +1716,45 @@ impl CodexMessageProcessor {
             &self.config.model_provider,
         );
 
-        self.refresh_token_if_requested(do_refresh).await;
+        let refresh_outcome = self.refresh_token_if_requested(do_refresh).await;
         let requires_auth = capabilities.requires_auth();
         let requires_openai_auth = capabilities.uses_openai_auth();
         let auth_method = self
             .current_provider_credential_mode()
             .map(Self::protocol_auth_mode);
+        let auth = if do_refresh {
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+        } else {
+            self.auth_manager
+                .auth_for_provider(Some(self.config.model_provider_id.as_str()))
+                .await
+        };
         let auth_token = if include_token && requires_auth {
-            match resolve_provider_credential(
-                &self.config.codex_home,
-                &self.config.model_provider_id,
-                &self.config.model_provider,
-                self.auth_manager
-                    .auth_cached_for_provider(Some(self.config.model_provider_id.as_str())),
-                self.config.mcp_oauth_credentials_store_mode,
-            )
-            .await
-            {
-                Ok(credential) => credential.token,
-                Err(err) => {
-                    tracing::warn!("failed to get token for auth status: {err}");
-                    None
+            let permanent_refresh_failure = matches!(
+                refresh_outcome,
+                RefreshTokenRequestOutcome::FailedPermanently
+            ) || auth
+                .as_ref()
+                .is_some_and(|auth| self.auth_manager.refresh_failure_for_auth(auth).is_some());
+
+            if permanent_refresh_failure && requires_openai_auth {
+                None
+            } else {
+                match resolve_provider_credential(
+                    &self.config.codex_home,
+                    &self.config.model_provider_id,
+                    &self.config.model_provider,
+                    auth,
+                    self.config.mcp_oauth_credentials_store_mode,
+                )
+                .await
+                {
+                    Ok(credential) => credential.token,
+                    Err(err) => {
+                        tracing::warn!("failed to get token for auth status: {err}");
+                        None
+                    }
                 }
             }
         } else {

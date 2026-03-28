@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -34,6 +35,22 @@ use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
 use crate::test_codex::ApplyPatchModelOutput;
+
+static DEFAULT_MODELS_RESPONSE: LazyLock<ModelsResponse> = LazyLock::new(|| {
+    let bundled_models_path = codex_utils_cargo_bin::find_resource!("../../models.json")
+        .unwrap_or_else(|err| {
+            panic!("failed to locate bundled models.json: {err}");
+        });
+    let bundled_models_contents =
+        std::fs::read_to_string(&bundled_models_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read bundled models.json from {}: {err}",
+                bundled_models_path.display()
+            );
+        });
+    serde_json::from_str(&bundled_models_contents)
+        .unwrap_or_else(|err| panic!("failed to parse bundled models.json: {err}"))
+});
 
 #[derive(Debug, Clone)]
 pub struct ResponseMock {
@@ -1252,7 +1269,7 @@ pub async fn start_mock_server() -> MockServer {
         .await;
 
     // Provide a default `/models` response so tests remain hermetic when the client queries it.
-    let _ = mount_models_once(&server, ModelsResponse { models: Vec::new() }).await;
+    let _ = mount_models_once(&server, DEFAULT_MODELS_RESPONSE.clone()).await;
 
     server
 }
