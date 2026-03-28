@@ -109,7 +109,6 @@ use crate::response_debug_context::extract_response_debug_context;
 use crate::response_debug_context::extract_response_debug_context_from_api_error;
 use crate::response_debug_context::telemetry_api_error_message;
 use crate::response_debug_context::telemetry_transport_error_message;
-use crate::tools::spec::create_tools_json_for_responses_api;
 use crate::util::FeedbackRequestTags;
 use crate::util::emit_feedback_auth_recovery_tags;
 use crate::util::emit_feedback_request_tags_with_auth_env;
@@ -379,7 +378,7 @@ impl ModelClient {
 
         let instructions = prompt.base_instructions.text.clone();
         let input = prompt.get_formatted_input();
-        let tools = create_tools_json_for_responses_api(&prompt.tools)?;
+        let tools = prompt.get_tools_json()?.to_vec();
         let reasoning = Self::build_reasoning(model_info, effort, summary);
         let verbosity = if model_info.support_verbosity {
             self.state.model_verbosity.or(model_info.default_verbosity)
@@ -712,7 +711,7 @@ impl ModelClientSession {
     ) -> Result<ResponsesApiRequest> {
         let instructions = &prompt.base_instructions.text;
         let input = prompt.get_formatted_input();
-        let tools = create_tools_json_for_responses_api(&prompt.tools)?;
+        let tools = prompt.get_tools_json()?.to_vec();
         let default_reasoning_effort = model_info.default_reasoning_level;
         let reasoning = if model_info.supports_reasoning_summaries {
             Some(Reasoning {
