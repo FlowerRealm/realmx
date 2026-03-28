@@ -31,7 +31,8 @@ use codex_app_server_protocol::AuthMode;
 use codex_client::build_reqwest_client_with_custom_ca;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::AuthDotJson;
-use codex_core::auth::save_auth;
+use codex_core::auth::AuthScope;
+use codex_core::auth::save_auth_for_scope;
 use codex_core::default_client::originator;
 use codex_core::token_data::TokenData;
 use codex_core::token_data::parse_chatgpt_jwt_claims;
@@ -60,6 +61,7 @@ pub struct ServerOptions {
     pub force_state: Option<String>,
     pub forced_chatgpt_workspace_id: Option<String>,
     pub cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
+    pub auth_scope: AuthScope,
 }
 
 impl ServerOptions {
@@ -79,6 +81,7 @@ impl ServerOptions {
             force_state: None,
             forced_chatgpt_workspace_id,
             cli_auth_credentials_store_mode,
+            auth_scope: AuthScope::Default,
         }
     }
 }
@@ -349,6 +352,7 @@ async fn process_request(
                         tokens.access_token.clone(),
                         tokens.refresh_token.clone(),
                         opts.cli_auth_credentials_store_mode,
+                        opts.auth_scope.clone(),
                     )
                     .await
                     {
@@ -757,6 +761,7 @@ pub(crate) async fn persist_tokens_async(
     access_token: String,
     refresh_token: String,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
+    auth_scope: AuthScope,
 ) -> io::Result<()> {
     // Reuse existing synchronous logic but run it off the async runtime.
     let codex_home = codex_home.to_path_buf();
@@ -775,11 +780,11 @@ pub(crate) async fn persist_tokens_async(
         }
         let auth = AuthDotJson {
             auth_mode: Some(AuthMode::Chatgpt),
-            openai_api_key: api_key,
+            api_key,
             tokens: Some(tokens),
             last_refresh: Some(Utc::now()),
         };
-        save_auth(&codex_home, &auth, auth_credentials_store_mode)
+        save_auth_for_scope(&codex_home, &auth_scope, &auth, auth_credentials_store_mode)
     })
     .await
     .map_err(|e| io::Error::other(format!("persist task failed: {e}")))?

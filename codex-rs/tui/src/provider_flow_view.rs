@@ -289,7 +289,7 @@ fn build_provider_detail_view_params(
                 row,
                 &location,
                 *field,
-                runtime_state.has_secure_api_key,
+                runtime_state.has_stored_api_key,
             ));
         }
     }
@@ -306,7 +306,7 @@ fn build_provider_detail_view_params(
         subtitle: Some(provider_detail_subtitle(row, scope, active_profile)),
         footer_note: Some(
             Line::from(
-                "Usage scripts are project-local. API keys stay in secure storage outside config.toml."
+                "Usage scripts are project-local. Provider API keys are stored in config.toml."
                     .to_string(),
             )
             .dim(),
@@ -505,17 +505,17 @@ fn provider_field_item(
     row: &ProviderFlowRow,
     location: &ProviderFlowLocation,
     field: ProviderField,
-    has_secure_api_key: bool,
+    has_stored_api_key: bool,
 ) -> SelectionItem {
     let provider_id = row.id.clone();
     let search_provider_id = provider_id.clone();
-    let (description, disabled_reason) = provider_field_description(row, field, has_secure_api_key);
+    let (description, disabled_reason) = provider_field_description(row, field, has_stored_api_key);
     let is_disabled = disabled_reason.is_some();
     let location = location.clone();
     SelectionItem {
         name: field.label().to_string(),
         description: Some(description),
-        selected_description: selected_provider_field_description(field, has_secure_api_key),
+        selected_description: selected_provider_field_description(field, has_stored_api_key),
         is_disabled,
         disabled_reason,
         actions: vec![Box::new(move |tx| {
@@ -696,9 +696,9 @@ fn provider_detail_summary(row: &ProviderFlowRow) -> String {
 fn provider_field_description(
     row: &ProviderFlowRow,
     field: ProviderField,
-    has_secure_api_key: bool,
+    has_stored_api_key: bool,
 ) -> (String, Option<String>) {
-    let value = provider_field_value(&row.id, &row.provider, field, has_secure_api_key);
+    let value = provider_field_value(&row.id, &row.provider, field, has_stored_api_key);
     let description = match value {
         ProviderFieldValue::Visible(value) => {
             if value.trim().is_empty() {
@@ -720,20 +720,20 @@ fn provider_field_description(
 
 fn selected_provider_field_description(
     field: ProviderField,
-    has_secure_api_key: bool,
+    has_stored_api_key: bool,
 ) -> Option<String> {
     Some(match field {
         ProviderField::Id => {
-            "Edit the provider ID. Renaming will migrate secure credentials and update saved default-provider references."
+            "Edit the provider ID. Renaming will keep stored API keys and update saved default-provider references."
                 .to_string()
         }
         ProviderField::Name => "Edit the human-readable provider name stored in config.toml.".to_string(),
         ProviderField::BaseUrl => "Edit the provider base URL stored in config.toml.".to_string(),
         ProviderField::ApiKey => {
             let mut text =
-                "Leave the field blank to keep the existing secure value. Type CLEAR to remove it.".to_string();
-            if has_secure_api_key {
-                text.push_str(" A secure key is already present.");
+                "Leave the field blank to keep the existing stored value. Type CLEAR to remove it.".to_string();
+            if has_stored_api_key {
+                text.push_str(" An API key is already present.");
             }
             text
         }
@@ -788,7 +788,7 @@ fn create_field_selected_description(field: ProviderField) -> String {
         ProviderField::Name => "Set the display name shown in the UI.".to_string(),
         ProviderField::BaseUrl => "Set the provider base URL used for requests.".to_string(),
         ProviderField::ApiKey => {
-            "Optionally store a secure API key outside config.toml while creating this provider."
+            "Optionally store an API key in config.toml while creating this provider."
                 .to_string()
         }
         ProviderField::WireApi => {
@@ -860,13 +860,13 @@ fn provider_field_placeholder(field: ProviderField) -> String {
             "",
             &crate::provider_edit::default_create_provider(),
             field,
-            /*has_secure_api_key*/ false,
+            /*has_stored_api_key*/ false,
         )),
         ProviderField::ExperimentalBearerToken => Some(provider_field_value(
             "",
             &crate::provider_edit::default_create_provider(),
             field,
-            /*has_secure_api_key*/ false,
+            /*has_stored_api_key*/ false,
         )),
         _ => None,
     };
@@ -910,6 +910,9 @@ mod tests {
     use crate::provider_flow::ProviderFlowSource;
     use crate::provider_flow::ProviderScreen;
     use crate::settings::data::SettingsScope;
+    use codex_core::AuthScope;
+    use codex_core::auth::AuthCredentialsStoreMode;
+    use codex_core::auth::login_with_api_key_for_scope;
     use codex_core::config::Config;
     use codex_core::config::ConfigBuilder;
     use codex_utils_absolute_path::AbsolutePathBuf;
@@ -1113,12 +1116,14 @@ model_provider = "acme"
 
     #[tokio::test]
     async fn provider_detail_marks_present_api_key() {
-        let mut config = provider_test_config(Some("dev")).await;
-        config
-            .model_providers
-            .get_mut("acme")
-            .expect("acme provider should exist")
-            .api_key = Some("secret-inline".to_string());
+        let config = provider_test_config(Some("dev")).await;
+        login_with_api_key_for_scope(
+            &config.codex_home,
+            &AuthScope::provider("acme"),
+            "secret-inline",
+            AuthCredentialsStoreMode::File,
+        )
+        .expect("store provider api key");
         let params = build_provider_view_params(
             &config,
             &ProviderDraft::new(),
@@ -1136,12 +1141,12 @@ model_provider = "acme"
 
         assert_eq!(
             item.description.as_deref(),
-            Some("A secure API key is already stored for this provider.")
+            Some("An API key is already stored for this provider.")
         );
         assert_eq!(
             item.selected_description.as_deref(),
             Some(
-                "Leave the field blank to keep the existing secure value. Type CLEAR to remove it. A secure key is already present."
+                "Leave the field blank to keep the existing stored value. Type CLEAR to remove it. An API key is already present."
             )
         );
     }

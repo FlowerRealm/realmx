@@ -713,6 +713,7 @@ fn normalize_skill_config_path(path: &Path) -> String {
 
 fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
     let provider = provider.sanitized_for_config_persistence();
+    let api_key = provider.inline_api_key();
     let mut table = TomlTable::new();
     table.set_implicit(false);
     table["name"] = value(provider.name);
@@ -739,6 +740,9 @@ fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlIt
     if let Some(oauth) = provider.oauth {
         let oauth_value = TomlValue::try_from(oauth)?;
         table["oauth"] = toml_value_to_item(&oauth_value)?;
+    }
+    if let Some(api_key) = api_key {
+        table["api_key"] = value(api_key);
     }
     if let Some(env_key) = provider.env_key {
         table["env_key"] = value(env_key);

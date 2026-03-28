@@ -36,7 +36,7 @@ item: Base URL
 item: API key
   current: false
   disabled: false
-  selected_description: Optionally store a secure API key outside config.toml while creating this provider.
+  selected_description: Optionally store an API key in config.toml while creating this provider.
   shortcut: 
   description: No API key will be stored yet.
   disabled_reason: 

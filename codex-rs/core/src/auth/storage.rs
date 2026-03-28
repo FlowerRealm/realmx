@@ -46,14 +46,93 @@ pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_mode: Option<AuthMode>,
 
-    #[serde(rename = "OPENAI_API_KEY")]
-    pub openai_api_key: Option<String>,
+    #[serde(
+        default,
+        alias = "OPENAI_API_KEY",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_key: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<TokenData>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_refresh: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AuthScope {
+    #[default]
+    Default,
+    Provider(String),
+}
+
+impl AuthScope {
+    pub fn from_provider_id(provider_id: Option<&str>) -> Self {
+        match provider_id {
+            Some(provider_id) => Self::Provider(provider_id.to_string()),
+            None => Self::Default,
+        }
+    }
+
+    pub fn provider(provider_id: impl Into<String>) -> Self {
+        Self::Provider(provider_id.into())
+    }
+
+    pub fn provider_id(&self) -> Option<&str> {
+        match self {
+            Self::Default => None,
+            Self::Provider(provider_id) => Some(provider_id.as_str()),
+        }
+    }
+}
+
+/// Provider-aware structure for $CODEX_HOME/auth.json.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct AuthStoreJson {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<AuthDotJson>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub providers: HashMap<String, AuthDotJson>,
+}
+
+impl AuthStoreJson {
+    pub fn from_default(auth: AuthDotJson) -> Self {
+        Self {
+            default: Some(auth),
+            providers: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, scope: &AuthScope) -> Option<&AuthDotJson> {
+        match scope {
+            AuthScope::Default => self.default.as_ref(),
+            AuthScope::Provider(provider_id) => self.providers.get(provider_id),
+        }
+    }
+
+    pub fn upsert(&mut self, scope: &AuthScope, auth: AuthDotJson) {
+        match scope {
+            AuthScope::Default => {
+                self.default = Some(auth);
+            }
+            AuthScope::Provider(provider_id) => {
+                self.providers.insert(provider_id.clone(), auth);
+            }
+        }
+    }
+
+    pub fn remove(&mut self, scope: &AuthScope) -> bool {
+        match scope {
+            AuthScope::Default => self.default.take().is_some(),
+            AuthScope::Provider(provider_id) => self.providers.remove(provider_id).is_some(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.default.is_none() && self.providers.is_empty()
+    }
 }
 
 pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
@@ -70,8 +149,8 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
 }
 
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
+    fn load(&self) -> std::io::Result<Option<AuthStoreJson>>;
+    fn save(&self, auth: &AuthStoreJson) -> std::io::Result<()>;
     fn delete(&self) -> std::io::Result<bool>;
 }
 
@@ -86,35 +165,69 @@ impl FileAuthStorage {
     }
 
     /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
-    /// Returns the full AuthDotJson structure.
-    pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
+    /// Supports both the current provider-aware envelope and the legacy flat auth payload.
+    pub(super) fn try_read_auth_store_json(
+        &self,
+        auth_file: &Path,
+    ) -> std::io::Result<AuthStoreJson> {
         let mut file = File::open(auth_file)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let auth_dot_json: AuthDotJson = serde_json::from_str(&contents)?;
-
-        Ok(auth_dot_json)
+        parse_auth_store_json(&contents)
     }
 }
 
+fn parse_auth_store_json(contents: &str) -> std::io::Result<AuthStoreJson> {
+    let value = serde_json::from_str::<serde_json::Value>(contents).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("failed to parse auth.json: {err}"),
+        )
+    })?;
+
+    let is_provider_aware = matches!(
+        &value,
+        serde_json::Value::Object(map)
+            if map.contains_key("default") || map.contains_key("providers")
+    );
+
+    if is_provider_aware {
+        return serde_json::from_value(value).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to parse provider-aware auth.json: {err}"),
+            )
+        });
+    }
+
+    serde_json::from_value(value)
+        .map(AuthStoreJson::from_default)
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to parse legacy auth.json: {err}"),
+            )
+        })
+}
+
 impl AuthStorageBackend for FileAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn load(&self) -> std::io::Result<Option<AuthStoreJson>> {
         let auth_file = get_auth_file(&self.codex_home);
-        let auth_dot_json = match self.try_read_auth_json(&auth_file) {
+        let auth_store_json = match self.try_read_auth_store_json(&auth_file) {
             Ok(auth) => auth,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(err),
         };
-        Ok(Some(auth_dot_json))
+        Ok(Some(auth_store_json))
     }
 
-    fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
+    fn save(&self, auth_store_json: &AuthStoreJson) -> std::io::Result<()> {
         let auth_file = get_auth_file(&self.codex_home);
 
         if let Some(parent) = auth_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json_data = serde_json::to_string_pretty(auth_dot_json)?;
+        let json_data = serde_json::to_string_pretty(auth_store_json)?;
         let mut options = OpenOptions::new();
         options.truncate(true).write(true).create(true);
         #[cfg(unix)]
@@ -162,9 +275,9 @@ impl KeyringAuthStorage {
         }
     }
 
-    fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<AuthDotJson>> {
+    fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<AuthStoreJson>> {
         match self.keyring_store.load(KEYRING_SERVICE, key) {
-            Ok(Some(serialized)) => serde_json::from_str(&serialized).map(Some).map_err(|err| {
+            Ok(Some(serialized)) => parse_auth_store_json(&serialized).map(Some).map_err(|err| {
                 std::io::Error::other(format!(
                     "failed to deserialize CLI auth from keyring: {err}"
                 ))
@@ -193,14 +306,13 @@ impl KeyringAuthStorage {
 }
 
 impl AuthStorageBackend for KeyringAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn load(&self) -> std::io::Result<Option<AuthStoreJson>> {
         let key = compute_store_key(&self.codex_home)?;
         self.load_from_keyring(&key)
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn save(&self, auth: &AuthStoreJson) -> std::io::Result<()> {
         let key = compute_store_key(&self.codex_home)?;
-        // Simpler error mapping per style: prefer method reference over closure
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
         self.save_to_keyring(&key, &serialized)?;
         if let Err(err) = delete_file_if_exists(&self.codex_home) {
@@ -238,7 +350,7 @@ impl AutoAuthStorage {
 }
 
 impl AuthStorageBackend for AutoAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn load(&self) -> std::io::Result<Option<AuthStoreJson>> {
         match self.keyring_storage.load() {
             Ok(Some(auth)) => Ok(Some(auth)),
             Ok(None) => self.file_storage.load(),
@@ -249,7 +361,7 @@ impl AuthStorageBackend for AutoAuthStorage {
         }
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn save(&self, auth: &AuthStoreJson) -> std::io::Result<()> {
         match self.keyring_storage.save(auth) {
             Ok(()) => Ok(()),
             Err(err) => {
@@ -265,8 +377,8 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 }
 
-// A global in-memory store for mapping codex_home -> AuthDotJson.
-static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
+// A global in-memory store for mapping codex_home -> AuthStoreJson.
+static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthStoreJson>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Debug)]
@@ -281,7 +393,7 @@ impl EphemeralAuthStorage {
 
     fn with_store<F, T>(&self, action: F) -> std::io::Result<T>
     where
-        F: FnOnce(&mut HashMap<String, AuthDotJson>, String) -> std::io::Result<T>,
+        F: FnOnce(&mut HashMap<String, AuthStoreJson>, String) -> std::io::Result<T>,
     {
         let key = compute_store_key(&self.codex_home)?;
         let mut store = EPHEMERAL_AUTH_STORE
@@ -292,11 +404,11 @@ impl EphemeralAuthStorage {
 }
 
 impl AuthStorageBackend for EphemeralAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn load(&self) -> std::io::Result<Option<AuthStoreJson>> {
         self.with_store(|store, key| Ok(store.get(&key).cloned()))
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn save(&self, auth: &AuthStoreJson) -> std::io::Result<()> {
         self.with_store(|store, key| {
             store.insert(key, auth.clone());
             Ok(())

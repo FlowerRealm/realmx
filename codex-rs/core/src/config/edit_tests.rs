@@ -1027,7 +1027,7 @@ fn set_model_provider_persists_advanced_values() {
                     scopes: Some(vec!["model.read".to_string()]),
                     oauth_resource: Some("https://acme.example/resource".to_string()),
                 }),
-                api_key: Some("should-not-persist".to_string()),
+                api_key: Some("persist-me".to_string()),
                 env_key: Some("ACME_API_KEY".to_string()),
                 env_key_instructions: Some("Set ACME_API_KEY".to_string()),
                 experimental_bearer_token: Some("inline-token".to_string()),
@@ -1064,7 +1064,7 @@ fn set_model_provider_persists_advanced_values() {
     assert!(contents.contains("api-version = \"2025-04-01-preview\""));
     assert!(contents.contains("X-Trace = \"1\""));
     assert!(contents.contains("Authorization = \"ACME_AUTH_HEADER\""));
-    assert!(!contents.contains("should-not-persist"));
+    assert!(contents.contains("api_key = \"persist-me\""));
 }
 
 #[test]

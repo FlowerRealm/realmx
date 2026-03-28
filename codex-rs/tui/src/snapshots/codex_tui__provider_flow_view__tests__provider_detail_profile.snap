@@ -43,9 +43,9 @@ item: Base URL
 item: API key
   current: false
   disabled: false
-  selected_description: Leave the field blank to keep the existing secure value. Type CLEAR to remove it.
+  selected_description: Leave the field blank to keep the existing stored value. Type CLEAR to remove it.
   shortcut: 
-  description: No secure API key is stored for this provider.
+  description: No API key is stored for this provider.
   disabled_reason: 
 item: wire_api
   current: false

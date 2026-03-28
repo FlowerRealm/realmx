@@ -181,6 +181,7 @@ use codex_backend_client::Client as BackendClient;
 use codex_chatgpt::connectors;
 use codex_cloud_requirements::cloud_requirements_loader;
 use codex_core::AuthManager;
+use codex_core::AuthScope;
 use codex_core::CodexAuth;
 use codex_core::CodexThread;
 use codex_core::Cursor as RolloutCursor;
@@ -193,9 +194,10 @@ use codex_core::ThreadConfigSnapshot;
 use codex_core::ThreadManager;
 use codex_core::ThreadSortKey as CoreThreadSortKey;
 use codex_core::activate_provider_api_key;
+use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
-use codex_core::auth::login_with_api_key;
-use codex_core::auth::login_with_chatgpt_auth_tokens;
+use codex_core::auth::login_with_api_key_for_scope;
+use codex_core::auth::login_with_chatgpt_auth_tokens_for_scope;
 use codex_core::clear_provider_credentials;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -485,7 +487,9 @@ impl CodexMessageProcessor {
             &self.config.codex_home,
             &self.config.model_provider_id,
             &self.config.model_provider,
-            self.auth_manager.auth_cached().as_ref(),
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+                .as_ref(),
             self.config.mcp_oauth_credentials_store_mode,
         )
         .ok()
@@ -501,7 +505,9 @@ impl CodexMessageProcessor {
     }
 
     async fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
-        let auth = self.auth_manager.auth_cached();
+        let auth = self
+            .auth_manager
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()));
         let capabilities = provider_login_capabilities(
             &self.config.model_provider_id,
             &self.config.model_provider,
@@ -1032,7 +1038,11 @@ impl CodexMessageProcessor {
         let provider = self.config.model_provider.clone();
         let capabilities = provider_login_capabilities(&provider_id, &provider);
 
-        if capabilities.uses_openai_auth() && self.auth_manager.is_external_auth_active() {
+        if capabilities.uses_openai_auth()
+            && self
+                .auth_manager
+                .is_external_auth_active_for_provider(Some(provider_id.as_str()))
+        {
             return Err(self.external_auth_active_error());
         }
 
@@ -1066,10 +1076,11 @@ impl CodexMessageProcessor {
         }
 
         let result = if capabilities.uses_openai_auth() {
-            login_with_api_key(
+            login_with_api_key_for_scope(
                 &self.config.codex_home,
+                &AuthScope::provider(provider_id.clone()),
                 &params.api_key,
-                self.config.cli_auth_credentials_store_mode,
+                AuthCredentialsStoreMode::File,
             )
             .map_err(std::io::Error::other)
         } else {
@@ -1147,7 +1158,10 @@ impl CodexMessageProcessor {
             });
         }
 
-        if self.auth_manager.is_external_auth_active() {
+        if self
+            .auth_manager
+            .is_external_auth_active_for_provider(Some(config.model_provider_id.as_str()))
+        {
             return Err(self.external_auth_active_error());
         }
 
@@ -1159,7 +1173,7 @@ impl CodexMessageProcessor {
             });
         }
 
-        Ok(LoginServerOptions {
+        let mut opts = LoginServerOptions {
             open_browser: false,
             ..LoginServerOptions::new(
                 config.codex_home.clone(),
@@ -1167,7 +1181,9 @@ impl CodexMessageProcessor {
                 config.forced_chatgpt_workspace_id.clone(),
                 config.cli_auth_credentials_store_mode,
             )
-        })
+        };
+        opts.auth_scope = AuthScope::provider(config.model_provider_id.clone());
+        Ok(opts)
     }
 
     async fn login_chatgpt_v2(&mut self, request_id: ConnectionRequestId) {
@@ -1243,7 +1259,8 @@ impl CodexMessageProcessor {
                             .await;
 
                             // Notify clients with the actual current auth mode.
-                            let auth = auth_manager.auth_cached();
+                            let auth =
+                                auth_manager.auth_cached_for_provider(Some(provider_id.as_str()));
                             let payload_v2 = AccountUpdatedNotification {
                                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
@@ -1529,8 +1546,9 @@ impl CodexMessageProcessor {
             return;
         }
 
-        if let Err(err) = login_with_chatgpt_auth_tokens(
+        if let Err(err) = login_with_chatgpt_auth_tokens_for_scope(
             &self.config.codex_home,
+            &AuthScope::provider(self.config.model_provider_id.clone()),
             &access_token,
             &chatgpt_account_id,
             chatgpt_plan_type.as_deref(),
@@ -1592,7 +1610,10 @@ impl CodexMessageProcessor {
         }
 
         if capabilities.uses_openai_auth() {
-            if let Err(err) = self.auth_manager.logout() {
+            if let Err(err) = self
+                .auth_manager
+                .logout_for_provider(Some(self.config.model_provider_id.as_str()))
+            {
                 return Err(JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
                     message: format!("logout failed: {err}"),
@@ -1602,7 +1623,7 @@ impl CodexMessageProcessor {
 
             return Ok(self
                 .auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .as_ref()
                 .map(CodexAuth::api_auth_mode));
         }
@@ -1652,10 +1673,18 @@ impl CodexMessageProcessor {
         {
             return;
         }
-        if self.auth_manager.is_external_auth_active() {
+        if self
+            .auth_manager
+            .is_external_auth_active_for_provider(Some(self.config.model_provider_id.as_str()))
+        {
             return;
         }
-        if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
+        if do_refresh
+            && let Err(err) = self
+                .auth_manager
+                .refresh_token_for_provider(Some(self.config.model_provider_id.as_str()))
+                .await
+        {
             tracing::warn!("failed to refresh token while getting account: {err}");
         }
     }
@@ -1679,7 +1708,8 @@ impl CodexMessageProcessor {
                 &self.config.codex_home,
                 &self.config.model_provider_id,
                 &self.config.model_provider,
-                self.auth_manager.auth_cached(),
+                self.auth_manager
+                    .auth_cached_for_provider(Some(self.config.model_provider_id.as_str())),
                 self.config.mcp_oauth_credentials_store_mode,
             )
             .await
@@ -1735,7 +1765,10 @@ impl CodexMessageProcessor {
         let account = match self.current_provider_credential_mode() {
             Some(ProviderCredentialMode::ApiKey) => Some(Account::ApiKey {}),
             Some(ProviderCredentialMode::OAuth) => Some(Account::Oauth {}),
-            Some(ProviderCredentialMode::Chatgpt) => match self.auth_manager.auth_cached() {
+            Some(ProviderCredentialMode::Chatgpt) => match self
+                .auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+            {
                 Some(auth) => {
                     let email = auth.get_account_email();
                     let plan_type = auth.account_plan_type();
@@ -1811,7 +1844,11 @@ impl CodexMessageProcessor {
             });
         }
 
-        let Some(auth) = self.auth_manager.auth().await else {
+        let Some(auth) = self
+            .auth_manager
+            .auth_for_provider(Some(self.config.model_provider_id.as_str()))
+            .await
+        else {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
                 message: "codex account authentication required to read rate limits".to_string(),
@@ -7259,7 +7296,7 @@ impl CodexMessageProcessor {
 
         if let Some(chatgpt_user_id) = self
             .auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .and_then(|auth| auth.get_chatgpt_user_id())
         {
             tracing::info!(target: "feedback_tags", chatgpt_user_id);

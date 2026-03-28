@@ -4,14 +4,13 @@
 //! We prefer this to using a crate feature to avoid building multiple
 //! permutations of the crate.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::AuthManager;
 use crate::CodexAuth;
@@ -40,15 +39,6 @@ pub fn set_thread_manager_test_mode(enabled: bool) {
 
 pub fn set_deterministic_process_ids(enabled: bool) {
     unified_exec::set_deterministic_process_ids_for_tests(enabled);
-}
-
-pub fn install_mock_secrets_keyring_for_tests(
-    codex_home: PathBuf,
-) -> codex_secrets::test_support::TestKeyringStoreGuard {
-    codex_secrets::test_support::set_test_keyring_store(
-        codex_home,
-        Arc::new(codex_keyring_store::tests::MockKeyringStore::default()),
-    )
 }
 
 pub fn auth_manager_from_auth(auth: CodexAuth) -> Arc<AuthManager> {

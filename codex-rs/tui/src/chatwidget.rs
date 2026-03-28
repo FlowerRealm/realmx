@@ -1428,7 +1428,7 @@ impl ChatWidget {
             self.show_welcome_banner,
             startup_tooltip_override,
             self.auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .and_then(|auth| auth.account_plan_type()),
             show_fast_status,
         );
@@ -1519,7 +1519,7 @@ impl ChatWidget {
     ) {
         if let Some(chatgpt_user_id) = self
             .auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .and_then(|auth| auth.get_chatgpt_user_id())
         {
             tracing::info!(target: "feedback_tags", chatgpt_user_id);
@@ -1689,7 +1689,7 @@ impl ChatWidget {
     pub(crate) fn open_feedback_consent(&mut self, category: crate::app_event::FeedbackCategory) {
         if let Some(chatgpt_user_id) = self
             .auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .and_then(|auth| auth.get_chatgpt_user_id())
         {
             tracing::info!(target: "feedback_tags", chatgpt_user_id);
@@ -6438,12 +6438,15 @@ impl ChatWidget {
         let base_url = self.config.chatgpt_base_url.clone();
         let app_event_tx = self.app_event_tx.clone();
         let auth_manager = Arc::clone(&self.auth_manager);
+        let provider_id = self.config.model_provider_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
 
             loop {
-                if let Some(auth) = auth_manager.auth().await
+                if let Some(auth) = auth_manager
+                    .auth_for_provider(Some(provider_id.as_str()))
+                    .await
                     && auth.is_chatgpt_auth()
                 {
                     for snapshot in fetch_rate_limits(base_url.clone(), auth).await {
@@ -6463,7 +6466,7 @@ impl ChatWidget {
         }
 
         self.auth_manager
-            .auth_cached()
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
             .as_ref()
             .is_some_and(CodexAuth::is_chatgpt_auth)
     }
@@ -6486,9 +6489,12 @@ impl ChatWidget {
         let config = self.config.clone();
         let auth_manager = Arc::clone(&self.auth_manager);
         let app_event_tx = self.app_event_tx.clone();
+        let provider_id = self.config.model_provider_id.clone();
 
         let handle = tokio::spawn(async move {
-            let auth = auth_manager.auth().await;
+            let auth = auth_manager
+                .auth_for_provider(Some(provider_id.as_str()))
+                .await;
             let snapshot = fetch_provider_usage_snapshot(config.clone(), auth).await;
             app_event_tx.send(AppEvent::ProviderUsageSnapshotFetched(snapshot));
 
@@ -6497,7 +6503,9 @@ impl ChatWidget {
 
             loop {
                 interval.tick().await;
-                let auth = auth_manager.auth().await;
+                let auth = auth_manager
+                    .auth_for_provider(Some(provider_id.as_str()))
+                    .await;
                 let snapshot = fetch_provider_usage_snapshot(config.clone(), auth).await;
                 app_event_tx.send(AppEvent::ProviderUsageSnapshotFetched(snapshot));
             }
@@ -8399,7 +8407,7 @@ impl ChatWidget {
             && matches!(service_tier, Some(ServiceTier::Fast))
             && self
                 .auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .as_ref()
                 .is_some_and(CodexAuth::is_chatgpt_auth)
     }

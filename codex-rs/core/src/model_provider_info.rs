@@ -122,9 +122,6 @@ pub struct ModelProviderInfo {
     /// Optional OAuth configuration for generic provider login.
     pub oauth: Option<ModelProviderOAuthConfig>,
     /// API key stored directly in config.toml for this provider.
-    ///
-    /// Deprecated: legacy compatibility only. Runtime credentials should be
-    /// stored outside config and are automatically migrated on load.
     pub api_key: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
@@ -343,9 +340,7 @@ impl ModelProviderInfo {
     }
 
     pub fn sanitized_for_config_persistence(&self) -> Self {
-        let mut provider = self.clone();
-        provider.api_key = None;
-        provider
+        self.clone()
     }
 
     /// Effective maximum number of request retries for this provider.

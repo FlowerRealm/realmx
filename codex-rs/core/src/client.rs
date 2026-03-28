@@ -544,15 +544,16 @@ impl ModelClient {
     /// This centralizes setup used by both prewarm and normal request paths so they stay in
     /// lockstep when auth/provider resolution changes.
     async fn current_client_setup(&self) -> Result<CurrentClientSetup> {
+        let provider_id = self.provider_id();
         let auth = match self.state.auth_manager.as_ref() {
-            Some(manager) => manager.auth().await,
+            Some(manager) => manager.auth_for_provider(Some(provider_id.as_str())).await,
             None => None,
         };
         let provider = self.provider();
         let api_provider = provider.to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))?;
         let api_auth = auth_provider_from_auth(
             &self.state.codex_home,
-            &self.provider_id(),
+            &provider_id,
             auth.clone(),
             &provider,
             self.state.oauth_store_mode,
@@ -1021,9 +1022,10 @@ impl ModelClientSession {
         }
 
         let auth_manager = self.client.state.auth_manager.clone();
+        let provider_id = self.client.provider_id();
         let mut auth_recovery = auth_manager
             .as_ref()
-            .map(super::auth::AuthManager::unauthorized_recovery);
+            .map(|manager| manager.unauthorized_recovery_for_provider(Some(provider_id.as_str())));
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;
@@ -1107,10 +1109,11 @@ impl ModelClientSession {
         warmup: bool,
     ) -> Result<WebsocketStreamOutcome> {
         let auth_manager = self.client.state.auth_manager.clone();
+        let provider_id = self.client.provider_id();
 
         let mut auth_recovery = auth_manager
             .as_ref()
-            .map(super::auth::AuthManager::unauthorized_recovery);
+            .map(|manager| manager.unauthorized_recovery_for_provider(Some(provider_id.as_str())));
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;

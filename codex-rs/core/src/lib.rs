@@ -4,6 +4,7 @@
 // user-visible output must go through the appropriate abstraction (e.g.,
 // the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
+#![recursion_limit = "256"]
 
 mod analytics_client;
 pub mod api_bridge;
@@ -103,6 +104,7 @@ pub use provider_credentials::clear_provider_oauth_tokens;
 pub use provider_credentials::detect_provider_credential_mode;
 pub use provider_credentials::has_provider_oauth_tokens;
 pub use provider_credentials::read_provider_api_key;
+pub use provider_credentials::rename_provider_api_key;
 pub use provider_credentials::resolve_provider_credential;
 pub use provider_credentials::store_provider_api_key;
 pub use provider_id::model_provider_id_requirements;
@@ -130,6 +132,7 @@ pub type CodexConversation = CodexThread;
 // Re-export common auth types for workspace consumers
 pub use analytics_client::AnalyticsEventsClient;
 pub use auth::AuthManager;
+pub use auth::AuthScope;
 pub use auth::CodexAuth;
 pub mod default_client;
 pub mod project_doc;

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_core::AuthManager;
+use codex_core::AuthScope;
 use codex_core::ModelProviderInfo;
 use codex_core::OAuthCredentialsStoreMode;
 use codex_core::OauthLoginHandle;
@@ -8,7 +9,7 @@ use codex_core::ProviderCredentialMode;
 use codex_core::activate_provider_api_key;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
-use codex_core::auth::login_with_api_key;
+use codex_core::auth::login_with_api_key_for_scope;
 use codex_core::auth::read_openai_api_key_from_env;
 use codex_core::detect_provider_credential_mode;
 use codex_core::perform_oauth_login_return_url;
@@ -259,7 +260,9 @@ impl AuthModeWidget {
             &self.codex_home,
             &self.provider_id,
             &self.provider,
-            self.auth_manager.auth_cached().as_ref(),
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.provider_id.as_str()))
+                .as_ref(),
             self.oauth_credentials_store_mode,
         ) {
             Ok(Some(mode)) => LoginStatus::AuthMode(mode),
@@ -675,7 +678,7 @@ impl AuthModeWidget {
                 "✓ API key configured".fg(Color::Green).into(),
                 "".into(),
                 format!(
-                    "  Stored a secure API key for provider `{}`.",
+                    "  Stored an API key for provider `{}` in config.toml.",
                     self.provider_id
                 )
                 .into(),
@@ -909,10 +912,11 @@ impl AuthModeWidget {
             return;
         }
         let result = if self.uses_openai_auth() {
-            login_with_api_key(
+            login_with_api_key_for_scope(
                 &self.codex_home,
+                &AuthScope::provider(self.provider_id.clone()),
                 &api_key,
-                self.cli_auth_credentials_store_mode,
+                AuthCredentialsStoreMode::File,
             )
         } else {
             activate_provider_api_key(
@@ -1056,12 +1060,13 @@ impl AuthModeWidget {
         }
 
         self.error = None;
-        let opts = ServerOptions::new(
+        let mut opts = ServerOptions::new(
             self.codex_home.clone(),
             CLIENT_ID.to_string(),
             self.forced_chatgpt_workspace_id.clone(),
             self.cli_auth_credentials_store_mode,
         );
+        opts.auth_scope = AuthScope::provider(self.provider_id.clone());
 
         match run_login_server(opts) {
             Ok(child) => {
@@ -1109,12 +1114,13 @@ impl AuthModeWidget {
         }
 
         self.error = None;
-        let opts = ServerOptions::new(
+        let mut opts = ServerOptions::new(
             self.codex_home.clone(),
             CLIENT_ID.to_string(),
             self.forced_chatgpt_workspace_id.clone(),
             self.cli_auth_credentials_store_mode,
         );
+        opts.auth_scope = AuthScope::provider(self.provider_id.clone());
         headless_chatgpt_login::start_headless_chatgpt_login(self, opts);
     }
 }

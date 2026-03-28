@@ -60,6 +60,7 @@ use codex_app_server_protocol::ConfigLayerSource;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::ThreadManager;
+use codex_core::clear_provider_api_key;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
@@ -74,6 +75,9 @@ use codex_core::features::Feature;
 use codex_core::models_manager::manager::RefreshStrategy;
 use codex_core::models_manager::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
 use codex_core::models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
+use codex_core::read_provider_api_key;
+use codex_core::rename_provider_api_key;
+use codex_core::store_provider_api_key;
 #[cfg(target_os = "windows")]
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_otel::SessionTelemetry;
@@ -1091,9 +1095,20 @@ impl App {
         &mut self,
         original_id: Option<String>,
         id: String,
-        provider: codex_core::ModelProviderInfo,
+        mut provider: codex_core::ModelProviderInfo,
         api_key_input: ProviderSecretInput,
     ) -> Result<()> {
+        let existing_api_key = if matches!(api_key_input, ProviderSecretInput::KeepExisting) {
+            match original_id.as_deref() {
+                Some(original_id) => read_provider_api_key(&self.config.codex_home, original_id)
+                    .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        provider.api_key = None;
+
         let mut edits = vec![ConfigEdit::SetModelProvider {
             id: id.clone(),
             provider: Box::new(provider.clone()),
@@ -1112,68 +1127,36 @@ impl App {
             .await
             .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
 
-        match api_key_input {
+        match &api_key_input {
+            ProviderSecretInput::Set(api_key) => {
+                store_provider_api_key(&self.config.codex_home, &id, &api_key)
+                    .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
+            }
+            ProviderSecretInput::Clear => {
+                let _ = clear_provider_api_key(&self.config.codex_home, &id)
+                    .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
+            }
             ProviderSecretInput::KeepExisting => {
-                if let Some(original_id) = original_id
-                    .as_deref()
-                    .filter(|original_id| *original_id != id)
-                {
-                    match codex_core::read_provider_api_key(&self.config.codex_home, original_id) {
-                        Ok(Some(existing_key)) => {
-                            codex_core::store_provider_api_key(
-                                &self.config.codex_home,
-                                &id,
-                                &existing_key,
-                            )?;
-                            codex_core::clear_provider_api_key(
-                                &self.config.codex_home,
-                                original_id,
-                            )?;
-                        }
-                        Ok(None) => {}
-                        Err(err) => return Err(err.into()),
+                if let Some(api_key) = existing_api_key {
+                    if let Some(original_id) = original_id.as_deref()
+                        && original_id != id
+                    {
+                        rename_provider_api_key(&self.config.codex_home, original_id, &id)
+                            .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
+                    } else {
+                        store_provider_api_key(&self.config.codex_home, &id, &api_key)
+                            .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
                     }
                 }
             }
-            ProviderSecretInput::Set(api_key) => {
-                codex_core::activate_provider_api_key(
-                    &self.config.codex_home,
-                    &id,
-                    &provider,
-                    self.config.mcp_oauth_credentials_store_mode,
-                    &api_key,
-                )?;
-                if let Some(original_id) = original_id
-                    .as_deref()
-                    .filter(|original_id| *original_id != id)
-                {
-                    codex_core::clear_provider_credentials(
-                        &self.config.codex_home,
-                        original_id,
-                        &provider,
-                        self.config.mcp_oauth_credentials_store_mode,
-                    )?;
-                }
-            }
-            ProviderSecretInput::Clear => {
-                codex_core::clear_provider_credentials(
-                    &self.config.codex_home,
-                    &id,
-                    &provider,
-                    self.config.mcp_oauth_credentials_store_mode,
-                )?;
-                if let Some(original_id) = original_id
-                    .as_deref()
-                    .filter(|original_id| *original_id != id)
-                {
-                    codex_core::clear_provider_credentials(
-                        &self.config.codex_home,
-                        original_id,
-                        &provider,
-                        self.config.mcp_oauth_credentials_store_mode,
-                    )?;
-                }
-            }
+        }
+
+        if let Some(original_id) = original_id.as_deref()
+            && original_id != id
+            && !matches!(api_key_input, ProviderSecretInput::KeepExisting)
+        {
+            let _ = clear_provider_api_key(&self.config.codex_home, original_id)
+                .map_err(|err| color_eyre::eyre::eyre!(err.to_string()))?;
         }
         Ok(())
     }
@@ -2594,7 +2577,9 @@ impl App {
         if let Some(updated_model) = config.model.clone() {
             model = updated_model;
         }
-        let auth = auth_manager.auth().await;
+        let auth = auth_manager
+            .auth_for_provider(Some(config.model_provider_id.as_str()))
+            .await;
         let auth_ref = auth.as_ref();
         // Determine who should see internal Slack routing. We treat
         // `@openai.com` emails as employees and default to `External` when the
@@ -8006,14 +7991,11 @@ guardian_approval = true
 
     #[tokio::test]
     #[serial]
-    async fn persist_model_provider_rename_updates_user_references_and_moves_secure_key()
-    -> Result<()> {
+    async fn persist_model_provider_rename_updates_user_references_and_keeps_api_key() -> Result<()>
+    {
         let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let _keyring_guard = codex_core::test_support::install_mock_secrets_keyring_for_tests(
-            codex_home.path().to_path_buf(),
-        );
 
         let user_config = toml::from_str::<TomlValue>(
             r#"
@@ -8042,7 +8024,7 @@ model_provider = "acme"
                 base_url: Some("https://acme.example/v1".to_string()),
                 auth_strategy: codex_core::ModelProviderAuthStrategy::None,
                 oauth: None,
-                api_key: None,
+                api_key: Some("secret-key".to_string()),
                 env_key: None,
                 env_key_instructions: None,
                 experimental_bearer_token: None,
@@ -8057,7 +8039,6 @@ model_provider = "acme"
                 supports_websockets: false,
             },
         );
-        codex_core::store_provider_api_key(codex_home.path(), "acme", "secret-key")?;
         app.chat_widget.set_config(app.config.clone());
 
         let provider = app
@@ -8078,13 +8059,10 @@ model_provider = "acme"
         assert!(config.contains("model_provider = \"acme-renamed\""));
         assert!(config.contains("[profiles.dev]"));
         assert!(config.contains("[model_providers.acme-renamed]"));
+        assert!(!config.contains("api_key ="));
         assert!(!config.contains("[model_providers.acme]"));
         assert_eq!(
-            codex_core::read_provider_api_key(codex_home.path(), "acme")?,
-            None
-        );
-        assert_eq!(
-            codex_core::read_provider_api_key(codex_home.path(), "acme-renamed")?,
+            read_provider_api_key(codex_home.path(), "acme-renamed")?,
             Some("secret-key".to_string())
         );
         Ok(())
@@ -8092,14 +8070,11 @@ model_provider = "acme"
 
     #[tokio::test]
     #[serial]
-    async fn persist_model_provider_rename_replaces_secure_key_without_leaving_old_secret()
-    -> Result<()> {
+    async fn persist_model_provider_rename_replaces_api_key_without_leaving_old_value() -> Result<()>
+    {
         let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let _keyring_guard = codex_core::test_support::install_mock_secrets_keyring_for_tests(
-            codex_home.path().to_path_buf(),
-        );
 
         app.config.model_providers.insert(
             "acme".to_string(),
@@ -8108,7 +8083,7 @@ model_provider = "acme"
                 base_url: Some("https://acme.example/v1".to_string()),
                 auth_strategy: codex_core::ModelProviderAuthStrategy::None,
                 oauth: None,
-                api_key: None,
+                api_key: Some("old-secret".to_string()),
                 env_key: None,
                 env_key_instructions: None,
                 experimental_bearer_token: None,
@@ -8123,8 +8098,6 @@ model_provider = "acme"
                 supports_websockets: false,
             },
         );
-        codex_core::store_provider_api_key(codex_home.path(), "acme", "old-secret")?;
-
         let provider = app
             .config
             .model_providers
@@ -8139,14 +8112,15 @@ model_provider = "acme"
         )
         .await?;
 
+        let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+        assert!(config.contains("[model_providers.acme-renamed]"));
+        assert!(!config.contains("api_key ="));
+        assert!(!config.contains("[model_providers.acme]"));
         assert_eq!(
-            codex_core::read_provider_api_key(codex_home.path(), "acme")?,
-            None
-        );
-        assert_eq!(
-            codex_core::read_provider_api_key(codex_home.path(), "acme-renamed")?,
+            read_provider_api_key(codex_home.path(), "acme-renamed")?,
             Some("new-secret".to_string())
         );
+        assert_eq!(read_provider_api_key(codex_home.path(), "acme")?, None);
         Ok(())
     }
 

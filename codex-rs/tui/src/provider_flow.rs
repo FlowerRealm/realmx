@@ -196,7 +196,7 @@ pub(crate) struct ProviderFlowData {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProviderDetailRuntimeState {
-    pub(crate) has_secure_api_key: bool,
+    pub(crate) has_stored_api_key: bool,
     pub(crate) can_edit_usage_scripts: bool,
 }
 
@@ -204,15 +204,14 @@ impl ProviderDetailRuntimeState {
     pub(crate) fn from_config(
         config: &Config,
         provider_id: &str,
-        provider: &ModelProviderInfo,
+        _provider: &ModelProviderInfo,
     ) -> Self {
-        let has_secure_api_key = read_provider_api_key(&config.codex_home, provider_id)
+        let has_stored_api_key = read_provider_api_key(&config.codex_home, provider_id)
             .ok()
             .flatten()
-            .is_some()
-            || provider.inline_api_key().is_some();
+            .is_some();
         Self {
-            has_secure_api_key,
+            has_stored_api_key,
             can_edit_usage_scripts: crate::provider_usage::can_edit_provider_usage_scripts(config),
         }
     }

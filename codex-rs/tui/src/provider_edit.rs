@@ -251,7 +251,7 @@ pub(crate) fn provider_field_value(
     provider_id: &str,
     provider: &ModelProviderInfo,
     field: ProviderField,
-    has_secure_api_key: bool,
+    has_stored_api_key: bool,
 ) -> ProviderFieldValue {
     match field {
         ProviderField::Id => ProviderFieldValue::Visible(provider_id.to_string()),
@@ -264,10 +264,10 @@ pub(crate) fn provider_field_value(
                 "Enter an API key, leave blank to keep the current value, or type {} to remove it.",
                 provider_clear_sentinel()
             ),
-            current_status: if has_secure_api_key {
-                "A secure API key is already stored for this provider.".to_string()
+            current_status: if has_stored_api_key {
+                "An API key is already stored for this provider.".to_string()
             } else {
-                "No secure API key is stored for this provider.".to_string()
+                "No API key is stored for this provider.".to_string()
             },
         },
         ProviderField::WireApi => ProviderFieldValue::Visible(provider.wire_api.to_string()),
