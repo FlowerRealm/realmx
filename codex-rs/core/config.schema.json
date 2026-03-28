@@ -834,7 +834,7 @@
       "description": "Serializable representation of a provider definition.",
       "properties": {
         "api_key": {
-          "description": "API key stored directly in config.toml for this provider.\n\nDeprecated: legacy compatibility only. Runtime credentials should be stored outside config and are automatically migrated on load.",
+          "description": "API key stored directly in config.toml for this provider.",
           "type": "string"
         },
         "auth_strategy": {

@@ -565,7 +565,8 @@ mod tests {
     async fn resolve_provider_credential_uses_default_auth_json_api_key_for_unconfigured_provider()
     {
         let codex_home = tempdir().expect("temp dir");
-        let provider = config_provider();
+        let mut provider = config_provider();
+        provider.api_key = None;
         write_provider_config(codex_home.path(), provider.clone());
         login_with_api_key(
             codex_home.path(),

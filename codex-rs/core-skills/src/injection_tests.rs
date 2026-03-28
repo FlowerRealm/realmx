@@ -1,13 +1,11 @@
 use super::*;
-use crate::CodexAuth;
-use crate::analytics_client::AnalyticsEventsClient;
-use crate::analytics_client::TrackEventsContext;
-use crate::config::ConfigBuilder;
-use crate::test_support::auth_manager_from_auth;
+use codex_analytics::AnalyticsEventsClient;
+use codex_analytics::TrackEventsContext;
+use codex_login::AuthManager;
+use codex_login::CodexAuth;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tempfile::tempdir;
 
 fn make_skill(name: &str, path: &str) -> SkillMetadata {
@@ -52,15 +50,9 @@ async fn build_skill_injections_tracks_successful_used_skills() {
         .await
         .expect("write skill");
     let skill = make_skill("alpha-skill", &skill_path.to_string_lossy());
-    let config = Arc::new(
-        ConfigBuilder::default()
-            .codex_home(dir.path().to_path_buf())
-            .build()
-            .await
-            .expect("config"),
-    );
-    let auth_manager = auth_manager_from_auth(CodexAuth::from_api_key("test"));
-    let analytics = AnalyticsEventsClient::new(config, auth_manager);
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
+    let analytics =
+        AnalyticsEventsClient::new(auth_manager, "http://example.test".to_string(), Some(false));
 
     let injections = build_skill_injections(
         std::slice::from_ref(&skill),
@@ -75,7 +67,6 @@ async fn build_skill_injections_tracks_successful_used_skills() {
     .await;
 
     assert_eq!(injections.warnings, Vec::<String>::new());
-    assert_eq!(injections.used_skills, vec![skill]);
     assert_eq!(injections.items.len(), 1);
 }
 

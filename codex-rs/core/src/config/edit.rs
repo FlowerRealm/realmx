@@ -259,6 +259,24 @@ mod document_helpers {
         {
             entry["oauth_resource"] = value(resource.clone());
         }
+        if !config.tools.is_empty() {
+            let mut tools = new_implicit_table();
+            let mut tool_entries: Vec<_> = config.tools.iter().collect();
+            tool_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (tool_name, tool_config) in tool_entries {
+                let mut tool = TomlTable::new();
+                tool.set_implicit(false);
+                if let Some(approval_mode) = tool_config.approval_mode {
+                    tool["approval_mode"] = value(match approval_mode {
+                        crate::config::types::AppToolApproval::Auto => "auto",
+                        crate::config::types::AppToolApproval::Prompt => "prompt",
+                        crate::config::types::AppToolApproval::Approve => "approve",
+                    });
+                }
+                tools.insert(tool_name, TomlItem::Table(tool));
+            }
+            entry["tools"] = TomlItem::Table(tools);
+        }
 
         entry
     }

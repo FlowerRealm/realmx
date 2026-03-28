@@ -10,6 +10,7 @@ use crate::config::types::AppsConfigToml;
 use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerToolConfig;
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::PROJECT_CONFIG_DIR_NAME;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -1107,10 +1108,10 @@ async fn maybe_persist_mcp_tool_approval_writes_project_config_for_project_serve
     let codex_home = session.codex_home().await;
     let project_dir = tempdir().expect("tempdir");
     std::fs::write(project_dir.path().join(".git"), "gitdir: nowhere").expect("seed git marker");
-    let project_codex_dir = project_dir.path().join(".codex");
-    std::fs::create_dir_all(&project_codex_dir).expect("create project .codex dir");
+    let project_config_dir = project_dir.path().join(PROJECT_CONFIG_DIR_NAME);
+    std::fs::create_dir_all(&project_config_dir).expect("create project config dir");
     std::fs::write(
-        project_codex_dir.join(CONFIG_TOML_FILE),
+        project_config_dir.join(CONFIG_TOML_FILE),
         "[mcp_servers.docs]\ncommand = \"docs-server\"\n",
     )
     .expect("seed project config");
@@ -1138,7 +1139,7 @@ async fn maybe_persist_mcp_tool_approval_writes_project_config_for_project_serve
 
     maybe_persist_mcp_tool_approval(&session, &turn_context, key.clone()).await;
 
-    let contents = std::fs::read_to_string(project_codex_dir.join(CONFIG_TOML_FILE))
+    let contents = std::fs::read_to_string(project_config_dir.join(CONFIG_TOML_FILE))
         .expect("read project config");
     let parsed: ConfigToml = toml::from_str(&contents).expect("parse project config");
     let tool = parsed

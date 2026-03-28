@@ -504,10 +504,17 @@ impl ModelsManager {
             .auth_manager
             .auth_for_provider(Some(provider_id.as_str()))
             .await;
+        let provider = self.provider.read().await.clone();
+        if provider.uses_openai_auth() && auth.is_none() {
+            info!(
+                provider_id,
+                "models cache: skipping remote models refresh without OpenAI auth"
+            );
+            return Ok(());
+        }
         let api_auth_mode = auth.as_ref().map(CodexAuth::api_auth_mode);
         let telemetry_auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let provider_generation = self.provider_generation.load(Ordering::SeqCst);
-        let provider = self.provider.read().await.clone();
         let api_provider = provider.to_api_provider(api_auth_mode)?;
         let api_auth = auth_provider_from_auth(
             &self.codex_home,
