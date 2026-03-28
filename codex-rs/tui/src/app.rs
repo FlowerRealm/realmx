@@ -235,6 +235,17 @@ enum ActiveProviderModelsRefreshTrigger {
     ProviderChange,
 }
 
+fn active_provider_models_refresh_policy_for_change(
+    active_provider_id: &str,
+    changed_provider_id: &str,
+) -> ActiveProviderModelsRefreshPolicy {
+    if active_provider_id == changed_provider_id {
+        ActiveProviderModelsRefreshPolicy::Refresh
+    } else {
+        ActiveProviderModelsRefreshPolicy::Skip
+    }
+}
+
 fn session_summary(
     token_usage: TokenUsage,
     thread_id: Option<ThreadId>,
@@ -938,10 +949,7 @@ impl App {
         Ok(())
     }
 
-    async fn apply_provider_navigation(
-        &mut self,
-        navigation: ProviderFlowNavigation,
-    ) -> Result<()> {
+    fn apply_provider_navigation(&mut self, navigation: ProviderFlowNavigation) {
         match navigation {
             ProviderFlowNavigation::ExitFlow => {
                 let _ = self
@@ -953,16 +961,10 @@ impl App {
             }
             ProviderFlowNavigation::ReturnToRoot { source, scope } => {
                 let _ = self.chat_widget.dismiss_active_bottom_view();
-                self.open_provider_flow_after_refresh(
-                    source,
-                    scope,
-                    ProviderScreen::Root,
-                    ActiveProviderModelsRefreshPolicy::Refresh,
-                )
-                .await?;
+                self.chat_widget
+                    .open_provider_flow(source, scope, ProviderScreen::Root);
             }
         }
-        Ok(())
     }
 
     async fn persist_default_model_provider_and_apply_navigation(
@@ -973,11 +975,7 @@ impl App {
     ) {
         let scope = scope.normalized(self.active_profile.as_deref());
         if current_provider_id_for_scope(&self.config, scope) == id {
-            if let Err(err) = self.apply_provider_navigation(navigation).await {
-                self.chat_widget.add_error_message(format!(
-                    "Provider is already current, but failed to update navigation: {err}"
-                ));
-            }
+            self.apply_provider_navigation(navigation);
             return;
         }
 
@@ -1002,11 +1000,7 @@ impl App {
                         "Provider switched but failed to reload config: {err}"
                     ));
                 } else {
-                    if let Err(err) = self.apply_provider_navigation(navigation).await {
-                        self.chat_widget.add_error_message(format!(
-                            "Provider changed, but failed to update navigation: {err}"
-                        ));
-                    }
+                    self.apply_provider_navigation(navigation);
                     self.chat_widget.add_info_message(
                         format!("Current provider changed to {id}"),
                         /*hint*/ None,
@@ -1129,11 +1123,10 @@ impl App {
         validate_provider_id(&id, &data.rows, Some(&provider_id))
             .map_err(|err| color_eyre::eyre::eyre!(err))?;
         let next_provider_id = id.clone();
-        let refresh_policy = if self.config.model_provider_id == provider_id {
-            ActiveProviderModelsRefreshPolicy::Refresh
-        } else {
-            ActiveProviderModelsRefreshPolicy::Skip
-        };
+        let refresh_policy = active_provider_models_refresh_policy_for_change(
+            &self.config.model_provider_id,
+            &provider_id,
+        );
         self.persist_model_provider(
             Some(provider_id.clone()),
             id,
@@ -1151,6 +1144,37 @@ impl App {
         )
         .await?;
         Ok(())
+    }
+
+    async fn remove_model_provider(&mut self, id: String) {
+        match ConfigEditsBuilder::new(&self.config.codex_home)
+            .remove_model_provider(&id)
+            .apply()
+            .await
+        {
+            Ok(()) => {
+                let refresh_policy = active_provider_models_refresh_policy_for_change(
+                    &self.config.model_provider_id,
+                    &id,
+                );
+                if let Err(err) = self
+                    .refresh_config_after_provider_change(refresh_policy)
+                    .await
+                {
+                    self.chat_widget.add_error_message(format!(
+                        "Provider removed but failed to reload config: {err}"
+                    ));
+                } else {
+                    self.chat_widget
+                        .add_info_message(format!("Removed provider {id}"), /*hint*/ None);
+                }
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to remove model provider");
+                self.chat_widget
+                    .add_error_message(format!("Failed to remove provider `{id}`: {err}"));
+            }
+        }
     }
 
     async fn persist_model_provider(
@@ -3920,37 +3944,7 @@ impl App {
                 }
             }
             AppEvent::RemoveModelProvider { id } => {
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .remove_model_provider(&id)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        let refresh_policy = if self.config.model_provider_id == id {
-                            ActiveProviderModelsRefreshPolicy::Refresh
-                        } else {
-                            ActiveProviderModelsRefreshPolicy::Skip
-                        };
-                        if let Err(err) = self
-                            .refresh_config_after_provider_change(refresh_policy)
-                            .await
-                        {
-                            self.chat_widget.add_error_message(format!(
-                                "Provider removed but failed to reload config: {err}"
-                            ));
-                        } else {
-                            self.chat_widget.add_info_message(
-                                format!("Removed provider {id}"),
-                                /*hint*/ None,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to remove model provider");
-                        self.chat_widget
-                            .add_error_message(format!("Failed to remove provider `{id}`: {err}"));
-                    }
-                }
+                self.remove_model_provider(id).await;
             }
             AppEvent::PersistProviderUsageScript {
                 provider_id,
@@ -5116,6 +5110,8 @@ mod tests {
     use crate::history_cell::UserHistoryCell;
     use crate::history_cell::new_session_info;
     use crate::multi_agents::AgentPickerThreadEntry;
+    use crate::provider_flow::ProviderField;
+    use crate::provider_flow::ProviderFlowLocation;
     use crate::provider_flow::ProviderFlowNavigation;
     use crate::provider_flow::ProviderFlowSource;
     use crate::provider_flow::ProviderScreen;
@@ -7426,6 +7422,86 @@ guardian_approval = true
         codex_core::test_support::all_model_presets().clone()
     }
 
+    fn remote_models_response(model_slug: &str) -> ModelsResponse {
+        ModelsResponse {
+            models: vec![
+                serde_json::from_value(serde_json::json!({
+                    "slug": model_slug,
+                    "display_name": "Remote Provider Model",
+                    "description": "Remote Provider Model desc",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [
+                        {"effort": "low", "description": "low"},
+                        {"effort": "medium", "description": "medium"}
+                    ],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "minimal_client_version": [0, 1, 0],
+                    "supported_in_api": true,
+                    "priority": 1,
+                    "upgrade": null,
+                    "base_instructions": "base instructions",
+                    "supports_reasoning_summaries": false,
+                    "support_verbosity": false,
+                    "default_verbosity": null,
+                    "apply_patch_tool_type": null,
+                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                    "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
+                    "context_window": 272_000,
+                    "experimental_supported_tools": [],
+                }))
+                .expect("valid model"),
+            ],
+        }
+    }
+
+    fn provider_with_base_url(
+        provider: &codex_core::ModelProviderInfo,
+        name: &str,
+        base_url: String,
+    ) -> codex_core::ModelProviderInfo {
+        let mut provider = provider.clone();
+        provider.name = name.to_string();
+        provider.base_url = Some(base_url);
+        provider
+    }
+
+    async fn wait_for_active_provider_models_refresh(
+        app_event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    ) -> std::result::Result<std::result::Result<Vec<ModelPreset>, String>, time::error::Elapsed>
+    {
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                match app_event_rx.recv().await {
+                    Some(AppEvent::ActiveProviderModelsRefreshed { result }) => break result,
+                    Some(_) => continue,
+                    None => panic!("app event channel closed while waiting for model refresh"),
+                }
+            }
+        })
+        .await
+    }
+
+    async fn configure_custom_providers(
+        app: &mut App,
+        active_provider_id: &str,
+        active_provider: &codex_core::ModelProviderInfo,
+        inactive_provider_id: &str,
+        inactive_provider: &codex_core::ModelProviderInfo,
+    ) -> Result<()> {
+        ConfigEditsBuilder::new(&app.config.codex_home)
+            .set_model_provider(active_provider_id, active_provider)
+            .set_model_provider(inactive_provider_id, inactive_provider)
+            .set_default_model_provider(active_provider_id)
+            .apply()
+            .await
+            .expect("persist custom providers");
+        app.refresh_config_after_provider_change(ActiveProviderModelsRefreshPolicy::Skip)
+            .await?;
+        Ok(())
+    }
+
     fn model_availability_nux_config(shown_count: &[(&str, u32)]) -> ModelAvailabilityNuxConfig {
         ModelAvailabilityNuxConfig {
             shown_count: shown_count
@@ -7790,36 +7866,7 @@ guardian_approval = true
     -> Result<()> {
         let server = MockServer::start().await;
         let dynamic_slug = "provider-change-remote-model";
-        let models_mock = mount_models_once(
-            &server,
-            ModelsResponse {
-                models: vec![serde_json::from_value(serde_json::json!({
-                    "slug": dynamic_slug,
-                    "display_name": "Remote Provider Model",
-                    "description": "Remote Provider Model desc",
-                    "default_reasoning_level": "medium",
-                    "supported_reasoning_levels": [{"effort": "low", "description": "low"}, {"effort": "medium", "description": "medium"}],
-                    "shell_type": "shell_command",
-                    "visibility": "list",
-                    "minimal_client_version": [0, 1, 0],
-                    "supported_in_api": true,
-                    "priority": 1,
-                    "upgrade": null,
-                    "base_instructions": "base instructions",
-                    "supports_reasoning_summaries": false,
-                    "support_verbosity": false,
-                    "default_verbosity": null,
-                    "apply_patch_tool_type": null,
-                    "truncation_policy": {"mode": "bytes", "limit": 10_000},
-                    "supports_parallel_tool_calls": false,
-                    "supports_image_detail_original": false,
-                    "context_window": 272_000,
-                    "experimental_supported_tools": [],
-                }))
-                .expect("valid model")],
-            },
-        )
-        .await;
+        let models_mock = mount_models_once(&server, remote_models_response(dynamic_slug)).await;
 
         let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
@@ -7871,17 +7918,9 @@ guardian_approval = true
             "custom-provider"
         );
 
-        let result = time::timeout(Duration::from_secs(2), async {
-            loop {
-                match app_event_rx.recv().await {
-                    Some(AppEvent::ActiveProviderModelsRefreshed { result }) => break result,
-                    Some(_) => continue,
-                    None => panic!("app event channel closed while waiting for model refresh"),
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for active provider models refresh");
+        let result = wait_for_active_provider_models_refresh(&mut app_event_rx)
+            .await
+            .expect("timed out waiting for active provider models refresh");
         assert!(
             matches!(&result, Ok(models) if models.iter().any(|preset| preset.model == dynamic_slug)),
             "provider change should refresh models from the new provider"
@@ -7919,6 +7958,21 @@ guardian_approval = true
             "skipping active provider refresh should not enqueue a refresh event"
         );
         Ok(())
+    }
+
+    #[test]
+    fn active_provider_models_refresh_policy_for_change_only_refreshes_active_provider() {
+        assert_eq!(
+            active_provider_models_refresh_policy_for_change("active-provider", "active-provider"),
+            ActiveProviderModelsRefreshPolicy::Refresh
+        );
+        assert_eq!(
+            active_provider_models_refresh_policy_for_change(
+                "active-provider",
+                "inactive-provider"
+            ),
+            ActiveProviderModelsRefreshPolicy::Skip
+        );
     }
 
     #[tokio::test]
@@ -8021,11 +8075,25 @@ guardian_approval = true
     }
 
     #[tokio::test]
-    async fn persist_default_provider_from_detail_returns_to_root() -> Result<()> {
-        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    async fn persist_default_provider_from_detail_returns_to_root_and_refreshes_once() -> Result<()>
+    {
+        let server = MockServer::start().await;
+        let dynamic_slug = "provider-switch-remote-model";
+        let models_mock = mount_models_once(&server, remote_models_response(dynamic_slug)).await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
 
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_config(app.config.clone());
+
+        let custom_provider =
+            provider_with_base_url(&app.config.model_provider, "Custom Provider", server.uri());
+        ConfigEditsBuilder::new(&app.config.codex_home)
+            .set_model_provider("custom-provider", &custom_provider)
+            .apply()
+            .await
+            .expect("persist custom provider");
+        app.refresh_in_memory_config_from_disk().await?;
         app.chat_widget.set_config(app.config.clone());
 
         app.chat_widget.open_provider_flow(
@@ -8037,18 +8105,18 @@ guardian_approval = true
             ProviderFlowSource::SlashCommand,
             SettingsScope::Global,
             ProviderScreen::Detail {
-                provider_id: "openrouter".to_string(),
+                provider_id: "custom-provider".to_string(),
             },
         );
 
         let before = render_bottom_popup(&app.chat_widget, 88);
         assert!(
-            before.contains("openrouter"),
+            before.contains("custom-provider"),
             "expected provider detail popup before persistence, got:\n{before}"
         );
 
         app.persist_default_model_provider_and_apply_navigation(
-            "openrouter".to_string(),
+            "custom-provider".to_string(),
             SettingsScope::Global,
             ProviderFlowNavigation::ReturnToRoot {
                 source: ProviderFlowSource::SlashCommand,
@@ -8057,10 +8125,226 @@ guardian_approval = true
         )
         .await;
 
+        let result = wait_for_active_provider_models_refresh(&mut app_event_rx)
+            .await
+            .expect("timed out waiting for provider switch refresh");
+        assert!(
+            matches!(&result, Ok(models) if models.iter().any(|preset| preset.model == dynamic_slug)),
+            "provider switch should refresh models exactly once"
+        );
+
         let after = render_bottom_popup(&app.chat_widget, 88);
         assert!(after.contains("Provider"));
-        assert!(!after.contains("Provider / openrouter"));
-        assert!(after.contains("openrouter"));
+        assert!(!after.contains("Provider / custom-provider"));
+        assert!(after.contains("custom-provider"));
+        assert_eq!(models_mock.requests().len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_default_provider_noop_navigation_does_not_refresh_models() -> Result<()> {
+        let server = MockServer::start().await;
+        let models_mock = mount_models_once(
+            &server,
+            remote_models_response("provider-noop-remote-model"),
+        )
+        .await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.chat_widget.set_config(app.config.clone());
+
+        let custom_provider =
+            provider_with_base_url(&app.config.model_provider, "Custom Provider", server.uri());
+        ConfigEditsBuilder::new(&app.config.codex_home)
+            .set_model_provider("custom-provider", &custom_provider)
+            .set_default_model_provider("custom-provider")
+            .apply()
+            .await
+            .expect("persist current custom provider");
+        app.refresh_config_after_provider_change(ActiveProviderModelsRefreshPolicy::Skip)
+            .await?;
+
+        app.chat_widget.open_provider_flow(
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::Global,
+            ProviderScreen::Root,
+        );
+        app.chat_widget.open_provider_flow(
+            ProviderFlowSource::SlashCommand,
+            SettingsScope::Global,
+            ProviderScreen::Detail {
+                provider_id: "custom-provider".to_string(),
+            },
+        );
+
+        app.persist_default_model_provider_and_apply_navigation(
+            "custom-provider".to_string(),
+            SettingsScope::Global,
+            ProviderFlowNavigation::ReturnToRoot {
+                source: ProviderFlowSource::SlashCommand,
+                scope: SettingsScope::Global,
+            },
+        )
+        .await;
+
+        assert!(
+            time::timeout(Duration::from_millis(50), app_event_rx.recv())
+                .await
+                .is_err(),
+            "reselecting the active provider should not enqueue a model refresh"
+        );
+
+        let after = render_bottom_popup(&app.chat_widget, 88);
+        assert!(after.contains("Provider"));
+        assert!(!after.contains("Provider / custom-provider"));
+        assert!(after.contains("custom-provider"));
+        assert!(models_mock.requests().is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_provider_field_edit_refreshes_active_provider_models() -> Result<()> {
+        let server = MockServer::start().await;
+        let dynamic_slug = "active-edit-remote-model";
+        let models_mock = mount_models_once(&server, remote_models_response(dynamic_slug)).await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        let active_provider =
+            provider_with_base_url(&app.config.model_provider, "Active Provider", server.uri());
+        let inactive_provider = provider_with_base_url(
+            &app.config.model_provider,
+            "Inactive Provider",
+            "https://inactive.example/v1".to_string(),
+        );
+        configure_custom_providers(
+            &mut app,
+            "active-provider",
+            &active_provider,
+            "inactive-provider",
+            &inactive_provider,
+        )
+        .await?;
+
+        app.save_provider_field_edit(
+            ProviderFlowLocation {
+                source: ProviderFlowSource::SlashCommand,
+                scope: SettingsScope::Global,
+                screen: ProviderScreen::Detail {
+                    provider_id: "active-provider".to_string(),
+                },
+            },
+            "active-provider".to_string(),
+            ProviderField::Name,
+            "Renamed Active Provider".to_string(),
+        )
+        .await?;
+
+        let result = wait_for_active_provider_models_refresh(&mut app_event_rx)
+            .await
+            .expect("timed out waiting for active provider edit refresh");
+        assert!(
+            matches!(&result, Ok(models) if models.iter().any(|preset| preset.model == dynamic_slug)),
+            "editing the active provider should refresh active provider models"
+        );
+        assert_eq!(models_mock.requests().len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_provider_field_edit_skips_refresh_for_inactive_provider() -> Result<()> {
+        let server = MockServer::start().await;
+        let models_mock = mount_models_once(
+            &server,
+            remote_models_response("inactive-edit-remote-model"),
+        )
+        .await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        let active_provider =
+            provider_with_base_url(&app.config.model_provider, "Active Provider", server.uri());
+        let inactive_provider = provider_with_base_url(
+            &app.config.model_provider,
+            "Inactive Provider",
+            "https://inactive.example/v1".to_string(),
+        );
+        configure_custom_providers(
+            &mut app,
+            "active-provider",
+            &active_provider,
+            "inactive-provider",
+            &inactive_provider,
+        )
+        .await?;
+
+        app.save_provider_field_edit(
+            ProviderFlowLocation {
+                source: ProviderFlowSource::SlashCommand,
+                scope: SettingsScope::Global,
+                screen: ProviderScreen::Detail {
+                    provider_id: "inactive-provider".to_string(),
+                },
+            },
+            "inactive-provider".to_string(),
+            ProviderField::Name,
+            "Renamed Inactive Provider".to_string(),
+        )
+        .await?;
+
+        assert!(
+            time::timeout(Duration::from_millis(50), app_event_rx.recv())
+                .await
+                .is_err(),
+            "editing an inactive provider should not enqueue a model refresh"
+        );
+        assert!(models_mock.requests().is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn remove_model_provider_skips_refresh_for_inactive_provider() -> Result<()> {
+        let server = MockServer::start().await;
+        let models_mock = mount_models_once(
+            &server,
+            remote_models_response("inactive-remove-remote-model"),
+        )
+        .await;
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        let active_provider =
+            provider_with_base_url(&app.config.model_provider, "Active Provider", server.uri());
+        let inactive_provider = provider_with_base_url(
+            &app.config.model_provider,
+            "Inactive Provider",
+            "https://inactive.example/v1".to_string(),
+        );
+        configure_custom_providers(
+            &mut app,
+            "active-provider",
+            &active_provider,
+            "inactive-provider",
+            &inactive_provider,
+        )
+        .await?;
+
+        app.remove_model_provider("inactive-provider".to_string())
+            .await;
+
+        assert!(
+            time::timeout(Duration::from_millis(50), app_event_rx.recv())
+                .await
+                .is_err(),
+            "removing an inactive provider should not enqueue a model refresh"
+        );
+        assert!(models_mock.requests().is_empty());
+        assert!(!app.config.model_providers.contains_key("inactive-provider"));
         Ok(())
     }
 

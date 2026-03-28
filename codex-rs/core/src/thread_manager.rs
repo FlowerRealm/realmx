@@ -314,6 +314,10 @@ impl ThreadManager {
             .await
     }
 
+    pub async fn refresh_models_for_startup(&self) -> crate::error::Result<Vec<ModelPreset>> {
+        self.refresh_models_for_active_provider().await
+    }
+
     pub fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
         self.state.models_manager.list_collaboration_modes()
     }

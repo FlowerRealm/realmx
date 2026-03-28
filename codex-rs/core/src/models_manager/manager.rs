@@ -301,6 +301,11 @@ impl ModelsManager {
         self.list_models_result(RefreshStrategy::Online).await
     }
 
+    /// Force a network refresh and return the latest picker-ready presets.
+    pub async fn refresh_models_for_startup_result(&self) -> CoreResult<Vec<ModelPreset>> {
+        self.refresh_models_for_active_provider_result().await
+    }
+
     /// List collaboration mode presets.
     ///
     /// Returns a static set of presets seeded with the configured model.
