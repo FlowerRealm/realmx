@@ -293,6 +293,9 @@ async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
             auth_method: Some(AuthMode::ApiKey),
             auth_token: Some("sk-test-key".to_string()),
             requires_openai_auth: Some(true),
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
     Ok(())
@@ -357,6 +360,9 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
             requires_openai_auth: Some(true),
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 
@@ -439,6 +445,9 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
             requires_openai_auth: Some(true),
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 
@@ -506,6 +515,9 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
             requires_openai_auth: Some(true),
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 
@@ -539,6 +551,9 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: Some("recovered-access-token".to_string()),
             requires_openai_auth: Some(true),
+            requires_auth: Some(true),
+            provider_id: Some("openai".to_string()),
+            provider_name: Some("OpenAI".to_string()),
         }
     );
 

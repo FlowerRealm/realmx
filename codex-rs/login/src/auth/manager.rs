@@ -1376,7 +1376,7 @@ impl AuthManager {
 
     /// Current cached auth (clone) without attempting a refresh.
     pub fn auth_cached(&self) -> Option<CodexAuth> {
-        self.auth_cached_for_provider(None)
+        self.auth_cached_for_provider(/*provider_id*/ None)
     }
 
     pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenFailedError> {
@@ -1402,7 +1402,7 @@ impl AuthManager {
     /// Current cached auth (clone). May be `None` if not logged in or load failed.
     /// Refreshes cached ChatGPT tokens if they are stale before returning.
     pub async fn auth(&self) -> Option<CodexAuth> {
-        self.auth_for_provider(None).await
+        self.auth_for_provider(/*provider_id*/ None).await
     }
 
     pub async fn auth_for_provider(&self, provider_id: Option<&str>) -> Option<CodexAuth> {
@@ -1614,7 +1614,7 @@ impl AuthManager {
     }
 
     pub fn is_external_auth_active(&self) -> bool {
-        self.is_external_auth_active_for_provider(None)
+        self.is_external_auth_active_for_provider(/*provider_id*/ None)
     }
 
     pub fn is_external_auth_active_for_provider(&self, provider_id: Option<&str>) -> bool {
@@ -1637,7 +1637,7 @@ impl AuthManager {
     }
 
     pub fn unauthorized_recovery(self: &Arc<Self>) -> UnauthorizedRecovery {
-        self.unauthorized_recovery_for_provider(None)
+        self.unauthorized_recovery_for_provider(/*provider_id*/ None)
     }
 
     pub fn unauthorized_recovery_for_provider(
@@ -1653,7 +1653,7 @@ impl AuthManager {
     /// can assume that some other instance already refreshed it. If the persisted
     /// token is the same as the cached, then ask the token authority to refresh.
     pub async fn refresh_token(&self) -> Result<(), RefreshTokenError> {
-        self.refresh_token_for_provider(None).await
+        self.refresh_token_for_provider(/*provider_id*/ None).await
     }
 
     pub async fn refresh_token_for_provider(
@@ -1750,11 +1750,11 @@ impl AuthManager {
 
     /// Log out the default scope.
     pub fn logout(&self) -> std::io::Result<bool> {
-        self.logout_for_provider(None)
+        self.logout_for_provider(/*provider_id*/ None)
     }
 
     pub fn get_api_auth_mode(&self) -> Option<ApiAuthMode> {
-        self.get_api_auth_mode_for_provider(None)
+        self.get_api_auth_mode_for_provider(/*provider_id*/ None)
     }
 
     pub fn get_api_auth_mode_for_provider(&self, provider_id: Option<&str>) -> Option<ApiAuthMode> {
@@ -1764,7 +1764,7 @@ impl AuthManager {
     }
 
     pub fn auth_mode(&self) -> Option<AuthMode> {
-        self.auth_mode_for_provider(None)
+        self.auth_mode_for_provider(/*provider_id*/ None)
     }
 
     pub fn auth_mode_for_provider(&self, provider_id: Option<&str>) -> Option<AuthMode> {

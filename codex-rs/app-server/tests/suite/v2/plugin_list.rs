@@ -223,7 +223,10 @@ enabled = false
 
     assert_eq!(marketplace.name, "codex-curated");
     assert_eq!(
-        marketplace.display_name.as_deref(),
+        marketplace
+            .interface
+            .as_ref()
+            .and_then(|interface| interface.display_name.as_deref()),
         Some("ChatGPT Official")
     );
     assert_eq!(marketplace.plugins.len(), 3);

@@ -294,7 +294,7 @@ fn auto_auth_storage_load_prefers_keyring_value() -> anyhow::Result<()> {
         codex_home.path().to_path_buf(),
         Arc::new(mock_keyring.clone()),
     );
-    let keyring_auth = auth_with_prefix("keyring");
+    let keyring_auth = auth_store(auth_with_prefix("keyring"));
     seed_keyring_with_auth(
         &mock_keyring,
         || compute_store_key(codex_home.path()),
@@ -305,7 +305,7 @@ fn auto_auth_storage_load_prefers_keyring_value() -> anyhow::Result<()> {
     storage.file_storage.save(&auth_store(file_auth))?;
 
     let loaded = storage.load()?;
-    assert_eq!(loaded, Some(auth_store(keyring_auth)));
+    assert_eq!(loaded, Some(keyring_auth));
     Ok(())
 }
 

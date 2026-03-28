@@ -769,6 +769,8 @@ mod tests {
         let notification = ServerNotification::AccountUpdated(AccountUpdatedNotification {
             auth_mode: Some(AuthMode::ApiKey),
             plan_type: None,
+            provider_id: None,
+            provider_name: None,
         });
 
         let jsonrpc_notification = OutgoingMessage::AppServerNotification(notification);
@@ -777,7 +779,9 @@ mod tests {
                 "method": "account/updated",
                 "params": {
                     "authMode": "apikey",
-                    "planType": null
+                    "planType": null,
+                    "providerId": null,
+                    "providerName": null
                 },
             }),
             serde_json::to_value(jsonrpc_notification)
