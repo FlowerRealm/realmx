@@ -133,12 +133,9 @@ jobs:
           - name: Linux
             runner: ubuntu-24.04
           - name: macOS
-            runner: macos-15-xlarge
+            runner: macos-15
           - name: Windows
-            runner: windows-x64
-            runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+            runner: windows-2025
     steps:
       - uses: actions/checkout@v6
       - name: Install Linux sandbox build dependencies
@@ -424,6 +421,7 @@ jobs:
 
       - name: Upload Cargo timings (clippy)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: cargo-timings-rust-ci-clippy-${{ matrix.target }}-${{ matrix.profile }}
@@ -476,9 +474,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             profile: dev
             remote_env: "true"
-            runs_on:
-              group: codex-runners
-              labels: codex-linux-x64
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             profile: dev
@@ -584,6 +579,7 @@ jobs:
 
       - name: Upload Cargo timings (nextest)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: cargo-timings-rust-ci-nextest-${{ matrix.target }}-${{ matrix.profile }}
