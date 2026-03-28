@@ -23,6 +23,12 @@ afterEach(async () => {
   }
 
   if (codexHomeToDelete) {
-    await fs.rm(codexHomeToDelete, { recursive: true, force: true });
+    // Plugin clone teardown can briefly race with test process cleanup in CI.
+    await fs.rm(codexHomeToDelete, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 });
