@@ -51,7 +51,7 @@ pub(crate) fn build_execute_plan_guard_instructions(
     let tasks_md = workspace_root.join("tasks.md");
     let Some(target) = resolve_current_executable_target(items)? else {
         return Ok(format!(
-            "Execute-mode plan workspace: `{}`.\nRead `{}` before acting.\nDerived plan text lives at `{}`.\nNo executable plan row is currently available.",
+            "Ultra Work execution workspace: `{}`.\nRead `{}` before acting.\nDerived plan text lives at `{}`.\nNo executable plan row is currently available.",
             workspace_root.display(),
             tasks_csv.display(),
             tasks_md.display(),
@@ -60,7 +60,7 @@ pub(crate) fn build_execute_plan_guard_instructions(
 
     let acceptance = target.acceptance.as_deref().unwrap_or("");
     Ok(format!(
-        "Execute-mode plan workspace: `{}`.\nRead `{}` before acting. Derived plan text lives at `{}`.\nThe accepted active plan is absolute truth in Execute mode.\nOnly execute the server-selected row below.\nCurrent executable row:\n- id: `{}`\n- step: {}\n- path: `{}`\n- details: {}\n- acceptance: {}\nDo not review or modify the plan. Record plan-external work only in `update_plan.explanation` and the final response.",
+        "Ultra Work execution workspace: `{}`.\nRead `{}` before acting. Derived plan text lives at `{}`.\nThe accepted active plan is absolute truth during Ultra Work execution.\nOnly execute the server-selected row below.\nCurrent executable row:\n- id: `{}`\n- step: {}\n- path: `{}`\n- details: {}\n- acceptance: {}\nDo not review or modify the plan. Record plan-external work only in `update_plan.explanation` and the final response.",
         workspace_root.display(),
         tasks_csv.display(),
         tasks_md.display(),
@@ -77,17 +77,18 @@ pub(crate) fn validate_execute_mode_plan_update(
     args: &UpdatePlanArgs,
 ) -> anyhow::Result<()> {
     if args.plan.len() != 1 {
-        anyhow::bail!("Execute mode may only update the server-selected current plan row");
+        anyhow::bail!("Ultra Work execution may only update the server-selected current plan row");
     }
 
-    let target = resolve_current_executable_target(items)?
-        .ok_or_else(|| anyhow::anyhow!("Execute mode has no current executable plan row"))?;
+    let target = resolve_current_executable_target(items)?.ok_or_else(|| {
+        anyhow::anyhow!("Ultra Work execution has no current executable plan row")
+    })?;
     let update = &args.plan[0];
     let row_id = update.id.as_deref().ok_or_else(|| {
-        anyhow::anyhow!("Execute mode updates must include the current plan row id")
+        anyhow::anyhow!("Ultra Work execution updates must include the current plan row id")
     })?;
     if row_id != target.row_id {
-        anyhow::bail!("Execute mode may only update the server-selected current plan row");
+        anyhow::bail!("Ultra Work execution may only update the server-selected current plan row");
     }
 
     let current = items
@@ -111,37 +112,37 @@ fn target_from_item(item: &ThreadPlanItem) -> ExecutePlanTarget {
 
 fn reject_metadata_mutation(update: &PlanItemArg, current: &ThreadPlanItem) -> anyhow::Result<()> {
     if update.step != current.step {
-        anyhow::bail!("Execute mode may not change the current plan row step");
+        anyhow::bail!("Ultra Work execution may not change the current plan row step");
     }
     reject_optional_string_mutation(
         update.path.as_deref(),
         Some(current.path.as_str()),
-        "Execute mode may not change the current plan row path",
+        "Ultra Work execution may not change the current plan row path",
     )?;
     reject_optional_string_mutation(
         update.details.as_deref(),
         Some(current.details.as_str()),
-        "Execute mode may not change the current plan row details",
+        "Ultra Work execution may not change the current plan row details",
     )?;
     reject_optional_vec_mutation(
         update.inputs.as_deref(),
         current.inputs.as_slice(),
-        "Execute mode may not change the current plan row inputs",
+        "Ultra Work execution may not change the current plan row inputs",
     )?;
     reject_optional_vec_mutation(
         update.outputs.as_deref(),
         current.outputs.as_slice(),
-        "Execute mode may not change the current plan row outputs",
+        "Ultra Work execution may not change the current plan row outputs",
     )?;
     reject_optional_vec_mutation(
         update.depends_on.as_deref(),
         current.depends_on.as_slice(),
-        "Execute mode may not change the current plan row dependencies",
+        "Ultra Work execution may not change the current plan row dependencies",
     )?;
     reject_optional_string_mutation(
         update.acceptance.as_deref(),
         current.acceptance.as_deref(),
-        "Execute mode may not change the current plan row acceptance",
+        "Ultra Work execution may not change the current plan row acceptance",
     )?;
     Ok(())
 }
@@ -182,15 +183,15 @@ fn validate_status_transition(
         | (ThreadPlanItemStatus::InProgress, StepStatus::InProgress)
         | (ThreadPlanItemStatus::Completed, StepStatus::Completed) => Ok(()),
         (ThreadPlanItemStatus::Pending, StepStatus::Pending) => {
-            anyhow::bail!("Execute mode pending rows must first transition to in_progress")
+            anyhow::bail!("Ultra Work execution pending rows must first transition to in_progress")
         }
         (ThreadPlanItemStatus::Pending, StepStatus::Completed) => {
-            anyhow::bail!("Execute mode pending rows must first transition to in_progress")
+            anyhow::bail!("Ultra Work execution pending rows must first transition to in_progress")
         }
         (ThreadPlanItemStatus::InProgress, StepStatus::Pending)
         | (ThreadPlanItemStatus::Completed, StepStatus::Pending)
         | (ThreadPlanItemStatus::Completed, StepStatus::InProgress) => {
-            anyhow::bail!("Execute mode received an invalid plan status transition")
+            anyhow::bail!("Ultra Work execution received an invalid plan status transition")
         }
     }
 }
@@ -266,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_execute_mode_multi_row_updates() {
+    fn rejects_ultra_work_execution_multi_row_updates() {
         let rows = sample_rows(&[
             ("plan-01", ThreadPlanItemStatus::Pending, vec![]),
             ("plan-02", ThreadPlanItemStatus::Pending, vec!["plan-01"]),
@@ -283,7 +284,7 @@ mod tests {
             .expect_err("multi-row execute update should fail");
         assert_eq!(
             err.to_string(),
-            "Execute mode may only update the server-selected current plan row"
+            "Ultra Work execution may only update the server-selected current plan row"
         );
     }
 
@@ -301,7 +302,7 @@ mod tests {
             .expect_err("missing id should fail");
         assert_eq!(
             err.to_string(),
-            "Execute mode updates must include the current plan row id"
+            "Ultra Work execution updates must include the current plan row id"
         );
     }
 
@@ -320,7 +321,7 @@ mod tests {
             .expect_err("non-current row should fail");
         assert_eq!(
             err.to_string(),
-            "Execute mode may only update the server-selected current plan row"
+            "Ultra Work execution may only update the server-selected current plan row"
         );
     }
 
@@ -338,7 +339,7 @@ mod tests {
             .expect_err("details mutation should fail");
         assert_eq!(
             err.to_string(),
-            "Execute mode may not change the current plan row details"
+            "Ultra Work execution may not change the current plan row details"
         );
     }
 
@@ -354,7 +355,7 @@ mod tests {
             .expect_err("pending to completed should fail");
         assert_eq!(
             err.to_string(),
-            "Execute mode pending rows must first transition to in_progress"
+            "Ultra Work execution pending rows must first transition to in_progress"
         );
     }
 
@@ -406,7 +407,7 @@ mod tests {
             .expect_err("completed-only plan should reject execute-mode updates");
         assert_eq!(
             err.to_string(),
-            "Execute mode has no current executable plan row"
+            "Ultra Work execution has no current executable plan row"
         );
     }
 

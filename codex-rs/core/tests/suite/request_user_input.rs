@@ -274,8 +274,8 @@ where
     assert_eq!(success, None);
     assert_eq!(
         output,
-        if mode_name == "Plan execution phase" {
-            "request_user_input is unavailable in Plan execution phase".to_string()
+        if mode_name == "Ultra Work execution phase" {
+            "request_user_input is unavailable in Ultra Work execution phase".to_string()
         } else {
             format!("request_user_input is unavailable in {mode_name} mode")
         }
@@ -285,9 +285,9 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_rejected_in_plan_execution_phase() -> anyhow::Result<()> {
-    assert_request_user_input_rejected("Plan execution phase", |model| CollaborationMode {
-        mode: ModeKind::Plan,
+async fn request_user_input_rejected_in_ultra_work_execution_phase() -> anyhow::Result<()> {
+    assert_request_user_input_rejected("Ultra Work execution phase", |model| CollaborationMode {
+        mode: ModeKind::UltraWork,
         plan_phase: Some(PlanModePhase::Executing),
         settings: Settings {
             model,

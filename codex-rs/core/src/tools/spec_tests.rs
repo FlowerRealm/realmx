@@ -1353,29 +1353,29 @@ fn plan_workspace_tools_only_appear_in_plan_modes() {
         Some(WebSearchMode::Cached),
         Some(ModeKind::Plan),
     );
-    assert!(plan_tools.iter().any(|name| name == "plan_workspace_read"));
-    assert!(plan_tools.iter().any(|name| name == "plan_workspace_write"));
+    assert!(!plan_tools.iter().any(|name| name == "plan_workspace_read"));
+    assert!(!plan_tools.iter().any(|name| name == "plan_workspace_write"));
 
-    let auto_plan_tools = model_tools_for_mode(
+    let ultra_work_tools = model_tools_for_mode(
         "gpt-5-codex",
         &features,
         Some(WebSearchMode::Cached),
-        Some(ModeKind::AutoPlan),
+        Some(ModeKind::UltraWork),
     );
     assert!(
-        auto_plan_tools
+        ultra_work_tools
             .iter()
             .any(|name| name == "plan_workspace_read")
     );
     assert!(
-        auto_plan_tools
+        ultra_work_tools
             .iter()
             .any(|name| name == "plan_workspace_write")
     );
 }
 
 #[test]
-fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
+fn execute_plan_dispatch_tool_only_appears_in_ultra_work_execution_when_enabled() {
     let mut features = Features::with_defaults();
     features.enable(Feature::PlanWorkflow);
 
@@ -1392,7 +1392,7 @@ fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
         &features,
         Some(WebSearchMode::Cached),
         CollaborationMode {
-            mode: ModeKind::Plan,
+            mode: ModeKind::UltraWork,
             plan_phase: Some(PlanModePhase::Executing),
             settings: Settings {
                 model: "gpt-5-codex".to_string(),
@@ -1409,7 +1409,7 @@ fn execute_plan_dispatch_tool_only_appears_in_execute_mode_when_enabled() {
 }
 
 #[test]
-fn execute_plan_dispatch_tool_does_not_appear_in_planning_mode() {
+fn execute_plan_dispatch_tool_does_not_appear_in_ultra_work_planning() {
     let mut features = Features::with_defaults();
     features.enable(Feature::PlanWorkflow);
 
@@ -1418,7 +1418,7 @@ fn execute_plan_dispatch_tool_does_not_appear_in_planning_mode() {
         &features,
         Some(WebSearchMode::Cached),
         CollaborationMode {
-            mode: ModeKind::Plan,
+            mode: ModeKind::UltraWork,
             plan_phase: Some(PlanModePhase::Planning),
             settings: Settings {
                 model: "gpt-5-codex".to_string(),

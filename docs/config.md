@@ -141,14 +141,19 @@ back to these environment variables.
 
 Realmx stores "do not show again" flags for some UI prompts under the `[notice]` table.
 
-## Plan mode defaults
+## Ultra Work defaults
 
-`plan_mode_reasoning_effort` lets you set a Plan-mode-specific default reasoning
-effort override. When unset, Plan mode uses the built-in Plan preset default
-(currently `medium`). When explicitly set (including `none`), it overrides the
-Plan preset. The string value `none` means "no reasoning" (an explicit Plan
-override), not "inherit the global default". There is currently no separate
-config value for "follow the global default in Plan mode".
+`ultra_work_reasoning_effort` lets you set an Ultra-Work-specific default
+reasoning effort override. When unset, Ultra Work uses the built-in Ultra Work
+preset default (currently `medium`). When explicitly set (including `none`), it
+overrides that preset. The string value `none` means "no reasoning" (an
+explicit Ultra Work override), not "inherit the global default". There is
+currently no separate config value for "follow the global default in Ultra
+Work".
+
+For backward compatibility, the legacy key `plan_mode_reasoning_effort` is
+still accepted as an alias when reading config, but new config should use
+`ultra_work_reasoning_effort`.
 
 ## Realtime start instructions
 

@@ -104,6 +104,7 @@ const fn path_prefix(prefix: &'static str, label: SettingsSectionLabel) -> Setti
 const MODEL_SECTION_MEMBERS: &[SettingsSectionMember] = &[
     exact("model", SettingsSectionLabel::Keep),
     key_prefix("model_", SettingsSectionLabel::StripPrefix("model_")),
+    exact("ultra_work_reasoning_effort", SettingsSectionLabel::Keep),
     exact("plan_mode_reasoning_effort", SettingsSectionLabel::Keep),
     exact("review_model", SettingsSectionLabel::Keep),
     exact("service_tier", SettingsSectionLabel::Keep),
@@ -387,6 +388,7 @@ mod tests {
         let section = settings_section("model").expect("model section");
         assert!(section.matches_key("model"));
         assert!(section.matches_key("model_reasoning_effort"));
+        assert!(section.matches_key("ultra_work_reasoning_effort"));
         assert!(section.matches_key("plan_mode_reasoning_effort"));
         assert!(section.matches_key("model_providers.openai.name"));
         assert!(section.matches_key("service_tier"));

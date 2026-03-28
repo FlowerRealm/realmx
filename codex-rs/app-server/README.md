@@ -163,7 +163,9 @@ Example with notification opt-out:
 - `model/list` — list available models (set `includeHidden: true` to include entries with `hidden: true`), with reasoning effort options, optional legacy `upgrade` model ids, optional `upgradeInfo` metadata (`model`, `upgradeCopy`, `modelLink`, `migrationMarkdown`), and optional `availabilityNux` metadata.
 - `experimentalFeature/list` — list feature flags with stage metadata (`beta`, `underDevelopment`, `stable`, etc.), enabled/default-enabled state, and cursor pagination. For non-beta flags, `displayName`/`description`/`announcement` are `null`.
 - `collaborationMode/list` — list available collaboration mode presets (experimental, no pagination). This response omits built-in developer instructions; clients should either pass `settings.developer_instructions: null` when setting a mode to use Codex's built-in instructions, or provide their own instructions explicitly.
-  - With `features.plan_workflow` enabled, the built-in Plan instructions switch to the file-first Plan workflow. They use the per-thread plan workspace (`requirements.md`, `design.md`, `tasks.csv`, derived `tasks.md`), allow preparatory setup actions only in temporary or scratch directories outside the current target repo, prefer shallow single-branch `git clone`/`git fetch` before `web search` when inspecting other repositories, and still forbid edits or rewrite-style commands inside the target repo worktree.
+  - Built-in `Default` remains the general-purpose execution preset.
+  - Built-in `Plan` remains the conversational planning-only preset.
+  - With `features.plan_workflow` enabled, the built-in `Ultra Work` planning instructions use the file-first workflow. They use the per-thread plan workspace (`requirements.md`, `design.md`, `tasks.csv`, derived `tasks.md`), allow preparatory setup actions only in temporary or scratch directories outside the current target repo, prefer shallow single-branch `git clone`/`git fetch` before `web search` when inspecting other repositories, and still forbid edits or rewrite-style commands inside the target repo worktree.
 - `skills/list` — list skills for one or more `cwd` values (optional `forceReload`).
 - `plugin/list` — list discovered plugin marketplaces and plugin state, including effective marketplace install/auth policy metadata. `interface.category` uses the marketplace category when present; otherwise it falls back to the plugin manifest category. Pass `forceRemoteSync: true` to refresh curated plugin state before listing (**under development; do not call from production clients yet**).
 - `plugin/read` — read one plugin by `marketplacePath` plus `pluginName`, returning marketplace info, a list-style `summary`, manifest descriptions/interface metadata, and bundled skills/apps/MCP server names (**under development; do not call from production clients yet**).
@@ -858,7 +860,7 @@ There are additional item-specific events:
 
 - `item/plan/delta` — streams proposed plan content for plan items (experimental); concatenate `delta` values for the same plan `itemId`. These deltas are preview-only and may not match the final completed `plan.text`.
 
-Plan mode is file-first. During planning, the model updates a per-thread plan workspace containing:
+Ultra Work planning is file-first. During planning, the model updates a per-thread plan workspace containing:
 
 - `requirements.md`
 - `design.md`

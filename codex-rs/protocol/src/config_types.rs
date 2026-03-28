@@ -324,15 +324,10 @@ pub enum AltScreenMode {
 #[serde(rename_all = "snake_case")]
 pub enum ModeKind {
     Plan,
-    #[doc(hidden)]
-    AutoPlan,
+    #[serde(alias = "auto_plan", alias = "execute")]
+    UltraWork,
     #[default]
-    #[serde(
-        alias = "code",
-        alias = "pair_programming",
-        alias = "execute",
-        alias = "custom"
-    )]
+    #[serde(alias = "code", alias = "pair_programming", alias = "custom")]
     Default,
     #[doc(hidden)]
     #[serde(skip_serializing, skip_deserializing)]
@@ -346,7 +341,8 @@ pub enum ModeKind {
     Execute,
 }
 
-pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 2] = [ModeKind::Default, ModeKind::Plan];
+pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 3] =
+    [ModeKind::Default, ModeKind::Plan, ModeKind::UltraWork];
 
 #[derive(
     Debug,
@@ -374,7 +370,7 @@ impl ModeKind {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Plan => "Plan",
-            Self::AutoPlan => "Auto Plan",
+            Self::UltraWork => "Ultra Work",
             Self::Default => "Default",
             Self::PairProgramming => "Pair Programming",
             Self::Execute => "Execute",
@@ -382,19 +378,27 @@ impl ModeKind {
     }
 
     pub const fn is_tui_visible(self) -> bool {
-        matches!(self, Self::Plan | Self::Default)
-    }
-
-    pub const fn is_plan_output_mode(self) -> bool {
-        matches!(self, Self::Plan | Self::AutoPlan)
+        matches!(self, Self::Plan | Self::UltraWork | Self::Default)
     }
 
     pub const fn is_plan_mode(self) -> bool {
-        matches!(self, Self::Plan | Self::AutoPlan)
+        matches!(self, Self::Plan)
+    }
+
+    pub const fn is_ultra_work_mode(self) -> bool {
+        matches!(self, Self::UltraWork | Self::Execute)
+    }
+
+    pub const fn is_ultra_work_planning_mode(self) -> bool {
+        matches!(self, Self::UltraWork)
+    }
+
+    pub const fn is_ultra_work_execution_mode(self) -> bool {
+        matches!(self, Self::Execute)
     }
 
     pub const fn allows_request_user_input(self) -> bool {
-        matches!(self, Self::Plan)
+        matches!(self, Self::Plan | Self::UltraWork)
     }
 }
 
@@ -412,7 +416,7 @@ pub struct CollaborationMode {
 impl CollaborationMode {
     fn normalize_mode(mode: ModeKind) -> ModeKind {
         match mode {
-            ModeKind::Execute => ModeKind::Plan,
+            ModeKind::Execute => ModeKind::UltraWork,
             other => other,
         }
     }
@@ -423,10 +427,8 @@ impl CollaborationMode {
     ) -> Option<PlanModePhase> {
         match mode {
             ModeKind::Execute => Some(PlanModePhase::Executing),
-            ModeKind::Plan | ModeKind::AutoPlan => {
-                Some(plan_phase.unwrap_or(PlanModePhase::Planning))
-            }
-            ModeKind::Default | ModeKind::PairProgramming => None,
+            ModeKind::UltraWork => Some(plan_phase.unwrap_or(PlanModePhase::Planning)),
+            ModeKind::Plan | ModeKind::Default | ModeKind::PairProgramming => None,
         }
     }
 
@@ -461,11 +463,23 @@ impl CollaborationMode {
         Self::normalize_mode(self.mode).is_plan_mode()
     }
 
+    pub fn is_ultra_work_mode(&self) -> bool {
+        Self::normalize_mode(self.mode).is_ultra_work_mode()
+    }
+
     pub fn is_plan_output_mode(&self) -> bool {
+        self.is_plan_mode()
+    }
+
+    pub fn is_ultra_work_planning_mode(&self) -> bool {
         matches!(self.plan_phase(), Some(PlanModePhase::Planning))
     }
 
     pub fn is_plan_execution_mode(&self) -> bool {
+        self.is_ultra_work_execution_mode()
+    }
+
+    pub fn is_ultra_work_execution_mode(&self) -> bool {
         matches!(self.plan_phase(), Some(PlanModePhase::Executing))
     }
 
@@ -508,7 +522,7 @@ impl CollaborationMode {
         let mode = mask.mode.unwrap_or(self.mode);
         CollaborationMode {
             mode: Self::normalize_mode(mode),
-            plan_phase: Self::normalize_plan_phase(mode, mask.plan_phase.or(self.plan_phase)),
+            plan_phase: Self::normalize_plan_phase(mode, mask.plan_phase.or(self.plan_phase())),
             settings: Settings {
                 model: mask.model.clone().unwrap_or_else(|| settings.model.clone()),
                 reasoning_effort: mask.reasoning_effort.unwrap_or(settings.reasoning_effort),
@@ -579,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_mode_normalizes_to_plan_executing() {
+    fn legacy_execute_mode_normalizes_to_ultra_work_executing() {
         let mode = CollaborationMode {
             mode: ModeKind::Execute,
             plan_phase: None,
@@ -591,7 +605,7 @@ mod tests {
         };
 
         let expected = CollaborationMode {
-            mode: ModeKind::Plan,
+            mode: ModeKind::UltraWork,
             plan_phase: Some(PlanModePhase::Executing),
             settings: Settings {
                 model: "gpt-5.2-codex".to_string(),
@@ -604,7 +618,7 @@ mod tests {
 
     #[test]
     fn mode_kind_deserializes_alias_values_to_default() {
-        for alias in ["code", "pair_programming", "execute", "custom"] {
+        for alias in ["code", "pair_programming", "custom"] {
             let json = format!("\"{alias}\"");
             let mode: ModeKind = serde_json::from_str(&json).expect("deserialize mode");
             assert_eq!(ModeKind::Default, mode);
@@ -612,21 +626,23 @@ mod tests {
     }
 
     #[test]
-    fn mode_kind_deserializes_auto_plan_for_backward_compatibility() {
-        let mode: ModeKind = serde_json::from_str("\"auto_plan\"").expect("deserialize mode");
-        assert_eq!(ModeKind::AutoPlan, mode);
+    fn mode_kind_deserializes_ultra_work_aliases_for_backward_compatibility() {
+        for alias in ["auto_plan", "execute"] {
+            let json = format!("\"{alias}\"");
+            let mode: ModeKind = serde_json::from_str(&json).expect("deserialize mode");
+            assert_eq!(ModeKind::UltraWork, mode);
+        }
     }
 
     #[test]
     fn tui_visible_collaboration_modes_match_mode_kind_visibility() {
-        let expected = [ModeKind::Default, ModeKind::Plan];
+        let expected = [ModeKind::Default, ModeKind::Plan, ModeKind::UltraWork];
         assert_eq!(expected, TUI_VISIBLE_COLLABORATION_MODES);
 
         for mode in TUI_VISIBLE_COLLABORATION_MODES {
             assert!(mode.is_tui_visible());
         }
 
-        assert!(!ModeKind::AutoPlan.is_tui_visible());
         assert!(!ModeKind::PairProgramming.is_tui_visible());
         assert!(!ModeKind::Execute.is_tui_visible());
     }

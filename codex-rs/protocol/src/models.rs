@@ -2070,15 +2070,15 @@ mod tests {
     }
 
     #[test]
-    fn collaboration_mode_instructions_include_plan_execution_phase_text() {
+    fn collaboration_mode_instructions_include_ultra_work_execution_text() {
         let instructions = DeveloperInstructions::from_collaboration_mode(&CollaborationMode {
-            mode: ModeKind::Plan,
+            mode: ModeKind::UltraWork,
             plan_phase: Some(PlanModePhase::Executing),
             settings: Settings {
                 model: "mock-model-execute".to_string(),
                 reasoning_effort: None,
                 developer_instructions: Some(
-                    "# Collaboration Style: Plan Execution Phase\nDo not review the plan in the execution phase.".to_string(),
+                    "# Collaboration Style: Ultra Work Execution\nDo not review the plan during Ultra Work execution.".to_string(),
                 ),
             },
         })
@@ -2086,8 +2086,8 @@ mod tests {
         .into_text();
 
         assert!(instructions.contains(COLLABORATION_MODE_OPEN_TAG));
-        assert!(instructions.contains("# Collaboration Style: Plan Execution Phase"));
-        assert!(instructions.contains("Do not review the plan in the execution phase."));
+        assert!(instructions.contains("# Collaboration Style: Ultra Work Execution"));
+        assert!(instructions.contains("Do not review the plan during Ultra Work execution."));
         assert!(instructions.contains(COLLABORATION_MODE_CLOSE_TAG));
     }
 

@@ -3585,7 +3585,7 @@ impl Session {
         {
             developer_sections.push(collab_instructions.into_text());
         }
-        if collaboration_mode.is_plan_execution_mode()
+        if collaboration_mode.is_ultra_work_execution_mode()
             && self.features.enabled(Feature::PlanWorkflow)
             && let Some(state_db) = self.state_db()
         {
@@ -3614,6 +3614,12 @@ impl Session {
                     )
                 };
                 if let Ok(execute_instructions) = execute_instructions {
+                    developer_sections.push(format!(
+                        "<collaboration_mode>\n{}\n</collaboration_mode>",
+                        crate::models_manager::collaboration_mode_presets::ultra_work_execution_instructions(
+                            self.features.enabled(Feature::PlanWorkflow)
+                        )
+                    ));
                     developer_sections.push(execute_instructions);
                 }
             }
@@ -5852,7 +5858,9 @@ pub(crate) async fn run_turn(
     let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     let mut server_model_warning_emitted_for_turn = false;
     let mut plan_acceptance = PlanAcceptanceState::new(
-        turn_context.collaboration_mode.is_plan_output_mode()
+        turn_context
+            .collaboration_mode
+            .is_ultra_work_planning_mode()
             && turn_context.features.enabled(Feature::PlanWorkflow),
     );
 
@@ -7269,8 +7277,9 @@ async fn flush_assistant_text_segments_all(
 async fn maybe_complete_plan_item_from_message(
     sess: &Session,
     turn_context: &TurnContext,
-    _state: &mut PlanModeStreamState,
+    state: &mut PlanModeStreamState,
     item: &ResponseItem,
+    persist_active_plan: bool,
 ) -> Result<Option<PlanCandidate>, CodexErr> {
     if let ResponseItem::Message { role, content, .. } = item
         && role == "assistant"
@@ -7282,6 +7291,17 @@ async fn maybe_complete_plan_item_from_message(
             }
         }
         if let Some(plan_text) = extract_proposed_plan_text(&text) {
+            let (plan_text, _citations) = strip_citations(&plan_text);
+            if !persist_active_plan {
+                if !state.plan_item_state.started {
+                    state.plan_item_state.start(sess, turn_context).await;
+                }
+                state
+                    .plan_item_state
+                    .complete_with_text(sess, turn_context, plan_text)
+                    .await;
+                return Ok(None);
+            }
             let codex_home = sess.codex_home().await;
             let thread_id = sess.conversation_id.to_string();
             let workspace =
@@ -7297,7 +7317,6 @@ async fn maybe_complete_plan_item_from_message(
                     rendered_text,
                 }));
             }
-            let (plan_text, _citations) = strip_citations(&plan_text);
             let canonical_plan = canonical_plan_csv_from_proposed_plan(plan_text.as_str())
                 .map_err(|err| {
                     CodexErr::InvalidRequest(format!("invalid proposed plan CSV: {err}"))
@@ -7393,8 +7412,27 @@ async fn handle_assistant_item_done_in_plan_mode(
     if let ResponseItem::Message { role, .. } = item
         && role == "assistant"
     {
-        *accepted_plan_candidate =
-            maybe_complete_plan_item_from_message(sess, turn_context, state, item).await?;
+        let persist_active_plan = turn_context
+            .collaboration_mode
+            .is_ultra_work_planning_mode();
+        *accepted_plan_candidate = maybe_complete_plan_item_from_message(
+            sess,
+            turn_context,
+            state,
+            item,
+            persist_active_plan,
+        )
+        .await?;
+
+        if persist_active_plan && accepted_plan_candidate.is_some() {
+            if state.allow_non_plan_message_emission
+                && let Some(agent_message) =
+                    last_assistant_message_from_item(item, /*plan_mode*/ true)
+            {
+                *last_agent_message = Some(agent_message);
+            }
+            return Ok(true);
+        }
 
         if let Some(turn_item) =
             handle_non_tool_response_item(sess, turn_context, item, /*plan_mode*/ true).await
@@ -7527,12 +7565,17 @@ async fn try_run_sampling_request(
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
     let mut should_emit_turn_diff = false;
-    let plan_mode = turn_context.collaboration_mode.is_plan_output_mode();
+    let plan_mode = turn_context.collaboration_mode.is_plan_mode();
+    let ultra_work_planning = turn_context
+        .collaboration_mode
+        .is_ultra_work_planning_mode();
+    let streamed_plan_mode = plan_mode || ultra_work_planning;
     let hidden_plan_review_enabled =
-        plan_mode && turn_context.features.enabled(Feature::PlanWorkflow);
-    let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
+        ultra_work_planning && turn_context.features.enabled(Feature::PlanWorkflow);
+    let mut assistant_message_stream_parsers =
+        AssistantMessageStreamParsers::new(streamed_plan_mode);
     let allow_non_plan_message_emission = !hidden_plan_review_enabled;
-    let mut plan_mode_state = plan_mode.then(|| {
+    let mut plan_mode_state = streamed_plan_mode.then(|| {
         PlanModeStreamState::new(
             &turn_context.sub_id,
             hidden_plan_review_enabled,
@@ -7630,7 +7673,7 @@ async fn try_run_sampling_request(
                     sess.as_ref(),
                     turn_context.as_ref(),
                     &item,
-                    plan_mode,
+                    streamed_plan_mode,
                 )
                 .await
                 {
@@ -7653,7 +7696,7 @@ async fn try_run_sampling_request(
                                     },
                                 }];
                         }
-                        seeded_parsed = plan_mode.then_some(seeded);
+                        seeded_parsed = streamed_plan_mode.then_some(seeded);
                         seeded_item_id = Some(item_id);
                     }
                     if let Some(state) = plan_mode_state.as_mut()

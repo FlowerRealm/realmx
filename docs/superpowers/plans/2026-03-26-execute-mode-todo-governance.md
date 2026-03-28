@@ -1,5 +1,7 @@
 # Execute Mode Todo Governance Implementation Plan
 
+> Historical note: this implementation plan predates the `Ultra Work` split. `Auto Plan` and `Execute` are no longer public modes; the current public modes are `Default`, `Plan`, and `Ultra Work`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make accepted `tasks.csv` plans govern `Execute` mode by having the server choose the current executable row, inject only the plan paths plus that row into execute-time instructions, and strictly gate `update_plan` to legal single-row status transitions.

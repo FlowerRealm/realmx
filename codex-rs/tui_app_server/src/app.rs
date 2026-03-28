@@ -3033,9 +3033,9 @@ impl App {
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }
-            AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
+            AppEvent::OpenUltraWorkReasoningScopePrompt { model, effort } => {
                 self.chat_widget
-                    .open_plan_reasoning_scope_prompt(model, effort);
+                    .open_ultra_work_reasoning_scope_prompt(model, effort);
             }
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
@@ -3669,9 +3669,9 @@ impl App {
             AppEvent::UpdateRateLimitSwitchPromptHidden(hidden) => {
                 self.chat_widget.set_rate_limit_switch_prompt_hidden(hidden);
             }
-            AppEvent::UpdatePlanModeReasoningEffort(effort) => {
-                self.config.plan_mode_reasoning_effort = effort;
-                self.chat_widget.set_plan_mode_reasoning_effort(effort);
+            AppEvent::UpdateUltraWorkReasoningEffort(effort) => {
+                self.config.ultra_work_reasoning_effort = effort;
+                self.chat_widget.set_ultra_work_reasoning_effort(effort);
                 self.refresh_status_line();
             }
             AppEvent::PersistFullAccessWarningAcknowledged => {
@@ -3719,16 +3719,16 @@ impl App {
                     ));
                 }
             }
-            AppEvent::PersistPlanModeReasoningEffort(effort) => {
+            AppEvent::PersistUltraWorkReasoningEffort(effort) => {
                 let profile = self.active_profile.as_deref();
                 let segments = if let Some(profile) = profile {
                     vec![
                         "profiles".to_string(),
                         profile.to_string(),
-                        "plan_mode_reasoning_effort".to_string(),
+                        "ultra_work_reasoning_effort".to_string(),
                     ]
                 } else {
-                    vec!["plan_mode_reasoning_effort".to_string()]
+                    vec!["ultra_work_reasoning_effort".to_string()]
                 };
                 let edit = if let Some(effort) = effort {
                     ConfigEdit::SetPath {
@@ -3745,15 +3745,15 @@ impl App {
                 {
                     tracing::error!(
                         error = %err,
-                        "failed to persist plan mode reasoning effort"
+                        "failed to persist ultra work reasoning effort"
                     );
                     if let Some(profile) = profile {
                         self.chat_widget.add_error_message(format!(
-                            "Failed to save Plan mode reasoning effort for profile `{profile}`: {err}"
+                            "Failed to save Ultra Work reasoning effort for profile `{profile}`: {err}"
                         ));
                     } else {
                         self.chat_widget.add_error_message(format!(
-                            "Failed to save Plan mode reasoning effort: {err}"
+                            "Failed to save Ultra Work reasoning effort: {err}"
                         ));
                     }
                 }
@@ -4446,7 +4446,6 @@ mod tests {
     use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::CollaborationModeMask;
     use codex_protocol::config_types::ModeKind;
-    use codex_protocol::config_types::PlanModePhase;
     use codex_protocol::config_types::Settings;
     use codex_protocol::openai_models::ModelAvailabilityNux;
     use codex_protocol::protocol::AgentMessageDeltaEvent;
@@ -5369,7 +5368,7 @@ mod tests {
                     collaboration_mode,
                     Some(CollaborationMode {
                         mode: ModeKind::Plan,
-                        plan_phase: Some(PlanModePhase::Planning),
+                        plan_phase: None,
                         settings: Settings {
                             model: "gpt-restored".to_string(),
                             reasoning_effort: Some(ReasoningEffortConfig::High),

@@ -172,17 +172,18 @@ use tracing::debug;
 use tracing::warn;
 
 const DEFAULT_MODEL_DISPLAY_NAME: &str = "loading";
-const PLAN_IMPLEMENTATION_TITLE: &str = "Implement this plan?";
-const PLAN_IMPLEMENTATION_YES: &str = "Yes, implement this plan";
-const PLAN_IMPLEMENTATION_NO: &str = "No, stay in Plan mode";
-const PLAN_IMPLEMENTATION_CODING_MESSAGE: &str = "Implement the plan.";
+const ULTRA_WORK_EXECUTION_PROMPT_TITLE: &str = "Start Ultra Work execution?";
+const ULTRA_WORK_EXECUTION_PROMPT_YES: &str = "Yes, start Ultra Work";
+const ULTRA_WORK_EXECUTION_PROMPT_NO: &str = "No, stay in Ultra Work";
+const ULTRA_WORK_EXECUTION_MESSAGE: &str = "Execute the accepted Ultra Work plan.";
 const MULTI_AGENT_ENABLE_TITLE: &str = "Enable subagents?";
 const MULTI_AGENT_ENABLE_YES: &str = "Yes, enable";
 const MULTI_AGENT_ENABLE_NO: &str = "Not now";
 const MULTI_AGENT_ENABLE_NOTICE: &str = "Subagents will be enabled in the next session.";
-const PLAN_MODE_REASONING_SCOPE_TITLE: &str = "Apply reasoning change";
-const PLAN_MODE_REASONING_SCOPE_PLAN_ONLY: &str = "Apply to Plan mode override";
-const PLAN_MODE_REASONING_SCOPE_ALL_MODES: &str = "Apply to global default and Plan mode override";
+const ULTRA_WORK_REASONING_SCOPE_TITLE: &str = "Apply reasoning change";
+const ULTRA_WORK_REASONING_SCOPE_ONLY: &str = "Apply to Ultra Work override";
+const ULTRA_WORK_REASONING_SCOPE_ALL_MODES: &str =
+    "Apply to global default and Ultra Work override";
 const CONNECTORS_SELECTION_VIEW_ID: &str = "connectors-selection";
 const APP_SERVER_TUI_STUB_MESSAGE: &str = "Not available in app-server TUI yet.";
 
@@ -1568,7 +1569,7 @@ impl ChatWidget {
     }
 
     fn on_plan_delta(&mut self, delta: String) {
-        if !self.is_active_plan_output_mode() {
+        if !self.is_active_streamed_plan_mode() {
             return;
         }
         if !self.plan_item_active {
@@ -1756,7 +1757,7 @@ impl ChatWidget {
         self.refresh_pending_input_preview();
 
         if !from_replay && self.queued_user_messages.is_empty() && !had_pending_steers {
-            self.maybe_prompt_plan_implementation();
+            self.maybe_prompt_ultra_work_execution();
         }
         // Keep this flag for replayed completion events so a subsequent live TurnComplete can
         // still show the prompt once after thread switch replay.
@@ -1773,14 +1774,14 @@ impl ChatWidget {
         self.maybe_show_pending_rate_limit_prompt();
     }
 
-    fn maybe_prompt_plan_implementation(&mut self) {
+    fn maybe_prompt_ultra_work_execution(&mut self) {
         if !self.collaboration_modes_enabled() {
             return;
         }
         if !self.queued_user_messages.is_empty() {
             return;
         }
-        if !self.is_active_plan_output_mode() {
+        if !self.is_active_ultra_work_planning_mode() {
             return;
         }
         if !self.saw_plan_item_this_turn {
@@ -1798,35 +1799,19 @@ impl ChatWidget {
         }
 
         match self.active_mode_kind() {
-            ModeKind::Plan => self.open_plan_implementation_prompt(),
-            ModeKind::AutoPlan => self.submit_plan_implementation_in_plan_execution_phase(),
-            ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => {}
+            ModeKind::UltraWork => self.open_ultra_work_execution_prompt(),
+            ModeKind::Default | ModeKind::Plan | ModeKind::PairProgramming | ModeKind::Execute => {}
         }
     }
 
-    fn submit_plan_implementation_in_plan_execution_phase(&mut self) {
-        let Some(mask) = collaboration_modes::plan_phase_mask(
-            self.model_catalog.as_ref(),
-            PlanModePhase::Executing,
-        ) else {
-            self.add_error_message("Plan mode unavailable".to_string());
-            return;
-        };
-        let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
-        self.app_event_tx.send(AppEvent::SubmitUserMessageWithMode {
-            text: user_text,
-            collaboration_mode: mask,
-        });
-    }
-
-    fn open_plan_implementation_prompt(&mut self) {
-        let execution_mask = collaboration_modes::plan_phase_mask(
+    fn open_ultra_work_execution_prompt(&mut self) {
+        let execution_mask = collaboration_modes::ultra_work_phase_mask(
             self.model_catalog.as_ref(),
             PlanModePhase::Executing,
         );
         let (implement_actions, implement_disabled_reason) = match execution_mask {
             Some(mask) => {
-                let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
+                let user_text = ULTRA_WORK_EXECUTION_MESSAGE.to_string();
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
                     tx.send(AppEvent::SubmitUserMessageWithMode {
                         text: user_text.clone(),
@@ -1835,12 +1820,12 @@ impl ChatWidget {
                 })];
                 (actions, None)
             }
-            None => (Vec::new(), Some("Plan mode unavailable".to_string())),
+            None => (Vec::new(), Some("Ultra Work unavailable".to_string())),
         };
         let items = vec![
             SelectionItem {
-                name: PLAN_IMPLEMENTATION_YES.to_string(),
-                description: Some("Enter the execution phase and start coding.".to_string()),
+                name: ULTRA_WORK_EXECUTION_PROMPT_YES.to_string(),
+                description: Some("Enter Ultra Work execution and start coding.".to_string()),
                 selected_description: None,
                 is_current: false,
                 actions: implement_actions,
@@ -1849,8 +1834,8 @@ impl ChatWidget {
                 ..Default::default()
             },
             SelectionItem {
-                name: PLAN_IMPLEMENTATION_NO.to_string(),
-                description: Some("Continue planning with the model.".to_string()),
+                name: ULTRA_WORK_EXECUTION_PROMPT_NO.to_string(),
+                description: Some("Continue planning in Ultra Work.".to_string()),
                 selected_description: None,
                 is_current: false,
                 actions: Vec::new(),
@@ -1860,14 +1845,14 @@ impl ChatWidget {
         ];
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some(PLAN_IMPLEMENTATION_TITLE.to_string()),
+            title: Some(ULTRA_WORK_EXECUTION_PROMPT_TITLE.to_string()),
             subtitle: None,
             footer_hint: Some(standard_popup_hint_line()),
             items,
             ..Default::default()
         });
-        self.notify(Notification::PlanModePrompt {
-            title: PLAN_IMPLEMENTATION_TITLE.to_string(),
+        self.notify(Notification::UltraWorkPrompt {
+            title: ULTRA_WORK_EXECUTION_PROMPT_TITLE.to_string(),
         });
     }
 
@@ -4261,10 +4246,7 @@ impl ChatWidget {
                     );
                     return;
                 }
-                if let Some(mask) = collaboration_modes::plan_phase_mask(
-                    self.model_catalog.as_ref(),
-                    PlanModePhase::Planning,
-                ) {
+                if let Some(mask) = collaboration_modes::plan_mask(self.model_catalog.as_ref()) {
                     self.set_collaboration_mask(mask);
                 } else {
                     self.add_info_message(
@@ -4568,7 +4550,7 @@ impl ChatWidget {
             }
             SlashCommand::Plan if !trimmed.is_empty() => {
                 self.dispatch_command(cmd);
-                if self.active_mode_kind() != ModeKind::Plan || !self.is_active_plan_output_mode() {
+                if !self.is_active_plan_mode() {
                     return;
                 }
                 let Some((prepared_args, prepared_elements)) = self
@@ -6478,14 +6460,14 @@ impl ChatWidget {
                 let description =
                     (!preset.description.is_empty()).then_some(preset.description.clone());
                 let model = preset.model.clone();
-                let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
+                let should_prompt_ultra_work_scope = self.should_prompt_ultra_work_reasoning_scope(
                     model.as_str(),
                     Some(preset.default_reasoning_effort),
                 );
                 let actions = Self::model_selection_actions(
                     model.clone(),
                     Some(preset.default_reasoning_effort),
-                    should_prompt_plan_mode_scope,
+                    should_prompt_ultra_work_scope,
                 );
                 SelectionItem {
                     name: model.clone(),
@@ -6640,11 +6622,11 @@ impl ChatWidget {
     fn model_selection_actions(
         model_for_action: String,
         effort_for_action: Option<ReasoningEffortConfig>,
-        should_prompt_plan_mode_scope: bool,
+        should_prompt_ultra_work_scope: bool,
     ) -> Vec<SelectionAction> {
         vec![Box::new(move |tx| {
-            if should_prompt_plan_mode_scope {
-                tx.send(AppEvent::OpenPlanReasoningScopePrompt {
+            if should_prompt_ultra_work_scope {
+                tx.send(AppEvent::OpenUltraWorkReasoningScopePrompt {
                     model: model_for_action.clone(),
                     effort: effort_for_action,
                 });
@@ -6660,27 +6642,27 @@ impl ChatWidget {
         })]
     }
 
-    fn should_prompt_plan_mode_reasoning_scope(
+    fn should_prompt_ultra_work_reasoning_scope(
         &self,
         selected_model: &str,
         selected_effort: Option<ReasoningEffortConfig>,
     ) -> bool {
         if !self.collaboration_modes_enabled()
-            || !self.is_active_plan_output_mode()
+            || !self.is_active_ultra_work_mode()
             || selected_model != self.current_model()
         {
             return false;
         }
 
         // Prompt whenever the selection is not a true no-op for both:
-        // 1) the active Plan-mode effective reasoning, and
+        // 1) the active Ultra Work effective reasoning, and
         // 2) the stored global defaults that would be updated by the fallback path.
         selected_effort != self.effective_reasoning_effort()
             || selected_model != self.current_collaboration_mode.model()
             || selected_effort != self.current_collaboration_mode.reasoning_effort()
     }
 
-    pub(crate) fn open_plan_reasoning_scope_prompt(
+    pub(crate) fn open_ultra_work_reasoning_scope_prompt(
         &mut self,
         model: String,
         effort: Option<ReasoningEffortConfig>,
@@ -6695,44 +6677,44 @@ impl ChatWidget {
             }
             None => "the selected reasoning".to_string(),
         };
-        let plan_only_description = format!("Always use {reasoning_phrase} in Plan mode.");
-        let plan_reasoning_source = if let Some(plan_override) =
-            self.config.plan_mode_reasoning_effort
-        {
-            format!(
-                "user-chosen Plan override ({})",
-                Self::reasoning_effort_label(plan_override).to_lowercase()
-            )
-        } else if let Some(plan_mask) = collaboration_modes::plan_mask(self.model_catalog.as_ref())
-        {
-            match plan_mask.reasoning_effort.flatten() {
-                Some(plan_effort) => format!(
-                    "built-in Plan default ({})",
-                    Self::reasoning_effort_label(plan_effort).to_lowercase()
-                ),
-                None => "built-in Plan default (no reasoning)".to_string(),
-            }
-        } else {
-            "built-in Plan default".to_string()
-        };
+        let ultra_work_only_description = format!("Always use {reasoning_phrase} in Ultra Work.");
+        let ultra_work_reasoning_source =
+            if let Some(ultra_work_override) = self.config.ultra_work_reasoning_effort {
+                format!(
+                    "user-chosen Ultra Work override ({})",
+                    Self::reasoning_effort_label(ultra_work_override).to_lowercase()
+                )
+            } else if let Some(ultra_work_mask) =
+                collaboration_modes::ultra_work_mask(self.model_catalog.as_ref())
+            {
+                match ultra_work_mask.reasoning_effort.flatten() {
+                    Some(ultra_work_effort) => format!(
+                        "built-in Ultra Work default ({})",
+                        Self::reasoning_effort_label(ultra_work_effort).to_lowercase()
+                    ),
+                    None => "built-in Ultra Work default (no reasoning)".to_string(),
+                }
+            } else {
+                "built-in Ultra Work default".to_string()
+            };
         let all_modes_description = format!(
-            "Set the global default reasoning level and the Plan mode override. This replaces the current {plan_reasoning_source}."
+            "Set the global default reasoning level and the Ultra Work override. This replaces the current {ultra_work_reasoning_source}."
         );
         let subtitle = format!("Choose where to apply {reasoning_phrase}.");
 
-        let plan_only_actions: Vec<SelectionAction> = vec![Box::new({
+        let ultra_work_only_actions: Vec<SelectionAction> = vec![Box::new({
             let model = model.clone();
             move |tx| {
                 tx.send(AppEvent::UpdateModel(model.clone()));
-                tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort));
-                tx.send(AppEvent::PersistPlanModeReasoningEffort(effort));
+                tx.send(AppEvent::UpdateUltraWorkReasoningEffort(effort));
+                tx.send(AppEvent::PersistUltraWorkReasoningEffort(effort));
             }
         })];
         let all_modes_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
             tx.send(AppEvent::UpdateModel(model.clone()));
             tx.send(AppEvent::UpdateReasoningEffort(effort));
-            tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort));
-            tx.send(AppEvent::PersistPlanModeReasoningEffort(effort));
+            tx.send(AppEvent::UpdateUltraWorkReasoningEffort(effort));
+            tx.send(AppEvent::PersistUltraWorkReasoningEffort(effort));
             tx.send(AppEvent::PersistModelSelection {
                 model: model.clone(),
                 effort,
@@ -6740,19 +6722,19 @@ impl ChatWidget {
         })];
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some(PLAN_MODE_REASONING_SCOPE_TITLE.to_string()),
+            title: Some(ULTRA_WORK_REASONING_SCOPE_TITLE.to_string()),
             subtitle: Some(subtitle),
             footer_hint: Some(standard_popup_hint_line()),
             items: vec![
                 SelectionItem {
-                    name: PLAN_MODE_REASONING_SCOPE_PLAN_ONLY.to_string(),
-                    description: Some(plan_only_description),
-                    actions: plan_only_actions,
+                    name: ULTRA_WORK_REASONING_SCOPE_ONLY.to_string(),
+                    description: Some(ultra_work_only_description),
+                    actions: ultra_work_only_actions,
                     dismiss_on_select: true,
                     ..Default::default()
                 },
                 SelectionItem {
-                    name: PLAN_MODE_REASONING_SCOPE_ALL_MODES.to_string(),
+                    name: ULTRA_WORK_REASONING_SCOPE_ALL_MODES.to_string(),
                     description: Some(all_modes_description),
                     actions: all_modes_actions,
                     dismiss_on_select: true,
@@ -6761,8 +6743,8 @@ impl ChatWidget {
             ],
             ..Default::default()
         });
-        self.notify(Notification::PlanModePrompt {
-            title: PLAN_MODE_REASONING_SCOPE_TITLE.to_string(),
+        self.notify(Notification::UltraWorkPrompt {
+            title: ULTRA_WORK_REASONING_SCOPE_TITLE.to_string(),
         });
     }
 
@@ -6770,7 +6752,8 @@ impl ChatWidget {
     pub(crate) fn open_reasoning_popup(&mut self, preset: ModelPreset) {
         let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
         let supported = preset.supported_reasoning_efforts;
-        let in_plan_mode = self.collaboration_modes_enabled() && self.is_active_plan_output_mode();
+        let in_ultra_work_mode =
+            self.collaboration_modes_enabled() && self.is_active_ultra_work_mode();
 
         let warn_effort = if supported
             .iter()
@@ -6816,9 +6799,9 @@ impl ChatWidget {
         if choices.len() == 1 {
             let selected_effort = choices.first().and_then(|c| c.stored);
             let selected_model = preset.model;
-            if self.should_prompt_plan_mode_reasoning_scope(&selected_model, selected_effort) {
+            if self.should_prompt_ultra_work_reasoning_scope(&selected_model, selected_effort) {
                 self.app_event_tx
-                    .send(AppEvent::OpenPlanReasoningScopePrompt {
+                    .send(AppEvent::OpenUltraWorkReasoningScopePrompt {
                         model: selected_model,
                         effort: selected_effort,
                     });
@@ -6839,9 +6822,9 @@ impl ChatWidget {
         let model_slug = preset.model.to_string();
         let is_current_model = self.current_model() == preset.model.as_str();
         let highlight_choice = if is_current_model {
-            if in_plan_mode {
+            if in_ultra_work_mode {
                 self.config
-                    .plan_mode_reasoning_effort
+                    .ultra_work_reasoning_effort
                     .or(self.effective_reasoning_effort())
             } else {
                 self.effective_reasoning_effort()
@@ -6889,11 +6872,11 @@ impl ChatWidget {
 
             let model_for_action = model_slug.clone();
             let choice_effort = choice.stored;
-            let should_prompt_plan_mode_scope =
-                self.should_prompt_plan_mode_reasoning_scope(model_slug.as_str(), choice_effort);
+            let should_prompt_ultra_work_scope =
+                self.should_prompt_ultra_work_reasoning_scope(model_slug.as_str(), choice_effort);
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                if should_prompt_plan_mode_scope {
-                    tx.send(AppEvent::OpenPlanReasoningScopePrompt {
+                if should_prompt_ultra_work_scope {
+                    tx.send(AppEvent::OpenUltraWorkReasoningScopePrompt {
                         model: model_for_action.clone(),
                         effort: choice_effort,
                     });
@@ -7845,18 +7828,22 @@ impl ChatWidget {
             .unwrap_or(false)
     }
 
-    pub(crate) fn set_plan_mode_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
-        self.config.plan_mode_reasoning_effort = effort;
+    pub(crate) fn set_ultra_work_reasoning_effort(
+        &mut self,
+        effort: Option<ReasoningEffortConfig>,
+    ) {
+        self.config.ultra_work_reasoning_effort = effort;
+        let active_kind = self.active_mode_kind();
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
-            && mask.mode == Some(ModeKind::Plan)
+            && mask.mode.is_some_and(ModeKind::is_ultra_work_mode)
         {
             if let Some(effort) = effort {
                 mask.reasoning_effort = Some(Some(effort));
-            } else if let Some(plan_mask) =
-                collaboration_modes::plan_mask(self.model_catalog.as_ref())
+            } else if let Some(default_mask) =
+                collaboration_modes::mask_for_kind(self.model_catalog.as_ref(), active_kind)
             {
-                mask.reasoning_effort = plan_mask.reasoning_effort;
+                mask.reasoning_effort = default_mask.reasoning_effort;
             }
         }
     }
@@ -7870,10 +7857,10 @@ impl ChatWidget {
         );
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
-            && mask.mode != Some(ModeKind::Plan)
+            && !mask.mode.is_some_and(ModeKind::is_ultra_work_mode)
         {
-            // Generic "global default" updates should not mutate the active Plan mask.
-            // Plan reasoning is controlled by the Plan preset and Plan-only override updates.
+            // Generic "global default" updates should not mutate the active Ultra Work mask.
+            // Ultra Work reasoning is controlled by the preset and Ultra-Work-only override updates.
             mask.reasoning_effort = Some(effort);
         }
     }
@@ -8116,12 +8103,26 @@ impl ChatWidget {
         self.effective_collaboration_mode().plan_phase()
     }
 
-    fn is_active_plan_output_mode(&self) -> bool {
-        self.effective_collaboration_mode().is_plan_output_mode()
+    fn is_active_plan_mode(&self) -> bool {
+        self.effective_collaboration_mode().is_plan_mode()
     }
 
-    fn is_active_plan_execution_mode(&self) -> bool {
-        self.effective_collaboration_mode().is_plan_execution_mode()
+    fn is_active_ultra_work_mode(&self) -> bool {
+        self.effective_collaboration_mode().is_ultra_work_mode()
+    }
+
+    fn is_active_ultra_work_planning_mode(&self) -> bool {
+        self.effective_collaboration_mode()
+            .is_ultra_work_planning_mode()
+    }
+
+    fn is_active_ultra_work_execution_mode(&self) -> bool {
+        self.effective_collaboration_mode()
+            .is_ultra_work_execution_mode()
+    }
+
+    fn is_active_streamed_plan_mode(&self) -> bool {
+        self.is_active_plan_mode() || self.is_active_ultra_work_planning_mode()
     }
 
     fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
@@ -8177,11 +8178,11 @@ impl ChatWidget {
             return None;
         }
         match self.active_mode_kind() {
-            ModeKind::Plan if self.is_active_plan_execution_mode() => {
-                Some(CollaborationModeIndicator::PlanExecuting)
-            }
             ModeKind::Plan => Some(CollaborationModeIndicator::Plan),
-            ModeKind::AutoPlan => Some(CollaborationModeIndicator::AutoPlan),
+            ModeKind::UltraWork if self.is_active_ultra_work_execution_mode() => {
+                Some(CollaborationModeIndicator::UltraWorkExecuting)
+            }
+            ModeKind::UltraWork => Some(CollaborationModeIndicator::UltraWork),
             ModeKind::Default | ModeKind::PairProgramming | ModeKind::Execute => None,
         }
     }
@@ -8233,8 +8234,8 @@ impl ChatWidget {
         let previous_plan_phase = self.active_plan_phase();
         let previous_model = self.current_model().to_string();
         let previous_effort = self.effective_reasoning_effort();
-        if mask.mode == Some(ModeKind::Plan)
-            && let Some(effort) = self.config.plan_mode_reasoning_effort
+        if mask.mode.is_some_and(ModeKind::is_ultra_work_mode)
+            && let Some(effort) = self.config.ultra_work_reasoning_effort
         {
             mask.reasoning_effort = Some(Some(effort));
         }
@@ -8247,11 +8248,14 @@ impl ChatWidget {
         let next_effort = self.effective_reasoning_effort();
         if previous_plan_phase != next_plan_phase {
             let message = match next_plan_phase {
-                Some(PlanModePhase::Planning) => {
-                    "Returned to Plan mode planning phase.".to_string()
+                Some(PlanModePhase::Planning) if next_mode == ModeKind::UltraWork => {
+                    "Returned to Ultra Work planning phase.".to_string()
                 }
-                Some(PlanModePhase::Executing) => "Entered Plan mode execution phase.".to_string(),
+                Some(PlanModePhase::Executing) if next_mode == ModeKind::UltraWork => {
+                    "Entered Ultra Work execution phase.".to_string()
+                }
                 None => format!("Switched to {} mode.", next_mode.display_name()),
+                _ => format!("Switched to {} mode.", next_mode.display_name()),
             };
             self.add_to_history(history_cell::new_info_event(message, /*hint*/ None));
         }
@@ -8739,8 +8743,10 @@ impl ChatWidget {
         text: String,
         mut collaboration_mode: CollaborationModeMask,
     ) {
-        if collaboration_mode.mode.is_some_and(ModeKind::is_plan_mode)
-            && let Some(effort) = self.config.plan_mode_reasoning_effort
+        if collaboration_mode
+            .mode
+            .is_some_and(ModeKind::is_ultra_work_mode)
+            && let Some(effort) = self.config.ultra_work_reasoning_effort
         {
             collaboration_mode.reasoning_effort = Some(Some(effort));
         }
@@ -9283,7 +9289,7 @@ enum Notification {
     ElicitationRequested {
         server_name: String,
     },
-    PlanModePrompt {
+    UltraWorkPrompt {
         title: String,
     },
     UserInputRequested {
@@ -9319,8 +9325,8 @@ impl Notification {
             Notification::ElicitationRequested { server_name } => {
                 format!("Approval requested by {server_name}")
             }
-            Notification::PlanModePrompt { title } => {
-                format!("Plan mode prompt: {title}")
+            Notification::UltraWorkPrompt { title } => {
+                format!("Ultra Work prompt: {title}")
             }
             Notification::UserInputRequested {
                 question_count,
@@ -9339,7 +9345,7 @@ impl Notification {
             Notification::ExecApprovalRequested { .. }
             | Notification::EditApprovalRequested { .. }
             | Notification::ElicitationRequested { .. } => "approval-requested",
-            Notification::PlanModePrompt { .. } => "plan-mode-prompt",
+            Notification::UltraWorkPrompt { .. } => "ultra-work-prompt",
             Notification::UserInputRequested { .. } => "user-input-requested",
         }
     }
@@ -9350,7 +9356,7 @@ impl Notification {
             Notification::ExecApprovalRequested { .. }
             | Notification::EditApprovalRequested { .. }
             | Notification::ElicitationRequested { .. }
-            | Notification::PlanModePrompt { .. }
+            | Notification::UltraWorkPrompt { .. }
             | Notification::UserInputRequested { .. } => 1,
         }
     }
@@ -9358,7 +9364,14 @@ impl Notification {
     fn allowed_for(&self, settings: &Notifications) -> bool {
         match settings {
             Notifications::Enabled(enabled) => *enabled,
-            Notifications::Custom(allowed) => allowed.iter().any(|a| a == self.type_name()),
+            Notifications::Custom(allowed) => {
+                let type_name = self.type_name();
+                allowed.iter().any(|name| {
+                    name == type_name
+                        || (matches!(self, Notification::UltraWorkPrompt { .. })
+                            && name == "plan-mode-prompt")
+                })
+            }
         }
     }
 

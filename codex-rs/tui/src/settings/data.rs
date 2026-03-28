@@ -1207,9 +1207,9 @@ microphone = "Desk Mic"
                     },
                 },
                 SchemaNode {
-                    key_path: "plan_mode_reasoning_effort".to_string(),
-                    title: "plan_mode_reasoning_effort".to_string(),
-                    description: Some("Plan effort".to_string()),
+                    key_path: "ultra_work_reasoning_effort".to_string(),
+                    title: "ultra_work_reasoning_effort".to_string(),
+                    description: Some("Ultra Work effort".to_string()),
                     kind: SchemaNodeKind::String,
                     enum_values: Vec::new(),
                     default_value: None,
@@ -1236,7 +1236,7 @@ microphone = "Desk Mic"
             r#"
 model = "gpt-5"
 model_reasoning_effort = "high"
-plan_mode_reasoning_effort = "medium"
+ultra_work_reasoning_effort = "medium"
 service_tier = "flex"
 "#,
         )
@@ -1244,7 +1244,7 @@ service_tier = "flex"
         let mut origins = HashMap::new();
         origins.insert("model".to_string(), metadata());
         origins.insert("model_reasoning_effort".to_string(), metadata());
-        origins.insert("plan_mode_reasoning_effort".to_string(), metadata());
+        origins.insert("ultra_work_reasoning_effort".to_string(), metadata());
         origins.insert("service_tier".to_string(), metadata());
 
         let root_items =
@@ -1275,9 +1275,9 @@ service_tier = "flex"
                 .collect::<Vec<_>>(),
             vec![
                 "model",
-                "plan_mode_reasoning_effort",
                 "reasoning_effort",
                 "service_tier",
+                "ultra_work_reasoning_effort",
             ]
         );
     }

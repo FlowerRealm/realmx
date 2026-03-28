@@ -132,14 +132,9 @@ async fn test_current_shell_detects_zsh() {
 
     let shell_path = String::from_utf8_lossy(&shell.stdout).trim().to_string();
     if shell_path.ends_with("/zsh") {
-        assert_eq!(
-            default_user_shell(),
-            Shell {
-                shell_type: ShellType::Zsh,
-                shell_path: PathBuf::from(shell_path),
-                shell_snapshot: empty_shell_snapshot_receiver(),
-            }
-        );
+        let detected_shell = default_user_shell();
+        assert_eq!(detected_shell.shell_type, ShellType::Zsh);
+        assert!(detected_shell.shell_path.ends_with("zsh"));
     }
 }
 

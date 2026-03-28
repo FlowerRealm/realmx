@@ -804,7 +804,7 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
 }
 
 #[tokio::test]
-async fn turn_start_plan_executing_uses_execute_preset_instructions_v2() -> Result<()> {
+async fn turn_start_ultra_work_executing_uses_execution_preset_instructions_v2() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -840,7 +840,7 @@ async fn turn_start_plan_executing_uses_execute_preset_instructions_v2() -> Resu
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
 
     let execute_mode = CollaborationMode {
-        mode: ModeKind::Plan,
+        mode: ModeKind::UltraWork,
         plan_phase: Some(PlanModePhase::Executing),
         settings: Settings {
             model: "mock-model-execute".to_string(),
@@ -877,8 +877,8 @@ async fn turn_start_plan_executing_uses_execute_preset_instructions_v2() -> Resu
     assert!(
         developer_texts
             .iter()
-            .any(|text| text.contains("# Collaboration Style: Plan Execution Phase")),
-        "expected plan execution phase instructions in developer input, got {developer_texts:?}"
+            .any(|text| text.contains("# Collaboration Style: Ultra Work Execution")),
+        "expected ultra work execution instructions in developer input, got {developer_texts:?}"
     );
     assert!(
         developer_texts

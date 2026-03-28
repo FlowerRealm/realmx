@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 #[test]
 fn request_user_input_mode_availability_defaults_to_plan_only() {
     assert!(ModeKind::Plan.allows_request_user_input());
-    assert!(!ModeKind::AutoPlan.allows_request_user_input());
+    assert!(ModeKind::UltraWork.allows_request_user_input());
     assert!(!ModeKind::Default.allows_request_user_input());
     assert!(!ModeKind::Execute.allows_request_user_input());
     assert!(!ModeKind::PairProgramming.allows_request_user_input());
@@ -21,8 +21,8 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
         None
     );
     assert_eq!(
-        request_user_input_unavailable_message(ModeKind::AutoPlan, false),
-        Some("request_user_input is unavailable in Auto Plan mode".to_string())
+        request_user_input_unavailable_message(ModeKind::UltraWork, false),
+        None
     );
     assert_eq!(
         request_user_input_unavailable_message(ModeKind::Default, false),
@@ -34,7 +34,7 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
     );
     assert_eq!(
         request_user_input_unavailable_message(ModeKind::Execute, false),
-        Some("request_user_input is unavailable in Execute mode".to_string())
+        Some("request_user_input is unavailable in Ultra Work execution phase".to_string())
     );
     assert_eq!(
         request_user_input_unavailable_message(ModeKind::PairProgramming, false),
@@ -45,19 +45,19 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 #[test]
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
-            request_user_input_tool_description(false),
-            "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode.".to_string()
-        );
+        request_user_input_tool_description(false),
+        "Request user input for one to three short questions and wait for the response. This tool is only available in Plan or Ultra Work mode.".to_string()
+    );
     assert_eq!(
-            request_user_input_tool_description(true),
-            "Request user input for one to three short questions and wait for the response. This tool is only available in Default or Plan mode.".to_string()
-        );
+        request_user_input_tool_description(true),
+        "Request user input for one to three short questions and wait for the response. This tool is only available in Default, Plan, or Ultra Work mode.".to_string()
+    );
 }
 
 #[test]
 fn request_user_input_unavailable_message_mentions_plan_execution_phase() {
     let collaboration_mode = CollaborationMode {
-        mode: ModeKind::Plan,
+        mode: ModeKind::UltraWork,
         plan_phase: Some(PlanModePhase::Executing),
         settings: Settings {
             model: "gpt-5".to_string(),
@@ -68,6 +68,6 @@ fn request_user_input_unavailable_message_mentions_plan_execution_phase() {
 
     assert_eq!(
         request_user_input_unavailable_message_for_collaboration_mode(&collaboration_mode, false),
-        Some("request_user_input is unavailable in Plan execution phase".to_string())
+        Some("request_user_input is unavailable in Ultra Work execution phase".to_string())
     );
 }

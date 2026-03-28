@@ -89,13 +89,10 @@ pub(crate) struct FooterProps {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CollaborationModeIndicator {
     Plan,
-    PlanExecuting,
-    #[allow(dead_code)] // Hidden by current mode filtering; used for legacy auto-plan sessions.
-    AutoPlan,
+    UltraWork,
+    UltraWorkExecuting,
     #[allow(dead_code)] // Hidden by current mode filtering; kept for future UI re-enablement.
     PairProgramming,
-    #[allow(dead_code)] // Hidden by current mode filtering; kept for future UI re-enablement.
-    Execute,
 }
 
 const MODE_CYCLE_HINT: &str = "shift+tab to cycle";
@@ -110,14 +107,13 @@ impl CollaborationModeIndicator {
         };
         match self {
             CollaborationModeIndicator::Plan => format!("Plan mode{suffix}"),
-            CollaborationModeIndicator::PlanExecuting => {
-                format!("Plan mode: executing{suffix}")
+            CollaborationModeIndicator::UltraWork => format!("Ultra Work mode{suffix}"),
+            CollaborationModeIndicator::UltraWorkExecuting => {
+                format!("Ultra Work: executing{suffix}")
             }
-            CollaborationModeIndicator::AutoPlan => format!("Auto Plan mode{suffix}"),
             CollaborationModeIndicator::PairProgramming => {
                 format!("Pair Programming mode{suffix}")
             }
-            CollaborationModeIndicator::Execute => format!("Execute mode{suffix}"),
         }
     }
 
@@ -125,10 +121,9 @@ impl CollaborationModeIndicator {
         let label = self.label(show_cycle_hint);
         match self {
             CollaborationModeIndicator::Plan => Span::from(label).magenta(),
-            CollaborationModeIndicator::PlanExecuting => Span::from(label).magenta().bold(),
-            CollaborationModeIndicator::AutoPlan => Span::from(label).magenta().bold(),
+            CollaborationModeIndicator::UltraWork => Span::from(label).magenta(),
+            CollaborationModeIndicator::UltraWorkExecuting => Span::from(label).magenta().bold(),
             CollaborationModeIndicator::PairProgramming => Span::from(label).cyan(),
-            CollaborationModeIndicator::Execute => Span::from(label).dim(),
         }
     }
 }

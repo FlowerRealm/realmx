@@ -56,7 +56,6 @@ fn normalized_provider_auth_strategy(
                 | ModelProviderAuthStrategy::OAuthOrApiKey
         )
         || provider.requires_openai_auth
-        || provider.oauth.is_some()
     {
         return ModelProviderAuthStrategy::ApiKey;
     }

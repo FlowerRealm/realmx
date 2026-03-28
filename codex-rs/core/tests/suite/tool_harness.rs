@@ -823,7 +823,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_mode_update_plan_rejects_pending_to_completed() -> anyhow::Result<()> {
+async fn ultra_work_execution_update_plan_rejects_pending_to_completed() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -895,7 +895,7 @@ plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject inva
             summary: None,
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Execute,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: session_configured.model.clone(),
@@ -915,7 +915,7 @@ plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject inva
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_mode_update_plan_allows_current_row_to_start() -> anyhow::Result<()> {
+async fn ultra_work_execution_update_plan_allows_current_row_to_start() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -987,7 +987,7 @@ plan-2,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,reject inva
             summary: None,
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Execute,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: session_configured.model.clone(),

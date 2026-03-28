@@ -58,11 +58,15 @@ pub(crate) fn plan_mask(model_catalog: &ModelCatalog) -> Option<CollaborationMod
     mask_for_kind(model_catalog, ModeKind::Plan)
 }
 
-pub(crate) fn plan_phase_mask(
+pub(crate) fn ultra_work_mask(model_catalog: &ModelCatalog) -> Option<CollaborationModeMask> {
+    mask_for_kind(model_catalog, ModeKind::UltraWork)
+}
+
+pub(crate) fn ultra_work_phase_mask(
     model_catalog: &ModelCatalog,
     plan_phase: PlanModePhase,
 ) -> Option<CollaborationModeMask> {
-    let mut mask = plan_mask(model_catalog)?;
+    let mut mask = ultra_work_mask(model_catalog)?;
     mask.plan_phase = Some(plan_phase);
     Some(mask)
 }

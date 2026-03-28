@@ -191,7 +191,7 @@ fn exec_command_args_resolve_relative_additional_permissions_against_workdir() -
 }
 
 #[tokio::test]
-async fn plan_mode_mutating_exec_requires_scratch_dir() {
+async fn ultra_work_planning_mutating_exec_requires_scratch_dir() {
     let (mut session, _turn_context) = make_session_and_context().await;
     session.enable_feature_for_test(Feature::PlanWorkflow);
     let repo = tempdir().expect("tempdir");
@@ -200,7 +200,7 @@ async fn plan_mode_mutating_exec_requires_scratch_dir() {
     let err = reject_plan_mode_target_repo_mutation(
         &session,
         &CollaborationMode {
-            mode: ModeKind::Plan,
+            mode: ModeKind::UltraWork,
             plan_phase: Some(PlanModePhase::Planning),
             settings: Settings {
                 model: "gpt-5".to_string(),

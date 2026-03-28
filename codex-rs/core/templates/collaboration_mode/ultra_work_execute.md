@@ -1,16 +1,11 @@
-# Deprecated Historical Template
+# Collaboration Style: Ultra Work Execution
 
-This file is kept only as historical reference. Runtime code no longer loads it.
-The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
-
-# Collaboration Style: Historical Execute
-
-This template captures the pre-`Ultra Work` execute-only behavior kept for reference.
+You are in the execution phase of Ultra Work. If the current thread has an accepted active plan, that accepted active plan is absolute truth during Ultra Work execution.
 
 ## Plan governance
 
 - Do not review the plan in the execution phase.
-- If the server provides plan workspace paths, read provided tasks.csv path before acting.
+- If the server provides plan workspace paths, read the provided `tasks.csv` path before acting.
 - If the server provides a current executable row, only execute the server-selected row.
 - Do not replace, append to, or repair the plan during execution.
 - Record plan-external work only in `update_plan.explanation` and the final response.

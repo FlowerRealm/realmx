@@ -114,13 +114,13 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
     workdir: &Path,
     is_mutating: bool,
 ) -> Result<(), FunctionCallError> {
-    if !collaboration_mode.is_plan_output_mode() || !is_mutating {
+    if !collaboration_mode.is_ultra_work_planning_mode() || !is_mutating {
         return Ok(());
     }
 
     if !session.features().enabled(Feature::PlanWorkflow) {
         return Err(FunctionCallError::RespondToModel(
-            "Plan mode only allows non-mutating exploration unless `features.plan_workflow` is enabled."
+            "Ultra Work planning only allows non-mutating exploration unless `features.plan_workflow` is enabled."
                 .to_string(),
         ));
     }
@@ -133,7 +133,7 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
         std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
     if canonical_workdir.starts_with(&target_repo_root) {
         return Err(FunctionCallError::RespondToModel(
-            "Plan mode preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+            "Ultra Work preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
                 .to_string(),
         ));
     }
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_mode_rejects_mutations_inside_target_repo() {
+    async fn ultra_work_planning_rejects_mutations_inside_target_repo() {
         let (mut session, _turn_context) = make_session_and_context().await;
         session.enable_feature_for_test(Feature::PlanWorkflow);
         let repo = tempdir().expect("tempdir");
@@ -405,7 +405,7 @@ mod tests {
         let err = reject_plan_mode_target_repo_mutation(
             &session,
             &CollaborationMode {
-                mode: ModeKind::Plan,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Planning),
                 settings: Settings {
                     model: "gpt-5".to_string(),
@@ -421,12 +421,12 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "Plan mode preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+            "Ultra Work preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
         );
     }
 
     #[tokio::test]
-    async fn plan_mode_allows_mutations_outside_target_repo_when_feature_enabled() {
+    async fn ultra_work_planning_allows_mutations_outside_target_repo_when_feature_enabled() {
         let (mut session, _turn_context) = make_session_and_context().await;
         session.enable_feature_for_test(Feature::PlanWorkflow);
         let repo = tempdir().expect("tempdir");
@@ -436,7 +436,7 @@ mod tests {
         reject_plan_mode_target_repo_mutation(
             &session,
             &CollaborationMode {
-                mode: ModeKind::Plan,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Planning),
                 settings: Settings {
                     model: "gpt-5".to_string(),
@@ -452,14 +452,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_mode_rejects_mutations_when_feature_disabled() {
+    async fn ultra_work_planning_rejects_mutations_when_feature_disabled() {
         let (session, _turn_context) = make_session_and_context().await;
         let outside = tempdir().expect("tempdir");
 
         let err = reject_plan_mode_target_repo_mutation(
             &session,
             &CollaborationMode {
-                mode: ModeKind::Plan,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Planning),
                 settings: Settings {
                     model: "gpt-5".to_string(),
@@ -475,7 +475,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "Plan mode only allows non-mutating exploration unless `features.plan_workflow` is enabled."
+            "Ultra Work planning only allows non-mutating exploration unless `features.plan_workflow` is enabled."
         );
     }
 }

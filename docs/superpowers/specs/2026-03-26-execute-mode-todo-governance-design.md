@@ -1,5 +1,7 @@
 # Execute Mode Todo Governance Design
 
+> Historical note: this design doc predates the `Ultra Work` split. `Auto Plan` and `Execute` are no longer public modes; the current public modes are `Default`, `Plan`, and `Ultra Work`.
+
 ## Summary
 
 Strengthen the plan-to-execution workflow so that:

@@ -2445,28 +2445,28 @@ async fn rate_limit_switch_prompt_popup_snapshot() {
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_snapshot() {
+async fn ultra_work_execution_prompt_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.open_plan_implementation_prompt();
+    chat.open_ultra_work_execution_prompt();
 
     let popup = render_bottom_popup(&chat, 80);
-    assert_snapshot!("plan_implementation_popup", popup);
+    assert_snapshot!("ultra_work_execution_prompt", popup);
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_no_selected_snapshot() {
+async fn ultra_work_execution_prompt_no_selected_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.open_plan_implementation_prompt();
+    chat.open_ultra_work_execution_prompt();
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
 
     let popup = render_bottom_popup(&chat, 80);
-    assert_snapshot!("plan_implementation_popup_no_selected", popup);
+    assert_snapshot!("ultra_work_execution_prompt_no_selected", popup);
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_yes_emits_submit_message_event() {
+async fn ultra_work_execution_prompt_yes_emits_submit_message_event() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.open_plan_implementation_prompt();
+    chat.open_ultra_work_execution_prompt();
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -2478,8 +2478,8 @@ async fn plan_implementation_popup_yes_emits_submit_message_event() {
     else {
         panic!("expected SubmitUserMessageWithMode, got {event:?}");
     };
-    assert_eq!(text, PLAN_IMPLEMENTATION_CODING_MESSAGE);
-    assert_eq!(collaboration_mode.mode, Some(ModeKind::Plan));
+    assert_eq!(text, ULTRA_WORK_EXECUTION_MESSAGE);
+    assert_eq!(collaboration_mode.mode, Some(ModeKind::UltraWork));
     assert_eq!(
         collaboration_mode.plan_phase,
         Some(PlanModePhase::Executing)
@@ -2492,16 +2492,21 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
 
-    let plan_execution_mode =
-        collaboration_modes::plan_phase_mask(chat.model_catalog.as_ref(), PlanModePhase::Executing)
-            .expect("expected plan execution collaboration mode");
-    chat.submit_user_message_with_mode("Implement the plan.".to_string(), plan_execution_mode);
+    let plan_execution_mode = collaboration_modes::ultra_work_phase_mask(
+        chat.model_catalog.as_ref(),
+        PlanModePhase::Executing,
+    )
+    .expect("expected ultra work execution collaboration mode");
+    chat.submit_user_message_with_mode(
+        "Execute the accepted Ultra Work plan.".to_string(),
+        plan_execution_mode,
+    );
 
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
             collaboration_mode:
                 Some(CollaborationMode {
-                    mode: ModeKind::Plan,
+                    mode: ModeKind::UltraWork,
                     plan_phase: Some(PlanModePhase::Executing),
                     ..
                 }),
@@ -2509,19 +2514,19 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
             ..
         } => {}
         other => {
-            panic!("expected Op::UserTurn with plan execution collab mode, got {other:?}")
+            panic!("expected Op::UserTurn with Ultra Work execution collab mode, got {other:?}")
         }
     }
 }
 
 #[tokio::test]
-async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
+async fn reasoning_selection_in_ultra_work_mode_opens_scope_prompt_event() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
-        .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mode");
+    chat.set_collaboration_mask(ultra_work_mask);
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
@@ -2534,7 +2539,7 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
     let event = rx.try_recv().expect("expected AppEvent");
     assert_matches!(
         event,
-        AppEvent::OpenPlanReasoningScopePrompt {
+        AppEvent::OpenUltraWorkReasoningScopePrompt {
             model,
             effort: Some(_)
         } if model == "gpt-5.1-codex-max"
@@ -2542,13 +2547,14 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
 }
 
 #[tokio::test]
-async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_scope_prompt_event() {
+async fn reasoning_selection_in_ultra_work_mode_without_effort_change_does_not_open_scope_prompt_event()
+ {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
-        .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mode");
+    chat.set_collaboration_mask(ultra_work_mask);
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
 
@@ -2576,19 +2582,19 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
 }
 
 #[tokio::test]
-async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_global_opens_scope_prompt()
+async fn reasoning_selection_in_ultra_work_mode_matching_plan_effort_but_different_global_opens_scope_prompt()
  {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
-        .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mode");
+    chat.set_collaboration_mask(ultra_work_mask);
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
 
-    // Reproduce: Plan effective reasoning remains the preset (medium), but the
-    // global default differs (high). Pressing Enter on the current Plan choice
+    // Reproduce: Ultra Work effective reasoning remains the preset (medium), but the
+    // global default differs (high). Pressing Enter on the current Ultra Work choice
     // should open the scope prompt rather than silently rewriting the global default.
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
@@ -2599,7 +2605,7 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
     let event = rx.try_recv().expect("expected AppEvent");
     assert_matches!(
         event,
-        AppEvent::OpenPlanReasoningScopePrompt {
+        AppEvent::OpenUltraWorkReasoningScopePrompt {
             model,
             effort: Some(ReasoningEffortConfig::Medium)
         } if model == "gpt-5.1-codex-max"
@@ -2607,16 +2613,16 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
 }
 
 #[tokio::test]
-async fn plan_mode_reasoning_override_is_marked_current_in_reasoning_popup() {
+async fn ultra_work_reasoning_override_is_marked_current_in_reasoning_popup() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
     set_chatgpt_auth(&mut chat);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
-    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::Low));
+    chat.set_ultra_work_reasoning_effort(Some(ReasoningEffortConfig::Low));
 
-    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
-        .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mode");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);
@@ -2625,18 +2631,18 @@ async fn plan_mode_reasoning_override_is_marked_current_in_reasoning_popup() {
     assert!(popup.contains("Low (current)"));
     assert!(
         !popup.contains("High (current)"),
-        "expected Plan override to drive current reasoning label, got: {popup}"
+        "expected Ultra Work override to drive current reasoning label, got: {popup}"
     );
 }
 
 #[tokio::test]
-async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_prompt_event() {
+async fn reasoning_selection_in_ultra_work_mode_model_switch_does_not_open_scope_prompt_event() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
-        .expect("expected plan collaboration mode");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mode");
+    chat.set_collaboration_mask(ultra_work_mask);
     let _ = drain_insert_history(&mut rx);
     set_chatgpt_auth(&mut chat);
 
@@ -2661,9 +2667,9 @@ async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_promp
 }
 
 #[tokio::test]
-async fn plan_reasoning_scope_popup_all_modes_persists_global_and_plan_override() {
+async fn ultra_work_reasoning_scope_popup_all_modes_persists_global_and_override() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.open_plan_reasoning_scope_prompt(
+    chat.open_ultra_work_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
         Some(ReasoningEffortConfig::High),
     );
@@ -2675,16 +2681,16 @@ async fn plan_reasoning_scope_popup_all_modes_persists_global_and_plan_override(
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdatePlanModeReasoningEffort(Some(ReasoningEffortConfig::High))
+            AppEvent::UpdateUltraWorkReasoningEffort(Some(ReasoningEffortConfig::High))
         )),
-        "expected plan override to be updated; events: {events:?}"
+        "expected Ultra Work override to be updated; events: {events:?}"
     );
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::PersistPlanModeReasoningEffort(Some(ReasoningEffortConfig::High))
+            AppEvent::PersistUltraWorkReasoningEffort(Some(ReasoningEffortConfig::High))
         )),
-        "expected updated plan override to be persisted; events: {events:?}"
+        "expected updated Ultra Work override to be persisted; events: {events:?}"
     );
     assert!(
         events.iter().any(|event| matches!(
@@ -2697,21 +2703,32 @@ async fn plan_reasoning_scope_popup_all_modes_persists_global_and_plan_override(
 }
 
 #[test]
-fn plan_mode_prompt_notification_uses_dedicated_type_name() {
-    let notification = Notification::PlanModePrompt {
-        title: PLAN_IMPLEMENTATION_TITLE.to_string(),
+fn ultra_work_prompt_notification_uses_dedicated_type_name() {
+    let notification = Notification::UltraWorkPrompt {
+        title: ULTRA_WORK_EXECUTION_PROMPT_TITLE.to_string(),
     };
 
-    assert!(notification.allowed_for(&Notifications::Custom(
-        vec!["plan-mode-prompt".to_string(),]
-    )));
+    assert!(notification.allowed_for(&Notifications::Custom(vec![
+        "ultra-work-prompt".to_string(),
+    ])));
     assert!(!notification.allowed_for(&Notifications::Custom(vec![
         "approval-requested".to_string(),
     ])));
     assert_eq!(
         notification.display(),
-        format!("Plan mode prompt: {PLAN_IMPLEMENTATION_TITLE}")
+        format!("Ultra Work prompt: {ULTRA_WORK_EXECUTION_PROMPT_TITLE}")
     );
+}
+
+#[test]
+fn ultra_work_prompt_notification_accepts_legacy_plan_mode_type_name() {
+    let notification = Notification::UltraWorkPrompt {
+        title: ULTRA_WORK_EXECUTION_PROMPT_TITLE.to_string(),
+    };
+
+    assert!(notification.allowed_for(&Notifications::Custom(
+        vec!["plan-mode-prompt".to_string(),]
+    )));
 }
 
 #[test]
@@ -2734,46 +2751,49 @@ fn user_input_requested_notification_uses_dedicated_type_name() {
 }
 
 #[tokio::test]
-async fn open_plan_implementation_prompt_sets_pending_notification() {
+async fn open_ultra_work_execution_prompt_sets_pending_notification() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.config.tui_notifications = Notifications::Custom(vec!["plan-mode-prompt".to_string()]);
+    chat.config.tui_notifications = Notifications::Custom(vec!["ultra-work-prompt".to_string()]);
 
-    chat.open_plan_implementation_prompt();
+    chat.open_ultra_work_execution_prompt();
 
     assert_matches!(
         chat.pending_notification,
-        Some(Notification::PlanModePrompt { ref title }) if title == PLAN_IMPLEMENTATION_TITLE
+        Some(Notification::UltraWorkPrompt { ref title })
+            if title == ULTRA_WORK_EXECUTION_PROMPT_TITLE
     );
 }
 
 #[tokio::test]
-async fn open_plan_reasoning_scope_prompt_sets_pending_notification() {
+async fn open_ultra_work_reasoning_scope_prompt_sets_pending_notification() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.config.tui_notifications = Notifications::Custom(vec!["plan-mode-prompt".to_string()]);
+    chat.config.tui_notifications = Notifications::Custom(vec!["ultra-work-prompt".to_string()]);
 
-    chat.open_plan_reasoning_scope_prompt(
+    chat.open_ultra_work_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
         Some(ReasoningEffortConfig::High),
     );
 
     assert_matches!(
         chat.pending_notification,
-        Some(Notification::PlanModePrompt { ref title }) if title == PLAN_MODE_REASONING_SCOPE_TITLE
+        Some(Notification::UltraWorkPrompt { ref title })
+            if title == ULTRA_WORK_REASONING_SCOPE_TITLE
     );
 }
 
 #[tokio::test]
-async fn agent_turn_complete_does_not_override_pending_plan_mode_prompt_notification() {
+async fn agent_turn_complete_does_not_override_pending_ultra_work_prompt_notification() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
 
-    chat.open_plan_implementation_prompt();
+    chat.open_ultra_work_execution_prompt();
     chat.notify(Notification::AgentTurnComplete {
         response: "done".to_string(),
     });
 
     assert_matches!(
         chat.pending_notification,
-        Some(Notification::PlanModePrompt { ref title }) if title == PLAN_IMPLEMENTATION_TITLE
+        Some(Notification::UltraWorkPrompt { ref title })
+            if title == ULTRA_WORK_EXECUTION_PROMPT_TITLE
     );
 }
 
@@ -2794,8 +2814,8 @@ async fn user_input_notification_overrides_pending_agent_turn_complete_notificat
             is_other: false,
             is_secret: false,
             options: Some(vec![RequestUserInputQuestionOption {
-                label: "Plan only".to_string(),
-                description: "Update only Plan mode.".to_string(),
+                label: "Ultra Work only".to_string(),
+                description: "Update only Ultra Work.".to_string(),
             }]),
         }],
     });
@@ -2824,8 +2844,8 @@ async fn handle_request_user_input_sets_pending_notification() {
             is_other: false,
             is_secret: false,
             options: Some(vec![RequestUserInputQuestionOption {
-                label: "Plan only".to_string(),
-                description: "Update only Plan mode.".to_string(),
+                label: "Ultra Work only".to_string(),
+                description: "Update only Ultra Work.".to_string(),
             }]),
         }],
     });
@@ -2840,38 +2860,38 @@ async fn handle_request_user_input_sets_pending_notification() {
 }
 
 #[tokio::test]
-async fn plan_reasoning_scope_popup_mentions_selected_reasoning() {
+async fn ultra_work_reasoning_scope_popup_mentions_selected_reasoning() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::Low));
-    chat.open_plan_reasoning_scope_prompt(
+    chat.set_ultra_work_reasoning_effort(Some(ReasoningEffortConfig::Low));
+    chat.open_ultra_work_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
         Some(ReasoningEffortConfig::Medium),
     );
 
     let popup = render_bottom_popup(&chat, 100);
     assert!(popup.contains("Choose where to apply medium reasoning."));
-    assert!(popup.contains("Always use medium reasoning in Plan mode."));
-    assert!(popup.contains("Apply to Plan mode override"));
-    assert!(popup.contains("Apply to global default and Plan mode override"));
-    assert!(popup.contains("user-chosen Plan override (low)"));
+    assert!(popup.contains("Always use medium reasoning in Ultra Work."));
+    assert!(popup.contains("Apply to Ultra Work override"));
+    assert!(popup.contains("Apply to global default and Ultra Work override"));
+    assert!(popup.contains("user-chosen Ultra Work override"));
 }
 
 #[tokio::test]
-async fn plan_reasoning_scope_popup_mentions_built_in_plan_default_when_no_override() {
+async fn ultra_work_reasoning_scope_popup_mentions_built_in_default_when_no_override() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.open_plan_reasoning_scope_prompt(
+    chat.open_ultra_work_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
         Some(ReasoningEffortConfig::Medium),
     );
 
     let popup = render_bottom_popup(&chat, 100);
-    assert!(popup.contains("built-in Plan default (medium)"));
+    assert!(popup.contains("built-in Ultra Work default"));
 }
 
 #[tokio::test]
-async fn plan_reasoning_scope_popup_plan_only_does_not_update_all_modes_reasoning() {
+async fn ultra_work_reasoning_scope_popup_only_does_not_update_all_modes_reasoning() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
-    chat.open_plan_reasoning_scope_prompt(
+    chat.open_ultra_work_reasoning_scope_prompt(
         "gpt-5.1-codex-max".to_string(),
         Some(ReasoningEffortConfig::High),
     );
@@ -2882,9 +2902,9 @@ async fn plan_reasoning_scope_popup_plan_only_does_not_update_all_modes_reasonin
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdatePlanModeReasoningEffort(Some(ReasoningEffortConfig::High))
+            AppEvent::UpdateUltraWorkReasoningEffort(Some(ReasoningEffortConfig::High))
         )),
-        "expected plan-only reasoning update; events: {events:?}"
+        "expected Ultra Work-only reasoning update; events: {events:?}"
     );
     assert!(
         events
@@ -2899,16 +2919,16 @@ async fn submit_user_message_with_mode_errors_when_mode_changes_during_running_t
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
     chat.on_task_started();
 
     let default_mode = collaboration_modes::default_mask(chat.model_catalog.as_ref())
         .expect("expected default collaboration mode");
     chat.submit_user_message_with_mode("Implement the plan.".to_string(), default_mode);
 
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::UltraWork);
     assert!(chat.queued_user_messages.is_empty());
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
     let rendered = drain_insert_history(&mut rx)
@@ -2957,9 +2977,9 @@ async fn submit_user_message_with_mode_submits_when_plan_stream_is_not_active() 
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     let default_mode = collaboration_modes::default_mask(chat.model_catalog.as_ref())
         .expect("expected default collaboration mode");
@@ -2983,12 +3003,12 @@ async fn submit_user_message_with_mode_submits_when_plan_stream_is_not_active() 
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_replayed_turn_complete() {
+async fn ultra_work_execution_prompt_skips_replayed_turn_complete() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.replay_initial_messages(vec![EventMsg::TurnComplete(TurnCompleteEvent {
         turn_id: "turn-1".to_string(),
@@ -2997,18 +3017,18 @@ async fn plan_implementation_popup_skips_replayed_turn_complete() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no plan popup for replayed turn, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_complete() {
+async fn ultra_work_execution_prompt_shows_once_when_replay_precedes_live_turn_complete() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.on_task_started();
     chat.on_plan_delta("- Step 1\n- Step 2\n".to_string());
@@ -3020,7 +3040,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
     })]);
     let replay_popup = render_bottom_popup(&chat, 80);
     assert!(
-        !replay_popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !replay_popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no prompt for replayed turn completion, got {replay_popup:?}"
     );
 
@@ -3034,14 +3054,14 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected prompt for first live turn completion after replay, got {popup:?}"
     );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     let dismissed_popup = render_bottom_popup(&chat, 80);
     assert!(
-        !dismissed_popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !dismissed_popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected prompt to dismiss on Esc, got {dismissed_popup:?}"
     );
 
@@ -3054,7 +3074,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
     });
     let duplicate_popup = render_bottom_popup(&chat, 80);
     assert!(
-        !duplicate_popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !duplicate_popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no prompt for duplicate live completion, got {duplicate_popup:?}"
     );
 }
@@ -3080,12 +3100,12 @@ async fn replayed_thread_rollback_emits_ordered_app_event() {
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_when_messages_queued() {
+async fn ultra_work_execution_prompt_skips_when_messages_queued() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
     chat.bottom_pane.set_task_running(true);
     chat.queue_user_message("Queued message".into());
 
@@ -3093,18 +3113,18 @@ async fn plan_implementation_popup_skips_when_messages_queued() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no plan popup with queued messages, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_without_proposed_plan() {
+async fn ultra_work_execution_prompt_skips_without_proposed_plan() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.on_task_started();
     chat.on_plan_update(UpdatePlanArgs {
@@ -3125,18 +3145,18 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no plan popup without proposed plan output, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_shows_after_proposed_plan_output() {
+async fn ultra_work_execution_prompt_shows_after_proposed_plan_output() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.on_task_started();
     chat.on_plan_delta("- Step 1\n- Step 2\n".to_string());
@@ -3145,18 +3165,18 @@ async fn plan_implementation_popup_shows_after_proposed_plan_output() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected plan popup after proposed plan output, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_when_steer_follows_proposed_plan() {
+async fn ultra_work_execution_prompt_skips_when_steer_follows_proposed_plan() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
     chat.thread_id = Some(ThreadId::new());
 
     chat.on_task_started();
@@ -3186,18 +3206,18 @@ async fn plan_implementation_popup_skips_when_steer_follows_proposed_plan() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected no plan popup after a steer follows the plan, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_shows_after_new_plan_follows_steer() {
+async fn ultra_work_execution_prompt_shows_after_new_plan_follows_steer() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
     chat.thread_id = Some(ThreadId::new());
 
     chat.on_task_started();
@@ -3231,19 +3251,19 @@ async fn plan_implementation_popup_shows_after_new_plan_follows_steer() {
 
     let popup = render_bottom_popup(&chat, 80);
     assert!(
-        popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected plan popup after a newer plan follows the steer, got {popup:?}"
     );
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
+async fn ultra_work_execution_prompt_skips_when_rate_limit_prompt_pending() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.has_chatgpt_account = true;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.on_task_started();
     chat.on_plan_update(UpdatePlanArgs {
@@ -3269,7 +3289,7 @@ async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
         "expected rate limit popup, got {popup:?}"
     );
     assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        !popup.contains(ULTRA_WORK_EXECUTION_PROMPT_TITLE),
         "expected plan popup to be skipped, got {popup:?}"
     );
 }
@@ -3919,9 +3939,9 @@ async fn commentary_completion_restores_status_indicator_before_exec_begin() {
 async fn plan_completion_restores_status_indicator_after_streaming_plan_output() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.on_task_started();
     assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
@@ -5461,7 +5481,7 @@ async fn collab_mode_shift_tab_cycles_only_when_idle() {
     assert_eq!(chat.current_collaboration_mode(), &initial);
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Default);
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::UltraWork);
     assert_eq!(chat.current_collaboration_mode(), &initial);
 
     chat.on_task_started();
@@ -5591,9 +5611,11 @@ async fn collab_slash_command_opens_picker_and_updates_mode() {
 async fn plan_slash_command_switches_to_plan_mode() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let execution_mask =
-        collaboration_modes::plan_phase_mask(chat.model_catalog.as_ref(), PlanModePhase::Executing)
-            .expect("expected plan execution collaboration mode");
+    let execution_mask = collaboration_modes::ultra_work_phase_mask(
+        chat.model_catalog.as_ref(),
+        PlanModePhase::Executing,
+    )
+    .expect("expected ultra work execution collaboration mode");
     chat.set_collaboration_mask(execution_mask);
     let _ = drain_insert_history(&mut rx);
 
@@ -5606,10 +5628,7 @@ async fn plan_slash_command_switches_to_plan_mode() {
         );
     }
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
-    assert_eq!(
-        chat.active_plan_phase_for_test(),
-        Some(PlanModePhase::Planning)
-    );
+    assert_eq!(chat.active_plan_phase_for_test(), None);
 }
 
 #[tokio::test]
@@ -5745,23 +5764,23 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
 async fn set_model_updates_active_collaboration_mask() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.set_model("gpt-5.1-codex-mini");
 
     assert_eq!(chat.current_model(), "gpt-5.1-codex-mini");
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::UltraWork);
 }
 
 #[tokio::test]
 async fn set_reasoning_effort_updates_active_collaboration_mask() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.set_reasoning_effort(None);
 
@@ -5769,17 +5788,17 @@ async fn set_reasoning_effort_updates_active_collaboration_mask() {
         chat.current_reasoning_effort(),
         Some(ReasoningEffortConfig::Medium)
     );
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::UltraWork);
 }
 
 #[tokio::test]
 async fn set_reasoning_effort_does_not_override_active_plan_override() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, true);
-    chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::High));
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
+    chat.set_ultra_work_reasoning_effort(Some(ReasoningEffortConfig::High));
+    let ultra_work_mask = collaboration_modes::ultra_work_mask(chat.model_catalog.as_ref())
+        .expect("expected ultra work collaboration mask");
+    chat.set_collaboration_mask(ultra_work_mask);
 
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
 
@@ -5787,7 +5806,7 @@ async fn set_reasoning_effort_does_not_override_active_plan_override() {
         chat.current_reasoning_effort(),
         Some(ReasoningEffortConfig::High)
     );
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::UltraWork);
 }
 
 #[tokio::test]

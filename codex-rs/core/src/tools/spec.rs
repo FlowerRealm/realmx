@@ -353,13 +353,13 @@ impl ToolsConfig {
             });
         let plan_workflow_enabled = features.enabled(Feature::PlanWorkflow);
         let plan_workspace_enabled = plan_workflow_enabled
-            && normalized_collaboration_mode
-                .as_ref()
-                .is_some_and(codex_protocol::config_types::CollaborationMode::is_plan_output_mode)
+            && normalized_collaboration_mode.as_ref().is_some_and(
+                codex_protocol::config_types::CollaborationMode::is_ultra_work_planning_mode,
+            )
             && !matches!(session_source, SessionSource::SubAgent(_));
         let execute_plan_dispatch_enabled = plan_workflow_enabled
             && normalized_collaboration_mode.as_ref().is_some_and(
-                codex_protocol::config_types::CollaborationMode::is_plan_execution_mode,
+                codex_protocol::config_types::CollaborationMode::is_ultra_work_execution_mode,
             )
             && !matches!(session_source, SessionSource::SubAgent(_));
         let include_search_tool = model_info.supports_search_tool;

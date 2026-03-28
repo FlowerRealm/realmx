@@ -159,9 +159,13 @@ pub(crate) async fn handle_update_plan(
     arguments: String,
     call_id: String,
 ) -> Result<String, FunctionCallError> {
-    if turn_context.collaboration_mode.is_plan_output_mode() {
+    if turn_context.collaboration_mode.is_plan_mode()
+        || turn_context
+            .collaboration_mode
+            .is_ultra_work_planning_mode()
+    {
         return Err(FunctionCallError::RespondToModel(
-            "update_plan is a TODO/checklist tool and is not allowed in Plan output modes"
+            "update_plan is a TODO/checklist tool and is not allowed in Plan or Ultra Work planning"
                 .to_string(),
         ));
     }
@@ -189,7 +193,10 @@ async fn try_handle_execute_mode_active_plan_update(
     turn_context: &TurnContext,
     args: &mut UpdatePlanArgs,
 ) -> Result<bool, FunctionCallError> {
-    if !turn_context.collaboration_mode.is_plan_execution_mode() {
+    if !turn_context
+        .collaboration_mode
+        .is_ultra_work_execution_mode()
+    {
         return Ok(false);
     }
     let Some(state_db) = session.state_db() else {
@@ -209,7 +216,7 @@ async fn try_handle_execute_mode_active_plan_update(
 
     if session.enabled(Feature::PlanWorkflow) {
         return Err(FunctionCallError::RespondToModel(
-            "Execute mode active plan rows are managed by execute_active_plan_with_subagents while automatic dispatch is enabled".to_string(),
+            "Ultra Work execution active plan rows are managed by execute_active_plan_with_subagents while automatic dispatch is enabled".to_string(),
         ));
     }
 

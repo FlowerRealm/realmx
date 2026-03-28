@@ -994,7 +994,7 @@ async fn clearing_collaboration_instructions_removes_stale_prompt() -> Result<()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_mode_injects_plan_paths_and_current_row_only() -> Result<()> {
+async fn ultra_work_execution_injects_plan_paths_and_current_row_only() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -1048,7 +1048,7 @@ plan-02,pending,Wire handler,codex-rs/core/src/tools/handlers/plan.rs,gate updat
             ),
             service_tier: None,
             collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Execute,
+                mode: ModeKind::UltraWork,
                 plan_phase: Some(PlanModePhase::Executing),
                 settings: Settings {
                     model: test.session_configured.model.clone(),

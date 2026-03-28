@@ -5,18 +5,12 @@ use codex_protocol::config_types::TUI_VISIBLE_COLLABORATION_MODES;
 use codex_protocol::openai_models::ReasoningEffort;
 
 const COLLABORATION_MODE_PLAN: &str = include_str!("../../templates/collaboration_mode/plan.md");
-const COLLABORATION_MODE_PLAN_LEGACY: &str =
-    include_str!("../../templates/collaboration_mode/plan_legacy.md");
-const COLLABORATION_MODE_AUTO_PLAN: &str =
-    include_str!("../../templates/collaboration_mode/auto_plan.md");
-const COLLABORATION_MODE_AUTO_PLAN_LEGACY: &str =
-    include_str!("../../templates/collaboration_mode/auto_plan_legacy.md");
+const COLLABORATION_MODE_ULTRA_WORK: &str =
+    include_str!("../../templates/collaboration_mode/ultra_work.md");
 const COLLABORATION_MODE_DEFAULT: &str =
     include_str!("../../templates/collaboration_mode/default.md");
-const COLLABORATION_MODE_EXECUTE: &str =
-    include_str!("../../templates/collaboration_mode/execute.md");
-const COLLABORATION_MODE_EXECUTE_LEGACY: &str =
-    include_str!("../../templates/collaboration_mode/execute_legacy.md");
+const COLLABORATION_MODE_ULTRA_WORK_EXECUTE: &str =
+    include_str!("../../templates/collaboration_mode/ultra_work_execute.md");
 const KNOWN_MODE_NAMES_PLACEHOLDER: &str = "{{KNOWN_MODE_NAMES}}";
 const PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER: &str =
     "{{PLAN_PREPARATORY_MUTATIONS_GUIDANCE}}";
@@ -32,7 +26,7 @@ const ASKING_QUESTIONS_GUIDANCE_PLACEHOLDER: &str = "{{ASKING_QUESTIONS_GUIDANCE
 pub struct CollaborationModesConfig {
     /// Enables `request_user_input` availability in Default mode.
     pub default_mode_request_user_input: bool,
-    /// Enables the file-first Plan workflow and its execute-phase runtime.
+    /// Enables the Ultra Work workflow and its execute-phase runtime.
     pub plan_workflow_enabled: bool,
 }
 
@@ -40,42 +34,23 @@ pub fn builtin_collaboration_mode_presets(
     collaboration_modes_config: CollaborationModesConfig,
 ) -> Vec<CollaborationModeMask> {
     vec![
-        plan_preset(collaboration_modes_config),
-        auto_plan_preset(collaboration_modes_config),
         default_preset(collaboration_modes_config),
-        execute_preset(collaboration_modes_config),
+        plan_preset(collaboration_modes_config),
+        ultra_work_preset(collaboration_modes_config),
     ]
 }
 
-fn plan_preset(collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
-    let developer_instructions = if collaboration_modes_config.plan_workflow_enabled {
-        plan_mode_instructions(COLLABORATION_MODE_PLAN)
-    } else {
-        COLLABORATION_MODE_PLAN_LEGACY.to_string()
-    };
+fn plan_preset(_collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
     CollaborationModeMask {
         name: ModeKind::Plan.display_name().to_string(),
         mode: Some(ModeKind::Plan),
-        plan_phase: Some(PlanModePhase::Planning),
+        plan_phase: None,
         model: None,
         reasoning_effort: Some(Some(ReasoningEffort::Medium)),
-        developer_instructions: Some(Some(developer_instructions)),
-    }
-}
-
-fn auto_plan_preset(collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
-    let developer_instructions = if collaboration_modes_config.plan_workflow_enabled {
-        plan_mode_instructions(COLLABORATION_MODE_AUTO_PLAN)
-    } else {
-        COLLABORATION_MODE_AUTO_PLAN_LEGACY.to_string()
-    };
-    CollaborationModeMask {
-        name: ModeKind::AutoPlan.display_name().to_string(),
-        mode: Some(ModeKind::AutoPlan),
-        plan_phase: Some(PlanModePhase::Planning),
-        model: None,
-        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
-        developer_instructions: Some(Some(developer_instructions)),
+        developer_instructions: Some(Some(plan_mode_instructions(
+            COLLABORATION_MODE_PLAN,
+            /*plan_workflow_enabled*/ false,
+        ))),
     }
 }
 
@@ -87,19 +62,6 @@ fn default_preset(collaboration_modes_config: CollaborationModesConfig) -> Colla
         model: None,
         reasoning_effort: None,
         developer_instructions: Some(Some(default_mode_instructions(collaboration_modes_config))),
-    }
-}
-
-fn execute_preset(collaboration_modes_config: CollaborationModesConfig) -> CollaborationModeMask {
-    CollaborationModeMask {
-        name: ModeKind::Execute.display_name().to_string(),
-        mode: Some(ModeKind::Execute),
-        plan_phase: Some(PlanModePhase::Executing),
-        model: None,
-        reasoning_effort: None,
-        developer_instructions: Some(Some(execute_mode_instructions(
-            collaboration_modes_config.plan_workflow_enabled,
-        ))),
     }
 }
 
@@ -124,19 +86,43 @@ fn default_mode_instructions(collaboration_modes_config: CollaborationModesConfi
         )
 }
 
-fn plan_mode_instructions(template: &str) -> String {
-    template.replace(
-        PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER,
-        &plan_preparatory_mutations_guidance(),
-    )
+fn ultra_work_preset(
+    collaboration_modes_config: CollaborationModesConfig,
+) -> CollaborationModeMask {
+    CollaborationModeMask {
+        name: ModeKind::UltraWork.display_name().to_string(),
+        mode: Some(ModeKind::UltraWork),
+        plan_phase: Some(PlanModePhase::Planning),
+        model: None,
+        reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        developer_instructions: Some(Some(ultra_work_mode_instructions(
+            collaboration_modes_config.plan_workflow_enabled,
+        ))),
+    }
 }
 
-fn execute_mode_instructions(plan_workflow_enabled: bool) -> String {
+fn plan_mode_instructions(template: &str, plan_workflow_enabled: bool) -> String {
     if plan_workflow_enabled {
-        COLLABORATION_MODE_EXECUTE.to_string()
+        template.replace(
+            PLAN_PREPARATORY_MUTATIONS_GUIDANCE_PLACEHOLDER,
+            &plan_preparatory_mutations_guidance(),
+        )
     } else {
-        COLLABORATION_MODE_EXECUTE_LEGACY.to_string()
+        template.to_string()
     }
+}
+
+fn ultra_work_mode_instructions(plan_workflow_enabled: bool) -> String {
+    if plan_workflow_enabled {
+        plan_mode_instructions(COLLABORATION_MODE_ULTRA_WORK, true)
+    } else {
+        COLLABORATION_MODE_ULTRA_WORK.to_string()
+    }
+}
+
+pub fn ultra_work_execution_instructions(plan_workflow_enabled: bool) -> String {
+    let _ = plan_workflow_enabled;
+    COLLABORATION_MODE_ULTRA_WORK_EXECUTE.to_string()
 }
 
 fn format_mode_names(modes: &[ModeKind]) -> String {
@@ -174,7 +160,7 @@ fn asking_questions_guidance_message(default_mode_request_user_input: bool) -> S
 }
 
 fn plan_preparatory_mutations_guidance() -> String {
-    "When `features.plan_workflow` is enabled, you may perform **preparatory mutations** that improve the plan without implementing it. These are side-effectful setup actions whose purpose is to gather truth or create a temporary analysis environment outside the target repo. When you need to inspect another code repository, prefer direct `git` access over `web search`. Clone or fetch into a temporary directory or other scratch location outside the current target repo, keep the checkout shallow, and avoid pulling unnecessary history. If the user specifies a branch, prefer `git clone --depth 1 --single-branch --branch <branch>` or the matching shallow `git fetch` for that branch. If the user does not specify a branch, resolve the remote default branch first, then use the same shallow single-branch strategy for that default branch. Use `web search` only after you already have the repository locally and only to supplement documentation or background context, not as the primary source for repository code. Other allowed examples include downloading read-only reference material into a temporary directory and generating temporary artifacts in a scratch workspace that exists only to inspect, build, or analyze. These actions must stay outside the current target repo and must not modify or create implementation files inside the target repo.\n\nEven when preparatory mutations are enabled, you must still not edit tracked files in the current target repo, run codegen/formatters/migrations that rewrite files in the current target repo, or carry out implementation work under the guise of planning. If a side-effectful setup action would write inside the current target repo, do not do it in Plan mode; use a temporary or scratch directory instead.".to_string()
+    "When `features.plan_workflow` is enabled, you may perform **preparatory mutations** that improve the plan without implementing it. These are side-effectful setup actions whose purpose is to gather truth or create a temporary analysis environment outside the target repo. When you need to inspect another code repository, prefer direct `git` access over `web search`. Clone or fetch into a temporary directory or other scratch location outside the current target repo, keep the checkout shallow, and avoid pulling unnecessary history. If the user specifies a branch, prefer `git clone --depth 1 --single-branch --branch <branch>` or the matching shallow `git fetch` for that branch. If the user does not specify a branch, resolve the remote default branch first, then use the same shallow single-branch strategy for that default branch. Use `web search` only after you already have the repository locally and only to supplement documentation or background context, not as the primary source for repository code. Other allowed examples include downloading read-only reference material into a temporary directory and generating temporary artifacts in a scratch workspace that exists only to inspect, build, or analyze. These actions must stay outside the current target repo and must not modify or create implementation files inside the target repo.\n\nEven when preparatory mutations are enabled, you must still not edit tracked files in the current target repo, run codegen/formatters/migrations that rewrite files in the current target repo, or carry out implementation work under the guise of planning. If a side-effectful setup action would write inside the current target repo, do not do it during Ultra Work planning; use a temporary or scratch directory instead.".to_string()
 }
 
 #[cfg(test)]

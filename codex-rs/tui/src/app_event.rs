@@ -300,8 +300,8 @@ pub(crate) enum AppEvent {
         model: ModelPreset,
     },
 
-    /// Open the Plan-mode reasoning scope prompt for the selected model/effort.
-    OpenPlanReasoningScopePrompt {
+    /// Open the Ultra Work reasoning scope prompt for the selected model/effort.
+    OpenUltraWorkReasoningScopePrompt {
         model: String,
         effort: Option<ReasoningEffort>,
     },
@@ -403,8 +403,8 @@ pub(crate) enum AppEvent {
     /// Update whether the rate limit switch prompt has been acknowledged for the session.
     UpdateRateLimitSwitchPromptHidden(bool),
 
-    /// Update the Plan-mode-specific reasoning effort in memory.
-    UpdatePlanModeReasoningEffort(Option<ReasoningEffort>),
+    /// Update the Ultra-Work-specific reasoning effort in memory.
+    UpdateUltraWorkReasoningEffort(Option<ReasoningEffort>),
 
     /// Persist the acknowledgement flag for the full access warning prompt.
     PersistFullAccessWarningAcknowledged,
@@ -416,8 +416,8 @@ pub(crate) enum AppEvent {
     /// Persist the acknowledgement flag for the rate limit switch prompt.
     PersistRateLimitSwitchPromptHidden,
 
-    /// Persist the Plan-mode-specific reasoning effort.
-    PersistPlanModeReasoningEffort(Option<ReasoningEffort>),
+    /// Persist the Ultra-Work-specific reasoning effort.
+    PersistUltraWorkReasoningEffort(Option<ReasoningEffort>),
 
     /// Persist the acknowledgement flag for the model migration prompt.
     PersistModelMigrationPromptAcknowledged {

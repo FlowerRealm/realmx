@@ -591,7 +591,7 @@ pub(crate) fn build_execute_dispatch_guard_instructions(
             .join(", ")
     };
     Ok(format!(
-        "Execute-mode plan workspace: `{}`.\nRead `{}` before acting. Derived plan text lives at `{}`.\nThe accepted active plan is absolute truth in Execute mode.\nWhen active plan dispatch is enabled, use `execute_active_plan_with_subagents` to advance dependency-ready rows automatically instead of manually updating plan rows.\nCurrent dependency-ready rows: {}\nDo not review or modify the plan manually. Record plan-external work only in the final response.",
+        "Ultra Work execution workspace: `{}`.\nRead `{}` before acting. Derived plan text lives at `{}`.\nThe accepted active plan is absolute truth during Ultra Work execution.\nWhen active plan dispatch is enabled, use `execute_active_plan_with_subagents` to advance dependency-ready rows automatically instead of manually updating plan rows.\nCurrent dependency-ready rows: {}\nDo not review or modify the plan manually. Record plan-external work only in the final response.",
         workspace.root().display(),
         tasks_csv.display(),
         tasks_md.display(),

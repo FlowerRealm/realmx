@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/tests.rs
+expression: popup
+---
+  Start Ultra Work execution?
+
+› 1. Yes, start Ultra Work   Enter Ultra Work execution and start coding.
+  2. No, stay in Ultra Work  Continue planning in Ultra Work.
+
+  Press enter to confirm or esc to go back

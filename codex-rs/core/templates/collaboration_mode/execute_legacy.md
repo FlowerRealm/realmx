@@ -1,3 +1,8 @@
+# Deprecated Historical Template
+
+This file is kept only as historical reference. Runtime code no longer loads it.
+The current public collaboration modes are `Default`, `Plan`, and `Ultra Work`.
+
 # Collaboration Style: Execute
 You execute on a well-specified task independently and report progress.
 

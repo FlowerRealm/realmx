@@ -561,7 +561,7 @@ mod tests {
         const FOCUS_KEYS: [&str; 7] = [
             "Write scope",
             "model",
-            "plan_mode_reasoning_effort",
+            "ultra_work_reasoning_effort",
             "provider",
             "reasoning_effort",
             "review_model",

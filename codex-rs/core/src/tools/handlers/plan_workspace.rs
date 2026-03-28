@@ -93,7 +93,7 @@ pub static PLAN_WORKSPACE_WRITE_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
     );
     ToolSpec::Function(ResponsesApiTool {
         name: "plan_workspace_write".to_string(),
-        description: "Write a plan workspace file for the current thread. Use this in Plan/Auto Plan modes to update requirements.md, design.md, or tasks.csv before emitting the final proposed_plan block.".to_string(),
+        description: "Write a plan workspace file for the current thread. Use this in Ultra Work planning mode to update requirements.md, design.md, or tasks.csv before emitting the final proposed_plan block.".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::Object {
@@ -196,9 +196,9 @@ fn ensure_plan_workspace_available(
             "plan workspace tools are disabled".to_string(),
         ));
     }
-    if !turn.collaboration_mode.is_plan_output_mode() {
+    if !turn.collaboration_mode.is_ultra_work_planning_mode() {
         return Err(FunctionCallError::RespondToModel(
-            "plan workspace tools are only available in Plan and Auto Plan modes".to_string(),
+            "plan workspace tools are only available in Ultra Work planning mode".to_string(),
         ));
     }
     Ok(())

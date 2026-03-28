@@ -1257,7 +1257,7 @@
       "description": "Initial collaboration mode to use when the TUI starts.",
       "enum": [
         "plan",
-        "auto_plan",
+        "ultra_work",
         "default"
       ],
       "type": "string"

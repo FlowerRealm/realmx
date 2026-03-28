@@ -27,7 +27,8 @@ fn format_allowed_modes(default_mode_request_user_input: bool) -> String {
         [] => "no modes".to_string(),
         [mode] => format!("{mode} mode"),
         [first, second] => format!("{first} or {second} mode"),
-        [..] => format!("modes: {}", mode_names.join(",")),
+        [first, second, third] => format!("{first}, {second}, or {third} mode"),
+        [..] => format!("modes: {}", mode_names.join(", ")),
     }
 }
 
@@ -35,7 +36,8 @@ fn request_user_input_is_available_for_collaboration_mode(
     collaboration_mode: &CollaborationMode,
     default_mode_request_user_input: bool,
 ) -> bool {
-    collaboration_mode.is_plan_output_mode()
+    collaboration_mode.is_plan_mode()
+        || collaboration_mode.is_ultra_work_planning_mode()
         || (default_mode_request_user_input && collaboration_mode.mode == ModeKind::Default)
 }
 
@@ -45,6 +47,8 @@ pub(crate) fn request_user_input_unavailable_message(
 ) -> Option<String> {
     if request_user_input_is_available(mode, default_mode_request_user_input) {
         None
+    } else if mode == ModeKind::Execute {
+        Some("request_user_input is unavailable in Ultra Work execution phase".to_string())
     } else {
         let mode_name = mode.display_name();
         Some(format!(
@@ -62,8 +66,8 @@ pub(crate) fn request_user_input_unavailable_message_for_collaboration_mode(
         default_mode_request_user_input,
     ) {
         None
-    } else if collaboration_mode.is_plan_execution_mode() {
-        Some("request_user_input is unavailable in Plan execution phase".to_string())
+    } else if collaboration_mode.is_ultra_work_execution_mode() {
+        Some("request_user_input is unavailable in Ultra Work execution phase".to_string())
     } else {
         request_user_input_unavailable_message(
             collaboration_mode.mode,
