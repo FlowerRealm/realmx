@@ -5506,7 +5506,10 @@ impl ChatWidget {
                     codex_protocol::protocol::SkillInvocationType::Implicit => "implicit",
                 };
                 let name = notification.name;
-                self.add_info_message(format!("Using skill ({invocation_type}): {name}"), None);
+                self.add_info_message(
+                    format!("Using skill ({invocation_type}): {name}"),
+                    /*hint*/ None,
+                );
             }
             EventMsg::GuardianAssessment(ev) => self.on_guardian_assessment(ev),
             EventMsg::ModelReroute(_) => {}
