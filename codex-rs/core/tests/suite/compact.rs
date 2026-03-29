@@ -3111,14 +3111,17 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
             .any(|text| text == "USER_THREE"),
         "current behavior excludes incoming user message from pre-turn compaction input"
     );
-    let follow_up_body = requests[3].body_json().to_string();
+    let follow_up_user_texts = requests[3].message_input_texts("user");
     assert!(
-        !follow_up_body.contains("USER_THREE"),
-        "runtime currently keeps the incoming user input out of the immediate post-compaction follow-up request"
+        follow_up_user_texts.iter().any(|text| text == "USER_THREE"),
+        "expected post-compaction follow-up request to keep incoming user text"
     );
+    let follow_up_user_images = requests[3].message_input_image_urls("user");
     assert!(
-        !follow_up_body.contains(&image_url),
-        "runtime currently keeps the incoming user image out of the immediate post-compaction follow-up request"
+        follow_up_user_images
+            .iter()
+            .any(|url| url == image_url.as_str()),
+        "expected post-compaction follow-up request to keep incoming user image content"
     );
 }
 

@@ -35,6 +35,7 @@ use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use wiremock::ResponseTemplate;
 fn approx_token_count(text: &str) -> i64 {
     i64::try_from(text.len().saturating_add(3) / 4).unwrap_or(i64::MAX)
 }
@@ -2067,7 +2068,6 @@ async fn snapshot_request_shape_remote_compact_resume_restates_realtime_end() ->
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-// TODO(ccunningham): Update once remote pre-turn compaction includes incoming user input.
 async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_user_message()
 -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -2082,28 +2082,22 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
     .await?;
     let codex = harness.test().codex.clone();
 
-    let _first_turn_request_mock = responses::mount_sse_once(
+    let responses_mock = responses::mount_sse_sequence(
         harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
-            responses::ev_completed_with_tokens("r1", 60),
-        ]),
-    )
-    .await;
-    let _second_turn_request_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m2", "REMOTE_SECOND_REPLY"),
-            responses::ev_completed_with_tokens("r2", 500),
-        ]),
-    )
-    .await;
-    let post_compact_turn_request_mock = responses::mount_sse_once(
-        harness.server(),
-        responses::sse(vec![
-            responses::ev_assistant_message("m3", "REMOTE_FINAL_REPLY"),
-            responses::ev_completed_with_tokens("r3", 80),
-        ]),
+        vec![
+            responses::sse(vec![
+                responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
+                responses::ev_completed_with_tokens("r1", 60),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("m2", "REMOTE_SECOND_REPLY"),
+                responses::ev_completed_with_tokens("r2", 500),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("m3", "REMOTE_FINAL_REPLY"),
+                responses::ev_completed_with_tokens("r3", 80),
+            ]),
+        ],
     )
     .await;
 
@@ -2144,23 +2138,33 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
     }
 
     assert_eq!(compact_mock.requests().len(), 1);
-    let compact_request = compact_mock.single_request();
-    let compact_body = compact_request.body_json().to_string();
-    assert!(
-        !compact_body.contains("USER_THREE"),
-        "remote pre-turn compaction should exclude the incoming user message"
+    let requests = responses_mock.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected user, user, and post-compact turn"
     );
-    if let Some(post_compact_request) = post_compact_turn_request_mock.last_request() {
-        assert_eq!(
-            post_compact_request
-                .message_input_texts("user")
-                .iter()
-                .filter(|text| text.as_str() == "USER_THREE")
-                .count(),
-            0,
-            "runtime currently keeps the incoming user out of the immediate post-compaction follow-up request"
-        );
-    }
+
+    let compact_request = compact_mock.single_request();
+    insta::assert_snapshot!(
+        "remote_pre_turn_compaction_including_incoming_shapes",
+        format_labeled_requests_snapshot(
+            "Remote pre-turn auto-compaction with a context override emits the context diff in the compact request while excluding the incoming user message.",
+            &[
+                ("Remote Compaction Request", &compact_request),
+                ("Remote Post-Compaction History Layout", &requests[2]),
+            ]
+        )
+    );
+    assert_eq!(
+        requests[2]
+            .message_input_texts("user")
+            .iter()
+            .filter(|text| text.as_str() == "USER_THREE")
+            .count(),
+        1,
+        "post-compaction request should contain incoming user exactly once from runtime append"
+    );
 
     Ok(())
 }
@@ -2297,8 +2301,6 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-// TODO(ccunningham): Update once remote pre-turn compaction context-overflow handling includes
-// incoming user input and emits richer oversized-input messaging.
 async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceeded() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -2312,20 +2314,23 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
     .await?;
     let codex = harness.test().codex.clone();
 
-    let first_turn_mock = mount_sse_once(
+    let responses_mock = responses::mount_sse_sequence(
         harness.server(),
-        responses::sse(vec![
+        vec![responses::sse(vec![
             responses::ev_assistant_message("m1", "REMOTE_FIRST_REPLY"),
             responses::ev_completed_with_tokens("r1", 500),
-        ]),
+        ])],
     )
     .await;
 
-    let compact_mock = responses::mount_compact_json_once(
+    let compact_mock = responses::mount_compact_response_once(
         harness.server(),
-        serde_json::json!({
-            "output": compacted_summary_only_output("REMOTE_PRETURN_CONTEXT_WINDOW_SUMMARY")
-        }),
+        ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {
+                "code": "context_length_exceeded",
+                "message": "Your input exceeds the context window of this model. Please adjust your input and try again."
+            }
+        })),
     )
     .await;
     let post_compact_turn_mock = responses::mount_sse_once(
@@ -2336,6 +2341,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
         ]),
     )
     .await;
+
     codex
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
@@ -2363,29 +2369,32 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
     .await;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    assert!(
-        first_turn_mock.requests().len() <= 1,
-        "expected at most one initial request before pre-turn compaction"
-    );
     assert_eq!(compact_mock.requests().len(), 1);
+    let requests = responses_mock.requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected no post-compaction follow-up turn request after compact failure"
+    );
     assert!(
-        post_compact_turn_mock.requests().len() <= 1,
-        "pre-turn compaction path should not produce more than one speculative follow-up turn request"
+        post_compact_turn_mock.requests().is_empty(),
+        "expected turn to stop after compaction failure"
     );
 
     let include_attempt_request = compact_mock.single_request();
-    let include_attempt_body = include_attempt_request.body_json().to_string();
-    assert!(
-        !include_attempt_body.contains("USER_TWO"),
-        "failing remote pre-turn compaction should exclude the incoming user message"
+    insta::assert_snapshot!(
+        "remote_pre_turn_compaction_context_window_exceeded_shapes",
+        format_labeled_requests_snapshot(
+            "Remote pre-turn auto-compaction context-window failure: compaction request excludes the incoming user message and the turn errors.",
+            &[(
+                "Remote Compaction Request (Incoming User Excluded)",
+                &include_attempt_request
+            ),]
+        )
     );
     assert!(
-        error_message.to_lowercase().contains("remote compact task")
-            || error_message
-                .to_lowercase()
-                .contains("unexpected status 404")
-            || error_message.to_lowercase().contains("context window"),
-        "expected a surfaced remote compaction failure, got {error_message}"
+        error_message.to_lowercase().contains("context window"),
+        "expected context window failure to surface, got {error_message}"
     );
 
     Ok(())
@@ -2518,29 +2527,27 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
         1,
         "expected initial turn request"
     );
-    assert!(
-        post_compact_turn_request_mock.requests().len() <= 1,
-        "expected at most one post-compaction request"
+    assert_eq!(
+        post_compact_turn_request_mock.requests().len(),
+        1,
+        "expected post-compaction request"
     );
 
-    let _compact_request = compact_mock.single_request();
-    if let Some(post_compact_turn_request) = post_compact_turn_request_mock.last_request() {
-        let post_compact_body = post_compact_turn_request.body_json().to_string();
-        assert!(
-            post_compact_body.contains("REMOTE_SUMMARY_ONLY"),
-            "summary-only compaction output should be reinjected into the continuation request"
-        );
-        assert!(
-            post_compact_body.contains("USER_ONE"),
-            "continuation should preserve prior user context before the compaction item"
-        );
-    } else {
-        assert_eq!(
-            initial_turn_request_mock.requests().len(),
-            1,
-            "initial turn request should still be captured when no continuation request is emitted"
-        );
-    }
+    let compact_request = compact_mock.single_request();
+    let post_compact_turn_request = post_compact_turn_request_mock.single_request();
+    insta::assert_snapshot!(
+        "remote_mid_turn_compaction_summary_only_reinjects_context_shapes",
+        format_labeled_requests_snapshot(
+            "Remote mid-turn compaction where compact output has only a compaction item: continuation layout reinjects context before that compaction item.",
+            &[
+                ("Remote Compaction Request", &compact_request),
+                (
+                    "Remote Post-Compaction History Layout",
+                    &post_compact_turn_request
+                ),
+            ]
+        )
+    );
 
     Ok(())
 }

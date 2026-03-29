@@ -24,6 +24,7 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
+use wiremock::matchers::query_param;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -656,6 +657,7 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
     )?;
     write_openai_curated_marketplace(codex_home.path(), &["linear", "gmail", "calendar"])?;
     write_installed_plugin(&codex_home, "openai-curated", "linear")?;
+    write_installed_plugin(&codex_home, "openai-curated", "gmail")?;
     write_installed_plugin(&codex_home, "openai-curated", "calendar")?;
 
     Mock::given(method("GET"))
@@ -668,6 +670,17 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
   {"id":"2","name":"gmail","marketplace_name":"openai-curated","version":"1.0.0","enabled":false}
 ]"#,
         ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/backend-api/plugins/featured"))
+        .and(query_param("platform", "codex"))
+        .and(header("authorization", "Bearer chatgpt-token"))
+        .and(header("chatgpt-account-id", "account-123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(r#"["linear@openai-curated","calendar@openai-curated"]"#),
+        )
         .mount(&server)
         .await;
 
@@ -688,6 +701,13 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
     .await??;
     let response: PluginListResponse = to_response(response)?;
     assert_eq!(response.remote_sync_error, None);
+    assert_eq!(
+        response.featured_plugin_ids,
+        vec![
+            "linear@openai-curated".to_string(),
+            "calendar@openai-curated".to_string(),
+        ]
+    );
 
     let curated_marketplace = response
         .marketplaces
@@ -709,7 +729,7 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
 
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(config.contains(r#"[plugins."linear@openai-curated"]"#));
-    assert!(config.contains(r#"[plugins."gmail@openai-curated"]"#));
+    assert!(!config.contains(r#"[plugins."gmail@openai-curated"]"#));
     assert!(!config.contains(r#"[plugins."calendar@openai-curated"]"#));
 
     assert!(
@@ -719,12 +739,10 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
             .is_dir()
     );
     assert!(
-        codex_home
+        !codex_home
             .path()
-            .join(format!(
-                "plugins/cache/openai-curated/gmail/{TEST_CURATED_PLUGIN_SHA}"
-            ))
-            .is_dir()
+            .join("plugins/cache/openai-curated/gmail")
+            .exists()
     );
     assert!(
         !codex_home

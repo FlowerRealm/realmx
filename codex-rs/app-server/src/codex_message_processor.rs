@@ -4556,10 +4556,12 @@ impl CodexMessageProcessor {
             }
             thread
         };
-        if thread.preview.is_empty()
+        if (thread.preview.is_empty() || thread.turns.is_empty())
             && let Ok(history_items) = read_rollout_items_from_rollout(rollout_path.as_path()).await
         {
-            thread.preview = preview_from_rollout_items(&history_items);
+            if thread.preview.is_empty() {
+                thread.preview = preview_from_rollout_items(&history_items);
+            }
             if thread.turns.is_empty()
                 && let Err(message) = populate_thread_turns(
                     &mut thread,

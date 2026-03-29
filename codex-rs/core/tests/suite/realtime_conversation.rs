@@ -339,7 +339,7 @@ async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> 
 
     assert_eq!(
         server.handshakes()[1].header("authorization").as_deref(),
-        Some("Bearer Access Token")
+        Some("Bearer env-realtime-key")
     );
 
     test.codex.submit(Op::RealtimeConversationClose).await?;
