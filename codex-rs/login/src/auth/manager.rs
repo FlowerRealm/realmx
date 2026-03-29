@@ -1054,28 +1054,32 @@ struct CachedAuth {
 #[derive(Clone)]
 struct AuthScopedRefreshFailure {
     scope: AuthScope,
-    auth: CodexAuth,
+    auth_dot_json: AuthDotJson,
     error: RefreshTokenFailedError,
+}
+
+fn auth_dot_json_for_refresh(auth: &CodexAuth) -> AuthDotJson {
+    match auth {
+        CodexAuth::ApiKey(api_key) => AuthDotJson {
+            auth_mode: Some(ApiAuthMode::ApiKey),
+            api_key: Some(api_key.api_key.clone()),
+            tokens: None,
+            last_refresh: None,
+        },
+        CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_) => {
+            auth.get_current_auth_json().unwrap_or_else(|| AuthDotJson {
+                auth_mode: Some(auth.api_auth_mode()),
+                api_key: None,
+                tokens: None,
+                last_refresh: None,
+            })
+        }
+    }
 }
 
 impl CachedAuth {
     fn from_test_auth(auth: CodexAuth) -> Self {
-        let auth_dot_json = match &auth {
-            CodexAuth::ApiKey(api_key) => AuthDotJson {
-                auth_mode: Some(ApiAuthMode::ApiKey),
-                api_key: Some(api_key.api_key.clone()),
-                tokens: None,
-                last_refresh: None,
-            },
-            CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_) => {
-                auth.get_current_auth_json().unwrap_or_else(|| AuthDotJson {
-                    auth_mode: Some(auth.api_auth_mode()),
-                    api_key: None,
-                    tokens: None,
-                    last_refresh: None,
-                })
-            }
-        };
+        let auth_dot_json = auth_dot_json_for_refresh(&auth);
 
         let mut cached = Self::default();
         match auth.api_auth_mode() {
@@ -1114,6 +1118,7 @@ impl Debug for CachedAuth {
 #[derive(Clone)]
 struct ScopedAuthSelection {
     auth: CodexAuth,
+    auth_dot_json: AuthDotJson,
     scope: AuthScope,
 }
 
@@ -1395,11 +1400,12 @@ impl AuthManager {
     }
 
     pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenFailedError> {
+        let auth_dot_json = auth_dot_json_for_refresh(auth);
         self.inner.read().ok().and_then(|cached| {
             cached
                 .permanent_refresh_failure
                 .as_ref()
-                .filter(|failure| Self::auths_equal_for_refresh(Some(auth), Some(&failure.auth)))
+                .filter(|failure| failure.auth_dot_json == auth_dot_json)
                 .map(|failure| failure.error.clone())
         })
     }
@@ -1480,10 +1486,8 @@ impl AuthManager {
 
         tracing::info!("Reloading auth for account {expected_account_id}");
         let cached_before_reload = self.select_cached_auth(scope);
-        let auth_changed = !Self::auths_equal_for_refresh(
-            cached_before_reload.as_ref().map(|auth| &auth.auth),
-            new_auth.as_ref().map(|auth| &auth.auth),
-        );
+        let auth_changed =
+            !Self::auths_equal_for_refresh(cached_before_reload.as_ref(), new_auth.as_ref());
         self.set_cached_stores(new_managed_store, new_ephemeral_store);
         if auth_changed {
             ReloadOutcome::ReloadedChanged
@@ -1492,17 +1496,13 @@ impl AuthManager {
         }
     }
 
-    fn auths_equal_for_refresh(a: Option<&CodexAuth>, b: Option<&CodexAuth>) -> bool {
+    fn auths_equal_for_refresh(
+        a: Option<&ScopedAuthSelection>,
+        b: Option<&ScopedAuthSelection>,
+    ) -> bool {
         match (a, b) {
             (None, None) => true,
-            (Some(a), Some(b)) => match (a.api_auth_mode(), b.api_auth_mode()) {
-                (ApiAuthMode::ApiKey, ApiAuthMode::ApiKey) => a.api_key() == b.api_key(),
-                (ApiAuthMode::Chatgpt, ApiAuthMode::Chatgpt)
-                | (ApiAuthMode::ChatgptAuthTokens, ApiAuthMode::ChatgptAuthTokens) => {
-                    a.get_current_auth_json() == b.get_current_auth_json()
-                }
-                _ => false,
-            },
+            (Some(a), Some(b)) => a.scope == b.scope && a.auth_dot_json == b.auth_dot_json,
             _ => false,
         }
     }
@@ -1511,19 +1511,16 @@ impl AuthManager {
     /// attempted against an auth snapshot that is still cached.
     fn record_permanent_refresh_failure_if_unchanged(
         &self,
-        attempted_scope: &AuthScope,
-        attempted_auth: &CodexAuth,
+        attempted_selection: &ScopedAuthSelection,
         error: &RefreshTokenFailedError,
     ) {
-        let cached_auth = self
-            .select_cached_auth(attempted_scope)
-            .map(|selection| selection.auth);
-        if Self::auths_equal_for_refresh(Some(attempted_auth), cached_auth.as_ref())
+        let cached_auth = self.select_cached_auth(&attempted_selection.scope);
+        if Self::auths_equal_for_refresh(Some(attempted_selection), cached_auth.as_ref())
             && let Ok(mut guard) = self.inner.write()
         {
             guard.permanent_refresh_failure = Some(AuthScopedRefreshFailure {
-                scope: attempted_scope.clone(),
-                auth: attempted_auth.clone(),
+                scope: attempted_selection.scope.clone(),
+                auth_dot_json: attempted_selection.auth_dot_json.clone(),
                 error: error.clone(),
             });
         }
@@ -1545,8 +1542,15 @@ impl AuthManager {
             && let Some(api_key) = read_codex_api_key_from_env()
         {
             let client = crate::default_client::create_client();
+            let auth = CodexAuth::from_api_key_with_client(api_key.as_str(), client);
             return Some(ScopedAuthSelection {
-                auth: CodexAuth::from_api_key_with_client(api_key.as_str(), client),
+                auth,
+                auth_dot_json: AuthDotJson {
+                    auth_mode: Some(ApiAuthMode::ApiKey),
+                    api_key: Some(api_key),
+                    tokens: None,
+                    last_refresh: None,
+                },
                 scope: AuthScope::Default,
             });
         }
@@ -1558,11 +1562,16 @@ impl AuthManager {
             self.auth_credentials_store_mode,
         )?;
         let client = crate::default_client::create_client();
-        let auth =
-            CodexAuth::from_auth_dot_json(&self.codex_home, auth_dot_json, storage_mode, client)
-                .ok()?;
+        let auth = CodexAuth::from_auth_dot_json(
+            &self.codex_home,
+            auth_dot_json.clone(),
+            storage_mode,
+            client,
+        )
+        .ok()?;
         Some(ScopedAuthSelection {
             auth,
+            auth_dot_json,
             scope: resolved_scope,
         })
     }
@@ -1597,8 +1606,8 @@ impl AuthManager {
                             guard.ephemeral_store.as_ref(),
                             guard.managed_store.as_ref(),
                         )
-                        .map(|selection| selection.auth);
-                    !Self::auths_equal_for_refresh(Some(&failure.auth), cached_auth.as_ref())
+                        .map(|selection| (selection.scope, selection.auth_dot_json));
+                    cached_auth != Some((failure.scope.clone(), failure.auth_dot_json.clone()))
                 });
             if clear_permanent_refresh_failure {
                 guard.permanent_refresh_failure = None;
@@ -1761,11 +1770,10 @@ impl AuthManager {
             Some(auth) => auth,
             None => return Ok(()),
         };
-        let attempted_auth = selection.auth.clone();
-        if let Some(error) = self.refresh_failure_for_auth(&attempted_auth) {
+        if let Some(error) = self.refresh_failure_for_auth(&selection.auth) {
             return Err(RefreshTokenError::Permanent(error));
         }
-        let result = match selection.auth {
+        let result = match &selection.auth {
             CodexAuth::ChatgptAuthTokens(_) => {
                 self.refresh_external_auth_for_scope(scope, ExternalAuthRefreshReason::Unauthorized)
                     .await
@@ -1778,7 +1786,7 @@ impl AuthManager {
                 })?;
                 self.refresh_and_persist_chatgpt_token(
                     &selection.scope,
-                    &chatgpt_auth,
+                    chatgpt_auth,
                     token_data.refresh_token,
                 )
                 .await?;
@@ -1787,11 +1795,7 @@ impl AuthManager {
             CodexAuth::ApiKey(_) => Ok(()),
         };
         if let Err(RefreshTokenError::Permanent(error)) = &result {
-            self.record_permanent_refresh_failure_if_unchanged(
-                &selection.scope,
-                &attempted_auth,
-                error,
-            );
+            self.record_permanent_refresh_failure_if_unchanged(&selection, error);
         }
         result
     }

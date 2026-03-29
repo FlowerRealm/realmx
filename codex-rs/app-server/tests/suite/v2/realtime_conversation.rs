@@ -476,6 +476,7 @@ type = "conversational"
 name = "Mock provider for test"
 base_url = "{responses_server_uri}/v1"
 wire_api = "responses"
+auth_strategy = "api_key"
 request_max_retries = 0
 stream_max_retries = 0
 "#

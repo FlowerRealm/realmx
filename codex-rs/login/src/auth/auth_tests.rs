@@ -239,7 +239,10 @@ fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
         RefreshTokenFailedReason::Exhausted,
         "refresh token already used",
     );
-    manager.record_permanent_refresh_failure_if_unchanged(&AuthScope::Default, &auth, &error);
+    let selection = manager
+        .select_cached_auth(&AuthScope::Default)
+        .expect("cached auth should exist");
+    manager.record_permanent_refresh_failure_if_unchanged(&selection, &error);
 
     assert_eq!(manager.refresh_failure_for_auth(&auth), Some(error));
     assert_eq!(manager.refresh_failure_for_auth(&updated_auth), None);
