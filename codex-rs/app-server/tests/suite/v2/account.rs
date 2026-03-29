@@ -59,6 +59,11 @@ struct CreateConfigTomlParams {
 fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
     let provider_id = params.provider_id.unwrap_or_else(|| "openai".to_string());
+    let provider_name = if provider_id == "openai" {
+        "OpenAI"
+    } else {
+        "Mock provider for test"
+    };
     let base_url = params
         .base_url
         .unwrap_or_else(|| "http://127.0.0.1:0/v1".to_string());
@@ -89,20 +94,17 @@ fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std:
     } else {
         String::new()
     };
-    let provider_block = if provider_id == "openai" {
-        String::new()
-    } else {
-        format!(
-            r#"
+    let provider_block = format!(
+        r#"
 [model_providers.{provider_id}]
-name = "Mock provider for test"
+name = "{provider_name}"
 base_url = "{base_url}"
 wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
+supports_websockets = false
 {auth_strategy_line}{requires_line}{oauth_line}"#
-        )
-    };
+    );
     let contents = format!(
         r#"
 model = "mock-model"

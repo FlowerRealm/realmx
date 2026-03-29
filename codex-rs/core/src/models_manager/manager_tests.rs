@@ -279,8 +279,7 @@ async fn refresh_available_models_sorts_by_priority() {
     let codex_home = tempdir().expect("temp dir");
     let auth_manager =
         AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
-    let mut provider = provider_for(server.uri());
-    provider.requires_openai_auth = true;
+    let provider = provider_for(server.uri());
     let manager = ModelsManager::with_provider_for_tests(
         codex_home.path().to_path_buf(),
         auth_manager,
@@ -569,7 +568,8 @@ async fn refresh_available_models_skips_network_without_chatgpt_auth() {
         false,
         AuthCredentialsStoreMode::File,
     ));
-    let provider = provider_for(server.uri());
+    let mut provider = provider_for(server.uri());
+    provider.requires_openai_auth = true;
     let manager = ModelsManager::with_provider_for_tests(
         codex_home.path().to_path_buf(),
         auth_manager,

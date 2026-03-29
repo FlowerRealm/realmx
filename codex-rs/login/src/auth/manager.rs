@@ -1053,6 +1053,7 @@ struct CachedAuth {
 
 #[derive(Clone)]
 struct AuthScopedRefreshFailure {
+    scope: AuthScope,
     auth: CodexAuth,
     error: RefreshTokenFailedError,
 }
@@ -1521,6 +1522,7 @@ impl AuthManager {
             && let Ok(mut guard) = self.inner.write()
         {
             guard.permanent_refresh_failure = Some(AuthScopedRefreshFailure {
+                scope: attempted_scope.clone(),
                 auth: attempted_auth.clone(),
                 error: error.clone(),
             });
@@ -1585,7 +1587,20 @@ impl AuthManager {
             tracing::info!("Reloaded auth, changed: {changed}");
             guard.managed_store = new_managed_store;
             guard.ephemeral_store = new_ephemeral_store;
-            if changed {
+            let clear_permanent_refresh_failure = guard
+                .permanent_refresh_failure
+                .as_ref()
+                .is_some_and(|failure| {
+                    let cached_auth = self
+                        .select_auth_from_stores(
+                            &failure.scope,
+                            guard.ephemeral_store.as_ref(),
+                            guard.managed_store.as_ref(),
+                        )
+                        .map(|selection| selection.auth);
+                    !Self::auths_equal_for_refresh(Some(&failure.auth), cached_auth.as_ref())
+                });
+            if clear_permanent_refresh_failure {
                 guard.permanent_refresh_failure = None;
             }
             changed
@@ -1747,6 +1762,9 @@ impl AuthManager {
             None => return Ok(()),
         };
         let attempted_auth = selection.auth.clone();
+        if let Some(error) = self.refresh_failure_for_auth(&attempted_auth) {
+            return Err(RefreshTokenError::Permanent(error));
+        }
         let result = match selection.auth {
             CodexAuth::ChatgptAuthTokens(_) => {
                 self.refresh_external_auth_for_scope(scope, ExternalAuthRefreshReason::Unauthorized)

@@ -8,4 +8,5 @@ Scenario: Pre-turn auto-compaction context-window failure: compaction request ex
 00:message/developer:<PERMISSIONS_INSTRUCTIONS>
 01:message/user:<ENVIRONMENT_CONTEXT:cwd=<CWD>>
 02:message/user:USER_ONE
-03:message/user:<COMPACTION_SUMMARY>\nFIRST_REPLY
+03:message/assistant:FIRST_REPLY
+04:message/user:<SUMMARIZATION_PROMPT>

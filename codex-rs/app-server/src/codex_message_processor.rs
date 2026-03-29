@@ -468,6 +468,16 @@ impl CodexMessageProcessor {
         self.thread_manager.skills_manager().clear_cache();
     }
 
+    pub(crate) async fn sync_models_manager_provider_from_config(&self, config: &Config) {
+        self.thread_manager
+            .get_models_manager()
+            .replace_provider(
+                config.model_provider_id.clone(),
+                config.model_provider.clone(),
+            )
+            .await;
+    }
+
     pub(crate) async fn maybe_start_plugin_startup_tasks_for_latest_config(&self) {
         match self.load_latest_config(/*fallback_cwd*/ None).await {
             Ok(config) => self
@@ -4575,7 +4585,8 @@ impl CodexMessageProcessor {
             }
         }
 
-        if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
+        if thread.turns.is_empty()
+            && let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
             && let Err(message) = populate_thread_turns(
                 &mut thread,
                 ThreadTurnSource::RolloutPath(fork_rollout_path.as_path()),

@@ -856,16 +856,8 @@ impl MessageProcessor {
         request_id: ConnectionRequestId,
         params: ConfigValueWriteParams,
     ) {
-        match self.config_api.write_value(params).await {
-            Ok(response) => {
-                self.codex_message_processor.clear_plugin_related_caches();
-                self.codex_message_processor
-                    .maybe_start_plugin_startup_tasks_for_latest_config()
-                    .await;
-                self.outgoing.send_response(request_id, response).await;
-            }
-            Err(error) => self.outgoing.send_error(request_id, error).await,
-        }
+        self.handle_config_mutation_result(request_id, self.config_api.write_value(params).await)
+            .await;
     }
 
     async fn handle_config_batch_write(
@@ -973,6 +965,23 @@ impl MessageProcessor {
         match result {
             Ok(response) => {
                 self.codex_message_processor.clear_plugin_related_caches();
+                match self
+                    .config_api
+                    .load_latest_config(/*fallback_cwd*/ None)
+                    .await
+                {
+                    Ok(config) => {
+                        self.codex_message_processor
+                            .sync_models_manager_provider_from_config(&config)
+                            .await;
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            "failed to refresh models manager provider after config mutation: {}",
+                            err.message
+                        );
+                    }
+                }
                 self.codex_message_processor
                     .maybe_start_plugin_startup_tasks_for_latest_config()
                     .await;
