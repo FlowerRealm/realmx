@@ -10,24 +10,27 @@
 
 use std::path::PathBuf;
 
-use crate::bottom_pane::ApprovalRequest;
-use crate::bottom_pane::StatusLineItem;
-use crate::history_cell::HistoryCell;
-use crate::provider_usage::ProviderUsageRefreshResult;
+use codex_app_server_protocol::PluginInstallResponse;
+use codex_app_server_protocol::PluginListResponse;
+use codex_app_server_protocol::PluginReadParams;
+use codex_app_server_protocol::PluginReadResponse;
+use codex_app_server_protocol::PluginUninstallResponse;
 use codex_chatgpt::connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::RateLimitSnapshot;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::ApprovalPreset;
 
-use crate::settings::data::SettingsScope;
-use crate::settings::data::SettingsScreen;
+use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::StatusLineItem;
+use crate::bottom_pane::TerminalTitleItem;
+use crate::history_cell::HistoryCell;
 
-use codex_core::ModelProviderInfo;
 use codex_core::config::types::ApprovalsReviewer;
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ServiceTier;
@@ -68,13 +71,6 @@ pub(crate) enum WindowsSandboxEnableMode {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
-}
-
-#[derive(Debug)]
-pub(crate) enum ProviderApiKeyInput {
-    KeepExisting,
-    Set(String),
-    Clear,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -142,9 +138,6 @@ pub(crate) enum AppEvent {
     /// Result of refreshing rate limits
     RateLimitSnapshotFetched(RateLimitSnapshot),
 
-    /// Result of refreshing provider usage snapshot.
-    ProviderUsageSnapshotFetched(Option<ProviderUsageRefreshResult>),
-
     /// Result of prefetching connectors.
     ConnectorsLoaded {
         result: Result<ConnectorsSnapshot, String>,
@@ -174,6 +167,84 @@ pub(crate) enum AppEvent {
     RefreshConnectors {
         force_refetch: bool,
     },
+
+    /// Fetch plugin marketplace state for the provided working directory.
+    FetchPluginsList {
+        cwd: PathBuf,
+    },
+
+    /// Result of fetching plugin marketplace state.
+    PluginsLoaded {
+        cwd: PathBuf,
+        result: Result<PluginListResponse, String>,
+    },
+
+    /// Replace the plugins popup with a plugin-detail loading state.
+    OpenPluginDetailLoading {
+        plugin_display_name: String,
+    },
+
+    /// Fetch detail for a specific plugin from a marketplace.
+    FetchPluginDetail {
+        cwd: PathBuf,
+        params: PluginReadParams,
+    },
+
+    /// Result of fetching plugin detail.
+    PluginDetailLoaded {
+        cwd: PathBuf,
+        result: Result<PluginReadResponse, String>,
+    },
+
+    /// Replace the plugins popup with an install loading state.
+    OpenPluginInstallLoading {
+        plugin_display_name: String,
+    },
+
+    /// Replace the plugins popup with an uninstall loading state.
+    OpenPluginUninstallLoading {
+        plugin_display_name: String,
+    },
+
+    /// Install a specific plugin from a marketplace.
+    FetchPluginInstall {
+        cwd: PathBuf,
+        marketplace_path: AbsolutePathBuf,
+        plugin_name: String,
+        plugin_display_name: String,
+    },
+
+    /// Result of installing a plugin.
+    PluginInstallLoaded {
+        cwd: PathBuf,
+        marketplace_path: AbsolutePathBuf,
+        plugin_name: String,
+        plugin_display_name: String,
+        result: Result<PluginInstallResponse, String>,
+    },
+
+    /// Uninstall a specific plugin by canonical plugin id.
+    FetchPluginUninstall {
+        cwd: PathBuf,
+        plugin_id: String,
+        plugin_display_name: String,
+    },
+
+    /// Result of uninstalling a plugin.
+    PluginUninstallLoaded {
+        cwd: PathBuf,
+        plugin_id: String,
+        plugin_display_name: String,
+        result: Result<PluginUninstallResponse, String>,
+    },
+
+    /// Advance the post-install plugin app-auth flow.
+    PluginInstallAuthAdvance {
+        refresh_connectors: bool,
+    },
+
+    /// Abandon the post-install plugin app-auth flow.
+    PluginInstallAuthAbandon,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
 
@@ -208,40 +279,6 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
-    /// Persist a custom provider entry under `[model_providers.<id>]`.
-    PersistModelProvider {
-        original_id: Option<String>,
-        id: String,
-        provider: ModelProviderInfo,
-        api_key_input: ProviderApiKeyInput,
-    },
-
-    /// Remove a custom provider entry.
-    RemoveModelProvider {
-        id: String,
-    },
-
-    /// Open the provider usage script editor for a provider.
-    OpenProviderUsageScriptEditor {
-        id: String,
-    },
-
-    /// Persist a project-local provider usage script.
-    PersistProviderUsageScript {
-        provider_id: String,
-        script: String,
-    },
-
-    /// Delete a project-local provider usage script.
-    DeleteProviderUsageScript {
-        provider_id: String,
-    },
-
-    /// Persist the default provider selection and refresh runtime config.
-    PersistDefaultModelProvider {
-        id: String,
-    },
-
     /// Persist the selected personality to the appropriate config.
     PersistPersonalitySelection {
         personality: Personality,
@@ -250,6 +287,11 @@ pub(crate) enum AppEvent {
     /// Persist the selected service tier to the appropriate config.
     PersistServiceTierSelection {
         service_tier: Option<ServiceTier>,
+    },
+
+    /// Open the device picker for a realtime microphone or speaker.
+    OpenRealtimeAudioDeviceSelection {
+        kind: RealtimeAudioDeviceKind,
     },
 
     /// Persist the selected realtime microphone or speaker to top-level config.
@@ -265,34 +307,6 @@ pub(crate) enum AppEvent {
     /// Restart the selected realtime microphone or speaker locally.
     RestartRealtimeAudioDevice {
         kind: RealtimeAudioDeviceKind,
-    },
-
-    /// Open a /settings screen.
-    OpenSettings {
-        scope: SettingsScope,
-        screen: SettingsScreen,
-        selected_item_key: Option<String>,
-    },
-
-    /// Open the write-scope picker inside /settings.
-    OpenSettingsScopePicker {
-        current_scope: SettingsScope,
-        current_screen: SettingsScreen,
-    },
-
-    /// Open an editor for one config key inside /settings.
-    OpenSettingEditor {
-        key_path: String,
-        scope: SettingsScope,
-        screen: SettingsScreen,
-    },
-
-    /// Persist a value change made from /settings.
-    SaveSettingValue {
-        key_path: String,
-        scope: SettingsScope,
-        screen: SettingsScreen,
-        value: Option<toml::Value>,
     },
 
     /// Open the reasoning selection popup after picking a model.
@@ -522,6 +536,16 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
+    /// Apply a user-confirmed terminal-title item ordering/selection.
+    TerminalTitleSetup {
+        items: Vec<TerminalTitleItem>,
+    },
+    /// Apply a temporary terminal-title preview while the setup UI is open.
+    TerminalTitleSetupPreview {
+        items: Vec<TerminalTitleItem>,
+    },
+    /// Dismiss the terminal-title setup UI without changing config.
+    TerminalTitleSetupCancelled,
 
     /// Apply a user-confirmed syntax theme selection.
     SyntaxThemeSelected {

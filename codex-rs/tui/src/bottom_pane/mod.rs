@@ -27,9 +27,9 @@ use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
-use codex_core::features::Features;
 use codex_core::plugins::PluginCapabilitySummary;
 use codex_core::skills::model::SkillMetadata;
+use codex_features::Features;
 use codex_file_search::FileMatch;
 use codex_protocol::request_user_input::RequestUserInputEvent;
 use codex_protocol::user_input::TextElement;
@@ -49,6 +49,7 @@ mod request_user_input;
 mod status_line_setup;
 pub(crate) use app_link_view::AppLinkElicitationTarget;
 pub(crate) use app_link_view::AppLinkSuggestionType;
+mod title_setup;
 pub(crate) use app_link_view::AppLinkView;
 pub(crate) use app_link_view::AppLinkViewParams;
 pub(crate) use approval_overlay::ApprovalOverlay;
@@ -76,12 +77,11 @@ mod chat_composer;
 mod chat_composer_history;
 mod command_popup;
 pub mod custom_prompt_view;
+mod experimental_features_view;
 mod file_search_popup;
 mod footer;
 mod list_selection_view;
 mod prompt_args;
-mod provider_manager_view;
-mod provider_usage_script_editor_view;
 mod skill_popup;
 mod skills_toggle_view;
 mod slash_commands;
@@ -101,17 +101,17 @@ pub(crate) use skills_toggle_view::SkillsToggleView;
 pub(crate) use status_line_setup::StatusLineItem;
 pub(crate) use status_line_setup::StatusLinePreviewData;
 pub(crate) use status_line_setup::StatusLineSetupView;
+pub(crate) use title_setup::TerminalTitleItem;
+pub(crate) use title_setup::TerminalTitleSetupView;
 mod paste_burst;
 mod pending_input_preview;
 mod pending_thread_approvals;
 pub mod popup_consts;
 mod scroll_state;
 mod selection_popup_common;
-pub(crate) mod textarea;
+mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
-pub(crate) use provider_manager_view::ProviderManagerView;
-pub(crate) use provider_usage_script_editor_view::ProviderUsageScriptEditorView;
 
 /// How long the "press again to quit" hint stays visible.
 ///
@@ -148,6 +148,8 @@ use codex_protocol::custom_prompts::CustomPrompt;
 
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;
+pub(crate) use experimental_features_view::ExperimentalFeatureItem;
+pub(crate) use experimental_features_view::ExperimentalFeaturesView;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use list_selection_view::SelectionItem;
 
@@ -264,6 +266,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_plugins_command_enabled(&mut self, enabled: bool) {
+        self.composer.set_plugins_command_enabled(enabled);
+        self.request_redraw();
+    }
+
     pub fn take_mention_bindings(&mut self) -> Vec<MentionBinding> {
         self.composer.take_mention_bindings()
     }
@@ -318,6 +325,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_audio_device_selection_enabled(&mut self, enabled: bool) {
+        self.composer.set_audio_device_selection_enabled(enabled);
+        self.request_redraw();
+    }
+
     pub fn set_voice_transcription_enabled(&mut self, enabled: bool) {
         self.composer.set_voice_transcription_enabled(enabled);
         self.request_redraw();
@@ -361,13 +373,6 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    fn pop_completed_view(&mut self) {
-        self.view_stack.pop();
-        if self.view_stack.is_empty() {
-            self.on_active_view_complete();
-        }
-    }
-
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         // Do not globally intercept space; only composer handles hold-to-talk.
@@ -408,14 +413,16 @@ impl BottomPane {
             };
 
             if ctrl_c_completed {
-                self.pop_completed_view();
+                self.view_stack.pop();
+                self.on_active_view_complete();
                 if let Some(next_view) = self.view_stack.last()
                     && next_view.is_in_paste_burst()
                 {
                     self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
                 }
             } else if view_complete {
-                self.pop_completed_view();
+                self.view_stack.clear();
+                self.on_active_view_complete();
             } else if view_in_paste_burst {
                 self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
             }
@@ -468,7 +475,8 @@ impl BottomPane {
             let event = view.on_ctrl_c();
             if matches!(event, CancellationEvent::Handled) {
                 if view.is_complete() {
-                    self.pop_completed_view();
+                    self.view_stack.pop();
+                    self.on_active_view_complete();
                 }
                 self.show_quit_shortcut_hint(key_hint::ctrl(KeyCode::Char('c')));
                 self.request_redraw();
@@ -489,7 +497,7 @@ impl BottomPane {
         if let Some(view) = self.view_stack.last_mut() {
             let needs_redraw = view.handle_paste(pasted);
             if view.is_complete() {
-                self.pop_completed_view();
+                self.on_active_view_complete();
             }
             if needs_redraw {
                 self.request_redraw();
@@ -817,8 +825,10 @@ impl BottomPane {
         &mut self,
         queued: Vec<String>,
         pending_steers: Vec<String>,
+        rejected_steers: Vec<String>,
     ) {
         self.pending_input_preview.pending_steers = pending_steers;
+        self.pending_input_preview.rejected_steers = rejected_steers;
         self.pending_input_preview.queued_messages = queued;
         self.request_redraw();
     }
@@ -965,7 +975,9 @@ impl BottomPane {
             request
         };
 
-        if let Some(tool_suggestion) = request.tool_suggestion() {
+        if let Some(tool_suggestion) = request.tool_suggestion()
+            && let Some(install_url) = tool_suggestion.install_url.clone()
+        {
             let suggestion_type = match tool_suggestion.suggest_type {
                 mcp_server_elicitation::ToolSuggestionType::Install => {
                     AppLinkSuggestionType::Install
@@ -989,7 +1001,7 @@ impl BottomPane {
                             "Enable this app to use it for the current request.".to_string()
                         }
                     },
-                    url: tool_suggestion.install_url.clone(),
+                    url: install_url,
                     is_installed,
                     is_enabled: false,
                     suggest_reason: Some(tool_suggestion.suggest_reason.clone()),
@@ -1143,7 +1155,8 @@ impl BottomPane {
             }
             let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
             let has_pending_input = !self.pending_input_preview.queued_messages.is_empty()
-                || !self.pending_input_preview.pending_steers.is_empty();
+                || !self.pending_input_preview.pending_steers.is_empty()
+                || !self.pending_input_preview.rejected_steers.is_empty();
             let has_status_or_footer =
                 self.status.is_some() || !self.unified_exec_footer.is_empty();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
@@ -1546,7 +1559,11 @@ mod tests {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
 
         let width = 48;
         let height = pane.desired_height(width);
@@ -1573,7 +1590,11 @@ mod tests {
         });
 
         pane.set_task_running(true);
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
         pane.hide_status_indicator();
 
         let width = 48;
@@ -1601,7 +1622,11 @@ mod tests {
         });
 
         pane.set_task_running(true);
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
 
         let width = 48;
         let height = pane.desired_height(width);

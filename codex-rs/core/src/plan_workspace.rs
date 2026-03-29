@@ -1,6 +1,6 @@
-use crate::git_info::get_git_repo_root;
 use crate::plan_csv::render_empty_plan_csv;
 use crate::plan_csv::render_plan_text;
+use codex_git_utils::get_git_repo_root;
 use codex_state::ThreadPlanItemCreateParams;
 use codex_state::canonicalize_thread_plan_csv;
 use codex_state::canonicalize_thread_plan_csv_for_authoring;

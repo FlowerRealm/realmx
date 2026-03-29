@@ -2123,6 +2123,13 @@ class PluginInstallParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    force_remote_sync: Annotated[
+        bool | None,
+        Field(
+            alias="forceRemoteSync",
+            description="When true, apply the remote plugin change before the local install flow.",
+        ),
+    ] = None
     marketplace_path: Annotated[AbsolutePathBuf, Field(alias="marketplacePath")]
     plugin_name: Annotated[str, Field(alias="pluginName")]
 
@@ -2228,6 +2235,13 @@ class PluginUninstallParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    force_remote_sync: Annotated[
+        bool | None,
+        Field(
+            alias="forceRemoteSync",
+            description="When true, apply the remote plugin change before the local uninstall flow.",
+        ),
+    ] = None
     plugin_id: Annotated[str, Field(alias="pluginId")]
 
 
@@ -2426,15 +2440,6 @@ class ReasoningTextDeltaNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
-class RemoteSkillSummary(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    description: str
-    id: str
-    name: str
-
-
 class RequestId(RootModel[str | int]):
     root: str | int
 
@@ -2496,7 +2501,6 @@ class ReasoningResponseItem(BaseModel):
     )
     content: list[ReasoningItemContent] | None = None
     encrypted_content: str | None = None
-    id: str
     summary: list[ReasoningItemReasoningSummary]
     type: Annotated[ReasoningResponseItemType, Field(title="ReasoningResponseItemType")]
 
@@ -4176,6 +4180,7 @@ class ThreadRealtimeAudioChunk(BaseModel):
         populate_by_name=True,
     )
     data: str
+    item_id: Annotated[str | None, Field(alias="itemId")] = None
     num_channels: Annotated[int, Field(alias="numChannels", ge=0)]
     sample_rate: Annotated[int, Field(alias="sampleRate", ge=0)]
     samples_per_channel: Annotated[
@@ -6801,14 +6806,6 @@ class FunctionCallOutputBody(RootModel[str | list[FunctionCallOutputContentItem]
     root: str | list[FunctionCallOutputContentItem]
 
 
-class FunctionCallOutputPayload(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    body: FunctionCallOutputBody
-    success: bool | None = None
-
-
 class GetAccountRateLimitsResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6906,7 +6903,7 @@ class FunctionCallOutputResponseItem(BaseModel):
         populate_by_name=True,
     )
     call_id: str
-    output: FunctionCallOutputPayload
+    output: FunctionCallOutputBody
     type: Annotated[
         FunctionCallOutputResponseItemType,
         Field(title="FunctionCallOutputResponseItemType"),
@@ -6918,7 +6915,7 @@ class CustomToolCallOutputResponseItem(BaseModel):
         populate_by_name=True,
     )
     call_id: str
-    output: FunctionCallOutputPayload
+    output: FunctionCallOutputBody
     type: Annotated[
         CustomToolCallOutputResponseItemType,
         Field(title="CustomToolCallOutputResponseItemType"),

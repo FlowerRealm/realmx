@@ -324,8 +324,8 @@ async fn spawn_ready_workers(
             Some(thread_id) => session
                 .services
                 .agent_control
-                .get_agent_nickname_and_role(thread_id)
-                .await
+                .get_agent_metadata(thread_id)
+                .map(|metadata| (metadata.agent_nickname, metadata.agent_role))
                 .unwrap_or((None, None)),
             None => (None, None),
         };
@@ -473,7 +473,7 @@ async fn close_assignments(
         let shutdown_status = match session
             .services
             .agent_control
-            .shutdown_agent(assignment.thread_id)
+            .shutdown_live_agent(assignment.thread_id)
             .await
         {
             Ok(_) => statuses

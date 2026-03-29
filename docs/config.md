@@ -12,6 +12,16 @@ Realmx can connect to MCP servers configured in `~/.realmx/config.toml`. See the
 
 - https://developers.openai.com/codex/config-reference
 
+## MCP tool approvals
+
+Codex stores per-tool approval overrides for custom MCP servers under
+`mcp_servers` in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.docs.tools.search]
+approval_mode = "approve"
+```
+
 ## Apps (Connectors)
 
 Use `$` in the composer to insert a ChatGPT connector; the popover lists accessible
@@ -106,8 +116,12 @@ Supported `extractor()` return values:
 Status line setup:
 
 - The only provider-usage status item is `remote-usage`
-- Older ids such as `provider-usage-remaining` or `su8-remaining` are normalized to `remote-usage` when read
 - When remote usage refresh fails, Realmx records the error in the transcript, shows it in `/status`, and keeps polling so transient failures can recover automatically
+
+Provider IDs:
+
+- Custom `model_providers` keys may use ASCII letters, digits, `-`, and `_`
+- Provider IDs are matched exactly at runtime, so casing must be referenced consistently
 
 ## SQLite State DB
 

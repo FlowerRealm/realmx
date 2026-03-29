@@ -94,7 +94,7 @@ describe("CodexExec", () => {
     expect(resumeIndex).toBeLessThan(imageIndex);
   });
 
-  it("does not override cli branding for custom executable paths", async () => {
+  it("allows overriding the env passed to the Codex CLI", async () => {
     const { CodexExec } = await import("../src/exec");
     spawnMock.mockClear();
     const child = new FakeChildProcess();
@@ -106,14 +106,41 @@ describe("CodexExec", () => {
       child.emit("exit", 0, null);
     });
 
-    const exec = new CodexExec("codex");
-    for await (const _ of exec.run({ input: "hi" })) {
-      // no-op
-    }
+    process.env.CODEX_ENV_SHOULD_NOT_LEAK = "leak";
 
-    const options = spawnMock.mock.calls[0]?.[2] as child_process.SpawnOptions | undefined;
-    expect(options).toBeDefined();
-    expect(options?.env?.CODEX_CLI_NAME).toBeUndefined();
-    expect(options?.argv0).toBeUndefined();
+    try {
+      const exec = new CodexExec("codex", {
+        CODEX_HOME: "/tmp/codex-home",
+        CUSTOM_ENV: "custom",
+      });
+
+      for await (const _ of exec.run({
+        input: "custom env",
+        apiKey: "test",
+        baseUrl: "https://example.test",
+      })) {
+        // no-op
+      }
+
+      const commandArgs = spawnMock.mock.calls[0]?.[1] as string[] | undefined;
+      expect(commandArgs).toBeDefined();
+      const spawnOptions = spawnMock.mock.calls[0]?.[2] as child_process.SpawnOptions | undefined;
+      const spawnEnv = spawnOptions?.env as Record<string, string> | undefined;
+      expect(spawnEnv).toBeDefined();
+      if (!spawnEnv || !commandArgs) {
+        throw new Error("Spawn args missing");
+      }
+
+      expect(spawnEnv.CODEX_HOME).toBe("/tmp/codex-home");
+      expect(spawnEnv.CUSTOM_ENV).toBe("custom");
+      expect(spawnEnv.CODEX_ENV_SHOULD_NOT_LEAK).toBeUndefined();
+      expect(spawnEnv.OPENAI_BASE_URL).toBeUndefined();
+      expect(spawnEnv.CODEX_API_KEY).toBe("test");
+      expect(spawnEnv.CODEX_INTERNAL_ORIGINATOR_OVERRIDE).toBeDefined();
+      expect(commandArgs).toContain("--config");
+      expect(commandArgs).toContain(`openai_base_url=${JSON.stringify("https://example.test")}`);
+    } finally {
+      delete process.env.CODEX_ENV_SHOULD_NOT_LEAK;
+    }
   });
 });

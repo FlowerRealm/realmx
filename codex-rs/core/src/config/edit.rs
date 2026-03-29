@@ -4,6 +4,8 @@ use crate::features::FEATURES;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
+use crate::provider_id::validate_model_provider_id;
+use crate::provider_id::validate_model_provider_reference;
 use anyhow::Context;
 use codex_config::CONFIG_TOML_FILE;
 use codex_protocol::config_types::Personality;
@@ -50,6 +52,8 @@ pub enum ConfigEdit {
     ReplaceMcpServers(BTreeMap<String, McpServerConfig>),
     /// Set or clear a skill config entry under `[[skills.config]]`.
     SetSkillConfig { path: PathBuf, enabled: bool },
+    /// Set or clear a skill config entry under `[[skills.config]]` by name.
+    SetSkillConfigByName { name: String, enabled: bool },
     /// Set trust_level under `[projects."<path>"]`,
     /// migrating inline tables to explicit tables.
     SetProjectTrustLevel { path: PathBuf, level: TrustLevel },
@@ -63,12 +67,18 @@ pub enum ConfigEdit {
     /// Set or replace a provider entry under `[model_providers.<id>]`.
     SetModelProvider {
         id: String,
-        provider: ModelProviderInfo,
+        provider: Box<ModelProviderInfo>,
     },
     /// Remove a provider entry under `[model_providers.<id>]`.
     RemoveModelProvider { id: String },
     /// Set the active default model provider.
     SetDefaultModelProvider { id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SkillConfigSelector {
+    Name(String),
+    Path(PathBuf),
 }
 
 /// Produces a config edit that sets `[tui] theme = "<name>"`.
@@ -87,6 +97,18 @@ pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
 
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "status_line".to_string()],
+        value: TomlItem::Value(array.into()),
+    }
+}
+
+pub fn terminal_title_items_edit(items: &[String]) -> ConfigEdit {
+    let mut array = toml_edit::Array::new();
+    for item in items {
+        array.push(item.clone());
+    }
+
+    ConfigEdit::SetPath {
+        segments: vec!["tui".to_string(), "terminal_title".to_string()],
         value: TomlItem::Value(array.into()),
     }
 }
@@ -237,6 +259,24 @@ mod document_helpers {
         {
             entry["oauth_resource"] = value(resource.clone());
         }
+        if !config.tools.is_empty() {
+            let mut tools = new_implicit_table();
+            let mut tool_entries: Vec<_> = config.tools.iter().collect();
+            tool_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (tool_name, tool_config) in tool_entries {
+                let mut tool = TomlTable::new();
+                tool.set_implicit(false);
+                if let Some(approval_mode) = tool_config.approval_mode {
+                    tool["approval_mode"] = value(match approval_mode {
+                        crate::config::types::AppToolApproval::Auto => "auto",
+                        crate::config::types::AppToolApproval::Prompt => "prompt",
+                        crate::config::types::AppToolApproval::Approve => "approve",
+                    });
+                }
+                tools.insert(tool_name, TomlItem::Table(tool));
+            }
+            entry["tools"] = TomlItem::Table(tools);
+        }
 
         entry
     }
@@ -384,18 +424,24 @@ impl ConfigDocument {
             )),
             ConfigEdit::ReplaceMcpServers(servers) => Ok(self.replace_mcp_servers(servers)),
             ConfigEdit::SetSkillConfig { path, enabled } => {
-                Ok(self.set_skill_config(path.as_path(), *enabled))
+                Ok(self.set_skill_config(SkillConfigSelector::Path(path.clone()), *enabled))
+            }
+            ConfigEdit::SetSkillConfigByName { name, enabled } => {
+                Ok(self.set_skill_config(SkillConfigSelector::Name(name.clone()), *enabled))
             }
             ConfigEdit::SetPath { segments, value } => Ok(self.insert(segments, value.clone())),
             ConfigEdit::ClearPath { segments } => Ok(self.clear_owned(segments)),
             ConfigEdit::SetModelProvider { id, provider } => {
-                let item = model_provider_to_item(provider)?;
+                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
+                let item = model_provider_to_item(provider.as_ref())?;
                 Ok(self.insert(&["model_providers".to_string(), id.clone()], item))
             }
             ConfigEdit::RemoveModelProvider { id } => {
+                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
                 Ok(self.remove(&["model_providers".to_string(), id.clone()]))
             }
             ConfigEdit::SetDefaultModelProvider { id } => {
+                validate_model_provider_reference(id).map_err(anyhow::Error::msg)?;
                 Ok(self.write_profile_value(&["model_provider"], Some(value(id.clone()))))
             }
             ConfigEdit::SetProjectTrustLevel { path, level } => {
@@ -485,8 +531,16 @@ impl ConfigDocument {
         true
     }
 
-    fn set_skill_config(&mut self, path: &Path, enabled: bool) -> bool {
-        let normalized_path = normalize_skill_config_path(path);
+    fn set_skill_config(&mut self, selector: SkillConfigSelector, enabled: bool) -> bool {
+        let selector = match selector {
+            SkillConfigSelector::Name(name) => SkillConfigSelector::Name(name.trim().to_string()),
+            SkillConfigSelector::Path(path) => {
+                SkillConfigSelector::Path(PathBuf::from(normalize_skill_config_path(&path)))
+            }
+        };
+        if matches!(&selector, SkillConfigSelector::Name(name) if name.is_empty()) {
+            return false;
+        }
         let mut remove_skills_table = false;
         let mut mutated = false;
 
@@ -545,12 +599,8 @@ impl ConfigDocument {
             };
 
             let existing_index = overrides.iter().enumerate().find_map(|(idx, table)| {
-                table
-                    .get("path")
-                    .and_then(|item| item.as_str())
-                    .map(Path::new)
-                    .map(normalize_skill_config_path)
-                    .filter(|value| *value == normalized_path)
+                skill_config_selector_from_table(table)
+                    .filter(|value| value == &selector)
                     .map(|_| idx)
             });
 
@@ -568,7 +618,7 @@ impl ConfigDocument {
             } else if let Some(index) = existing_index {
                 for (idx, table) in overrides.iter_mut().enumerate() {
                     if idx == index {
-                        table["path"] = value(normalized_path);
+                        write_skill_config_selector(table, &selector);
                         table["enabled"] = value(false);
                         mutated = true;
                         break;
@@ -577,7 +627,7 @@ impl ConfigDocument {
             } else {
                 let mut entry = TomlTable::new();
                 entry.set_implicit(false);
-                entry["path"] = value(normalized_path);
+                write_skill_config_selector(&mut entry, &selector);
                 entry["enabled"] = value(false);
                 overrides.push(entry);
                 mutated = true;
@@ -706,9 +756,123 @@ fn normalize_skill_config_path(path: &Path) -> String {
         .to_string()
 }
 
+fn skill_config_selector_from_table(table: &TomlTable) -> Option<SkillConfigSelector> {
+    let path = table
+        .get("path")
+        .and_then(|item| item.as_str())
+        .map(Path::new)
+        .map(|path| SkillConfigSelector::Path(PathBuf::from(normalize_skill_config_path(path))));
+    let name = table
+        .get("name")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| SkillConfigSelector::Name(name.to_string()));
+
+    match (path, name) {
+        (Some(selector), None) | (None, Some(selector)) => Some(selector),
+        _ => None,
+    }
+}
+
+fn write_skill_config_selector(table: &mut TomlTable, selector: &SkillConfigSelector) {
+    match selector {
+        SkillConfigSelector::Name(name) => {
+            table.remove("path");
+            table["name"] = value(name.clone());
+        }
+        SkillConfigSelector::Path(path) => {
+            table.remove("name");
+            table["path"] = value(path.to_string_lossy().to_string());
+        }
+    }
+}
+
 fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
-    let value = TomlValue::try_from(provider.sanitized_for_config_persistence())?;
-    toml_value_to_item(&value)
+    let provider = provider.sanitized_for_config_persistence();
+    let api_key = provider.inline_api_key();
+    let mut table = TomlTable::new();
+    table.set_implicit(false);
+    table["name"] = value(provider.name);
+    if let Some(base_url) = provider.base_url {
+        table["base_url"] = value(base_url);
+    }
+    table["wire_api"] = value(provider.wire_api.to_string());
+    if provider.requires_openai_auth {
+        table["requires_openai_auth"] = value(true);
+    }
+    if provider.supports_websockets {
+        table["supports_websockets"] = value(true);
+    }
+    if provider.auth_strategy != crate::ModelProviderAuthStrategy::None {
+        let auth_strategy = match provider.auth_strategy {
+            crate::ModelProviderAuthStrategy::None => unreachable!(),
+            crate::ModelProviderAuthStrategy::OpenAi => "openai",
+            crate::ModelProviderAuthStrategy::ApiKey => "api_key",
+            crate::ModelProviderAuthStrategy::OAuth => "oauth",
+            crate::ModelProviderAuthStrategy::OAuthOrApiKey => "oauth_or_api_key",
+        };
+        table["auth_strategy"] = value(auth_strategy);
+    }
+    if let Some(oauth) = provider.oauth {
+        let oauth_value = TomlValue::try_from(oauth)?;
+        table["oauth"] = toml_value_to_item(&oauth_value)?;
+    }
+    if let Some(api_key) = api_key {
+        table["api_key"] = value(api_key);
+    }
+    if let Some(env_key) = provider.env_key {
+        table["env_key"] = value(env_key);
+    }
+    if let Some(env_key_instructions) = provider.env_key_instructions {
+        table["env_key_instructions"] = value(env_key_instructions);
+    }
+    if let Some(token) = provider.experimental_bearer_token {
+        table["experimental_bearer_token"] = value(token);
+    }
+    if let Some(query_params) = provider.query_params
+        && !query_params.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = query_params.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["query_params"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(http_headers) = provider.http_headers
+        && !http_headers.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = http_headers.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(env_http_headers) = provider.env_http_headers
+        && !env_http_headers.is_empty()
+    {
+        let mut ordered = toml::map::Map::new();
+        let mut entries = env_http_headers.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, value) in entries {
+            ordered.insert(key, TomlValue::String(value));
+        }
+        table["env_http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
+    }
+    if let Some(request_max_retries) = provider.request_max_retries {
+        table["request_max_retries"] = value(i64::try_from(request_max_retries)?);
+    }
+    if let Some(stream_max_retries) = provider.stream_max_retries {
+        table["stream_max_retries"] = value(i64::try_from(stream_max_retries)?);
+    }
+    if let Some(stream_idle_timeout_ms) = provider.stream_idle_timeout_ms {
+        table["stream_idle_timeout_ms"] = value(i64::try_from(stream_idle_timeout_ms)?);
+    }
+    Ok(TomlItem::Table(table))
 }
 
 /// Convert a `toml::Value` into the `toml_edit` item used by config persistence.
@@ -914,7 +1078,7 @@ impl ConfigEditsBuilder {
     pub fn set_model_provider(mut self, id: &str, provider: &ModelProviderInfo) -> Self {
         self.edits.push(ConfigEdit::SetModelProvider {
             id: id.to_string(),
-            provider: provider.clone(),
+            provider: Box::new(provider.clone()),
         });
         self
     }

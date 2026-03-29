@@ -18,6 +18,7 @@ use crate::response_debug_context::telemetry_transport_error_message;
 use crate::util::FeedbackRequestTags;
 use crate::util::emit_feedback_request_tags;
 use codex_api::ModelsClient;
+use codex_api::RemoteModelsPayload;
 use codex_api::RequestTelemetry;
 use codex_api::ReqwestTransport;
 use codex_api::TransportError;
@@ -28,9 +29,13 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_rmcp_client::OAuthCredentialsStoreMode;
 use http::HeaderMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::TryLockError;
@@ -39,7 +44,7 @@ use tracing::error;
 use tracing::info;
 use tracing::instrument;
 
-const MODEL_CACHE_FILE: &str = "models_cache.json";
+const MODEL_CACHE_FILE_PREFIX: &str = "models_cache";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
@@ -169,9 +174,10 @@ pub struct ModelsManager {
     auth_manager: Arc<AuthManager>,
     codex_home: PathBuf,
     etag: RwLock<Option<String>>,
-    cache_manager: ModelsCacheManager,
-    provider_id: String,
-    provider: ModelProviderInfo,
+    cache_manager: RwLock<ModelsCacheManager>,
+    provider_id: RwLock<String>,
+    provider: RwLock<ModelProviderInfo>,
+    provider_generation: AtomicU64,
     oauth_store_mode: OAuthCredentialsStoreMode,
 }
 
@@ -193,7 +199,7 @@ impl ModelsManager {
             model_catalog,
             collaboration_modes_config,
             OPENAI_PROVIDER_ID.to_string(),
-            ModelProviderInfo::create_openai_provider(/* base_url */ None),
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             OAuthCredentialsStoreMode::default(),
         )
     }
@@ -208,7 +214,7 @@ impl ModelsManager {
         provider: ModelProviderInfo,
         oauth_store_mode: OAuthCredentialsStoreMode,
     ) -> Self {
-        let cache_path = codex_home.join(MODEL_CACHE_FILE);
+        let cache_path = codex_home.join(Self::cache_file_name(provider_id.as_str()));
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
         let catalog_mode = if model_catalog.is_some() {
             CatalogMode::Custom
@@ -218,7 +224,7 @@ impl ModelsManager {
         let remote_models = model_catalog
             .map(|catalog| Self::with_derived_aliases(catalog.models))
             .unwrap_or_else(|| {
-                Self::load_remote_models_from_file()
+                Self::load_bundled_models_from_file()
                     .unwrap_or_else(|err| panic!("failed to load bundled models.json: {err}"))
             });
         Self {
@@ -228,11 +234,34 @@ impl ModelsManager {
             auth_manager,
             codex_home,
             etag: RwLock::new(None),
-            cache_manager,
-            provider_id,
-            provider,
+            cache_manager: RwLock::new(cache_manager),
+            provider_id: RwLock::new(provider_id),
+            provider: RwLock::new(provider),
+            provider_generation: AtomicU64::new(0),
             oauth_store_mode,
         }
+    }
+
+    fn cache_file_name(provider_id: &str) -> String {
+        format!("{MODEL_CACHE_FILE_PREFIX}-{provider_id}.json")
+    }
+
+    pub async fn replace_provider(&self, provider_id: String, provider: ModelProviderInfo) {
+        if matches!(self.catalog_mode, CatalogMode::Custom) {
+            return;
+        }
+
+        let cache_path = self
+            .codex_home
+            .join(Self::cache_file_name(provider_id.as_str()));
+        *self.provider_id.write().await = provider_id;
+        *self.provider.write().await = provider;
+        *self.cache_manager.write().await =
+            ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
+        self.provider_generation.fetch_add(1, Ordering::SeqCst);
+        *self.etag.write().await = None;
+        self.remote_models.write().await.clear();
+        self.try_load_cache().await;
     }
 
     /// List all available models, refreshing according to the specified strategy.
@@ -244,11 +273,37 @@ impl ModelsManager {
         fields(refresh_strategy = %refresh_strategy)
     )]
     pub async fn list_models(&self, refresh_strategy: RefreshStrategy) -> Vec<ModelPreset> {
-        if let Err(err) = self.refresh_available_models(refresh_strategy).await {
+        if let Err(err) = self.list_models_result(refresh_strategy).await {
             error!("failed to refresh available models: {err}");
         }
         let remote_models = self.get_remote_models().await;
         self.build_available_models(remote_models)
+    }
+
+    /// List all available models, surfacing refresh failures to the caller.
+    #[instrument(
+        level = "info",
+        skip(self),
+        fields(refresh_strategy = %refresh_strategy)
+    )]
+    pub async fn list_models_result(
+        &self,
+        refresh_strategy: RefreshStrategy,
+    ) -> CoreResult<Vec<ModelPreset>> {
+        self.refresh_available_models(refresh_strategy).await?;
+        let remote_models = self.get_remote_models().await;
+        Ok(self.build_available_models(remote_models))
+    }
+
+    /// Force a network refresh and return the latest picker-ready presets for the active provider.
+    #[instrument(level = "info", skip(self))]
+    pub async fn refresh_models_for_active_provider_result(&self) -> CoreResult<Vec<ModelPreset>> {
+        self.list_models_result(RefreshStrategy::Online).await
+    }
+
+    /// Force a network refresh and return the latest picker-ready presets.
+    pub async fn refresh_models_for_startup_result(&self) -> CoreResult<Vec<ModelPreset>> {
+        self.refresh_models_for_active_provider_result().await
     }
 
     /// List collaboration mode presets.
@@ -363,7 +418,7 @@ impl ModelsManager {
         let model_info = if let Some(remote) = remote {
             ModelInfo {
                 slug: model.to_string(),
-                used_fallback_model_metadata: false,
+                used_fallback_model_metadata: remote.used_fallback_model_metadata,
                 ..remote
             }
         } else {
@@ -402,7 +457,7 @@ impl ModelsManager {
     pub(crate) async fn refresh_if_new_etag(&self, etag: String) {
         let current_etag = self.get_etag().await;
         if current_etag.clone().is_some() && current_etag.as_deref() == Some(etag.as_str()) {
-            if let Err(err) = self.cache_manager.renew_cache_ttl().await {
+            if let Err(err) = self.cache_manager.read().await.renew_cache_ttl().await {
                 error!("failed to renew cache TTL: {err}");
             }
             return;
@@ -416,16 +471,6 @@ impl ModelsManager {
     async fn refresh_available_models(&self, refresh_strategy: RefreshStrategy) -> CoreResult<()> {
         // don't override the custom model catalog if one was provided by the user
         if matches!(self.catalog_mode, CatalogMode::Custom) {
-            return Ok(());
-        }
-
-        if self.auth_manager.auth_mode() != Some(AuthMode::Chatgpt) {
-            if matches!(
-                refresh_strategy,
-                RefreshStrategy::Offline | RefreshStrategy::OnlineIfUncached
-            ) {
-                self.try_load_cache().await;
-            }
             return Ok(());
         }
 
@@ -454,20 +499,34 @@ impl ModelsManager {
     async fn fetch_and_update_models(&self) -> CoreResult<()> {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
-        let auth = self.auth_manager.auth().await;
-        let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
-        let api_provider = self.provider.to_api_provider(auth_mode)?;
+        let provider_id = self.provider_id.read().await.clone();
+        let auth = self
+            .auth_manager
+            .auth_for_provider(Some(provider_id.as_str()))
+            .await;
+        let provider = self.provider.read().await.clone();
+        if provider.uses_openai_auth() && auth.is_none() {
+            info!(
+                provider_id,
+                "models cache: skipping remote models refresh without OpenAI auth"
+            );
+            return Ok(());
+        }
+        let api_auth_mode = auth.as_ref().map(CodexAuth::api_auth_mode);
+        let telemetry_auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
+        let provider_generation = self.provider_generation.load(Ordering::SeqCst);
+        let api_provider = provider.to_api_provider(api_auth_mode)?;
         let api_auth = auth_provider_from_auth(
             &self.codex_home,
-            &self.provider_id,
+            &provider_id,
             auth.clone(),
-            &self.provider,
+            &provider,
             self.oauth_store_mode,
         )
         .await?;
         let transport = ReqwestTransport::new(build_reqwest_client());
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+            auth_mode: telemetry_auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
             auth_header_attached: api_auth.auth_header_attached(),
             auth_header_name: api_auth.auth_header_name(),
         });
@@ -475,17 +534,28 @@ impl ModelsManager {
             .with_telemetry(Some(request_telemetry));
 
         let client_version = crate::models_manager::client_version_to_whole();
-        let (models, etag) = timeout(
+        let (remote_models, etag) = timeout(
             MODELS_REFRESH_TIMEOUT,
             client.list_models(&client_version, HeaderMap::new()),
         )
         .await
         .map_err(|_| CodexErr::Timeout)?
         .map_err(map_api_error)?;
+        let models = Self::resolve_remote_models_payload(remote_models);
+
+        if !self.provider_generation_matches(provider_generation) {
+            info!(
+                provider_id,
+                "models refresh: dropping stale provider refresh result after provider change"
+            );
+            return Ok(());
+        }
 
         self.apply_remote_models(models.clone()).await;
         *self.etag.write().await = etag.clone();
         self.cache_manager
+            .read()
+            .await
             .persist_cache(&models, etag, client_version)
             .await;
         Ok(())
@@ -495,23 +565,36 @@ impl ModelsManager {
         self.etag.read().await.clone()
     }
 
-    /// Replace the cached remote models and rebuild the derived presets list.
-    async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
-        let mut existing_models = Self::load_remote_models_from_file().unwrap_or_default();
-        for model in Self::with_derived_aliases(models) {
-            if let Some(existing_index) = existing_models
-                .iter()
-                .position(|existing| existing.slug == model.slug)
-            {
-                existing_models[existing_index] = model;
-            } else {
-                existing_models.push(model);
+    fn resolve_remote_models_payload(payload: RemoteModelsPayload) -> Vec<ModelInfo> {
+        match payload {
+            RemoteModelsPayload::Enhanced(models) => models,
+            RemoteModelsPayload::OpenAiIds(model_ids) => {
+                let bundled_models = Self::load_bundled_models_from_file()
+                    .unwrap_or_else(|err| panic!("failed to load bundled models.json: {err}"))
+                    .into_iter()
+                    .map(|model| (model.slug.clone(), model))
+                    .collect::<HashMap<_, _>>();
+                let mut seen = HashSet::new();
+                model_ids
+                    .into_iter()
+                    .filter(|id| seen.insert(id.clone()))
+                    .map(|id| {
+                        bundled_models
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_else(|| model_info::remote_model_info_from_slug(&id))
+                    })
+                    .collect()
             }
         }
-        *self.remote_models.write().await = existing_models;
     }
 
-    fn load_remote_models_from_file() -> Result<Vec<ModelInfo>, std::io::Error> {
+    /// Replace the cached remote models and rebuild the derived presets list.
+    async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
+        *self.remote_models.write().await = Self::with_derived_aliases(models);
+    }
+
+    fn load_bundled_models_from_file() -> Result<Vec<ModelInfo>, std::io::Error> {
         let file_contents = include_str!("../../models.json");
         let response: ModelsResponse = serde_json::from_str(file_contents)?;
         Ok(Self::with_derived_aliases(response.models))
@@ -522,8 +605,15 @@ impl ModelsManager {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.load_cache.duration_ms", &[]);
         let client_version = crate::models_manager::client_version_to_whole();
+        let provider_generation = self.provider_generation.load(Ordering::SeqCst);
         info!(client_version, "models cache: evaluating cache eligibility");
-        let cache = match self.cache_manager.load_fresh(&client_version).await {
+        let cache = match self
+            .cache_manager
+            .read()
+            .await
+            .load_fresh(&client_version)
+            .await
+        {
             Some(cache) => cache,
             None => {
                 info!("models cache: no usable cache entry");
@@ -531,6 +621,10 @@ impl ModelsManager {
             }
         };
         let models = cache.models.clone();
+        if !self.provider_generation_matches(provider_generation) {
+            info!("models cache: dropping stale cache load after provider change");
+            return false;
+        }
         *self.etag.write().await = cache.etag.clone();
         self.apply_remote_models(models.clone()).await;
         info!(
@@ -541,12 +635,22 @@ impl ModelsManager {
         true
     }
 
+    fn provider_generation_matches(&self, expected_generation: u64) -> bool {
+        self.provider_generation.load(Ordering::SeqCst) == expected_generation
+    }
+
     /// Build picker-ready presets from the active catalog snapshot.
     fn build_available_models(&self, mut remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
         remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
 
         let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
-        let chatgpt_mode = matches!(self.auth_manager.auth_mode(), Some(AuthMode::Chatgpt));
+        let chatgpt_mode = self.provider_id.try_read().ok().is_some_and(|provider_id| {
+            matches!(
+                self.auth_manager
+                    .get_api_auth_mode_for_provider(Some(provider_id.as_str())),
+                Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
+            )
+        });
         presets = ModelPreset::filter_by_auth(presets, chatgpt_mode);
 
         ModelPreset::mark_default_by_picker_visibility(&mut presets);
@@ -584,7 +688,7 @@ impl ModelsManager {
         if let Some(model) = model {
             return model.to_string();
         }
-        let mut models = Self::load_remote_models_from_file().unwrap_or_default();
+        let mut models = Self::load_bundled_models_from_file().unwrap_or_default();
         models.sort_by(|a, b| a.priority.cmp(&b.priority));
         let presets: Vec<ModelPreset> = models.into_iter().map(Into::into).collect();
         presets
@@ -604,7 +708,7 @@ impl ModelsManager {
             .model_catalog
             .as_ref()
             .map(|model_catalog| Self::with_derived_aliases(model_catalog.models.clone()))
-            .unwrap_or_else(|| Self::load_remote_models_from_file().unwrap_or_default());
+            .unwrap_or_else(|| Self::load_bundled_models_from_file().unwrap_or_default());
         Self::construct_model_info_from_candidates(model, &candidates, config)
     }
 }

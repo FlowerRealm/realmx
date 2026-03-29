@@ -3,9 +3,9 @@
 use anyhow::Context;
 use assert_cmd::prelude::*;
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
-use core_test_support::responses::ev_apply_patch_custom_tool_call;
-use core_test_support::responses::ev_apply_patch_function_call;
 use core_test_support::responses::ev_completed;
+use core_test_support::responses::ev_response_created;
+use core_test_support::responses::ev_shell_command_call;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
@@ -65,21 +65,29 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
 -Hello world
 +Final text
 *** End Patch"#;
+    let add_script = format!("apply_patch <<'EOF'\n{add_patch}\nEOF\n");
+    let update_script = format!("apply_patch <<'EOF'\n{update_patch}\nEOF\n");
     let response_streams = vec![
         sse(vec![
-            ev_apply_patch_custom_tool_call("request_0", add_patch),
-            ev_completed("request_0"),
+            ev_response_created("resp_0"),
+            ev_shell_command_call("request_0", &add_script),
+            ev_completed("resp_0"),
         ]),
         sse(vec![
-            ev_apply_patch_function_call("request_1", update_patch),
-            ev_completed("request_1"),
+            ev_response_created("resp_1"),
+            ev_shell_command_call("request_1", &update_script),
+            ev_completed("resp_1"),
         ]),
-        sse(vec![ev_completed("request_2")]),
+        sse(vec![ev_response_created("resp_2"), ev_completed("resp_2")]),
     ];
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
+        .arg("-m")
+        .arg("gpt-5.1-codex")
+        .arg("-c")
+        .arg("include_apply_patch_tool=true")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")
@@ -116,21 +124,29 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
 +
 +    return True
 *** End Patch"#;
+    let add_script = format!("apply_patch <<'EOF'\n{freeform_add_patch}\nEOF\n");
+    let update_script = format!("apply_patch <<'EOF'\n{freeform_update_patch}\nEOF\n");
     let response_streams = vec![
         sse(vec![
-            ev_apply_patch_custom_tool_call("request_0", freeform_add_patch),
-            ev_completed("request_0"),
+            ev_response_created("resp_0"),
+            ev_shell_command_call("request_0", &add_script),
+            ev_completed("resp_0"),
         ]),
         sse(vec![
-            ev_apply_patch_custom_tool_call("request_1", freeform_update_patch),
-            ev_completed("request_1"),
+            ev_response_created("resp_1"),
+            ev_shell_command_call("request_1", &update_script),
+            ev_completed("resp_1"),
         ]),
-        sse(vec![ev_completed("request_2")]),
+        sse(vec![ev_response_created("resp_2"), ev_completed("resp_2")]),
     ];
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
+        .arg("-m")
+        .arg("gpt-5.1-codex")
+        .arg("-c")
+        .arg("include_apply_patch_tool=true")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")

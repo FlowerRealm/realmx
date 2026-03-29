@@ -27,6 +27,8 @@ use crate::render::line_utils::push_owned_lines;
 use crate::render::renderable::Renderable;
 use crate::style::proposed_plan_style;
 use crate::style::user_message_style;
+#[cfg(test)]
+use crate::test_support::PathBufExt;
 use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::truncate_text;
 use crate::tooltips;
@@ -617,7 +619,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         } else {
             line![
                 "See ",
-                "https://github.com/FlowerRealm/realmx".cyan().underlined(),
+                "https://github.com/openai/codex".cyan().underlined(),
                 " for installation options."
             ]
         };
@@ -632,7 +634,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/FlowerRealm/realmx/releases/latest"
+            "https://github.com/openai/codex/releases/latest"
                 .cyan()
                 .underlined(),
         ];
@@ -1241,7 +1243,7 @@ pub(crate) fn new_session_info(
         model.clone(),
         reasoning_effort,
         show_fast_status,
-        config.cwd.clone(),
+        config.cwd.to_path_buf(),
         CODEX_CLI_VERSION,
     );
     let mut parts: Vec<Box<dyn HistoryCell>> = vec![Box::new(header)];
@@ -2522,7 +2524,7 @@ pub(crate) fn new_view_image_tool_call(path: PathBuf, cwd: &Path) -> PlainHistor
 pub(crate) fn new_image_generation_call(
     call_id: String,
     revised_prompt: Option<String>,
-    saved_to: Option<String>,
+    saved_path: Option<String>,
 ) -> PlainHistoryCell {
     let detail = revised_prompt.unwrap_or_else(|| call_id.clone());
 
@@ -2530,8 +2532,8 @@ pub(crate) fn new_image_generation_call(
         vec!["• ".dim(), "Generated Image:".bold()].into(),
         vec!["  └ ".dim(), detail.dim()].into(),
     ];
-    if let Some(saved_to) = saved_to {
-        lines.push(vec!["  └ ".dim(), format!("Saved to: {saved_to}").dim()].into());
+    if let Some(saved_path) = saved_path {
+        lines.push(vec!["  └ ".dim(), "Saved to: ".dim(), saved_path.into()].into());
     }
 
     PlainHistoryCell { lines }
@@ -2836,6 +2838,25 @@ mod tests {
         .expect("resource link content should serialize")
     }
 
+    #[test]
+    fn image_generation_call_renders_saved_path() {
+        let saved_path = "file:///tmp/generated-image.png".to_string();
+        let cell = new_image_generation_call(
+            "call-image-generation".to_string(),
+            Some("A tiny blue square".to_string()),
+            Some(saved_path.clone()),
+        );
+
+        assert_eq!(
+            render_lines(&cell.display_lines(80)),
+            vec![
+                "• Generated Image:".to_string(),
+                "  └ A tiny blue square".to_string(),
+                format!("  └ Saved to: {saved_path}"),
+            ],
+        );
+    }
+
     fn session_configured_event(model: &str) -> SessionConfiguredEvent {
         SessionConfiguredEvent {
             session_id: ThreadId::new(),
@@ -2847,7 +2868,7 @@ mod tests {
             approval_policy: AskForApproval::Never,
             approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            cwd: PathBuf::from("/tmp/project"),
+            cwd: PathBuf::from("/tmp/project").abs().to_path_buf(),
             reasoning_effort: None,
             history_log_id: 0,
             history_entry_count: 0,
@@ -2961,9 +2982,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "snapshot path rendering differs on Windows"
+    )]
     async fn session_info_availability_nux_tooltip_snapshot() {
         let mut config = test_config().await;
-        config.cwd = PathBuf::from("/tmp/project");
+        config.cwd = PathBuf::from("/tmp/project").abs();
         let cell = new_session_info(
             &config,
             "gpt-5",
@@ -3101,6 +3126,7 @@ mod tests {
             disabled_tools: None,
             scopes: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         };
         let mut servers = config.mcp_servers.get().clone();
         servers.insert("docs".to_string(), stdio_config);
@@ -3125,6 +3151,7 @@ mod tests {
             disabled_tools: None,
             scopes: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         };
         servers.insert("http".to_string(), http_config);
         config

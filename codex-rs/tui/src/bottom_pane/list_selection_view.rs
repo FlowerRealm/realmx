@@ -44,8 +44,6 @@ const SIDE_CONTENT_GAP: u16 = 2;
 
 /// Shared menu-surface horizontal inset (2 cells per side) used by selection popups.
 const MENU_SURFACE_HORIZONTAL_INSET: u16 = 4;
-#[cfg(test)]
-const REALMX_HOME_DIR_NAME: &str = ".realmx";
 
 /// Controls how the side content panel is sized relative to the popup width.
 ///
@@ -373,11 +371,14 @@ impl ListSelectionView {
                         ""
                     };
                     let name_with_marker = format!("{name}{marker}");
+                    let is_disabled = item.is_disabled || item.disabled_reason.is_some();
                     let n = visible_idx + 1;
                     let wrap_prefix = if self.is_searchable {
                         // The number keys don't work when search is enabled (since we let the
                         // numbers be used for the search query).
                         format!("{prefix} ")
+                    } else if is_disabled {
+                        format!("{prefix} {}", " ".repeat(n.to_string().len() + 2))
                     } else {
                         format!("{prefix} {n}. ")
                     };
@@ -390,7 +391,6 @@ impl ListSelectionView {
                         .flatten()
                         .or_else(|| item.description.clone());
                     let wrap_indent = description.is_none().then_some(wrap_prefix_width);
-                    let is_disabled = item.is_disabled || item.disabled_reason.is_some();
                     GenericDisplayRow {
                         name: name_with_marker,
                         name_prefix_spans,
@@ -1171,7 +1171,7 @@ mod tests {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let home = dirs::home_dir().expect("home directory should be available");
-        let codex_home = home.join(REALMX_HOME_DIR_NAME);
+        let codex_home = home.join(".codex");
         let params =
             crate::theme_picker::build_theme_picker_params(None, Some(&codex_home), Some(94));
         let view = ListSelectionView::new(params, tx);

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::PlanModePhase;
@@ -139,6 +139,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -257,6 +258,7 @@ where
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,

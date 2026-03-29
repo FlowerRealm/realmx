@@ -3,9 +3,9 @@
 use anyhow::Context;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use codex_core::auth::AuthCredentialsStoreMode;
-use codex_core::auth::load_auth_dot_json;
 use codex_login::ServerOptions;
+use codex_login::auth::AuthCredentialsStoreMode;
+use codex_login::auth::load_auth_dot_json;
 use codex_login::run_device_code_login;
 use serde_json::json;
 use std::sync::Arc;
@@ -255,7 +255,7 @@ async fn device_code_login_integration_persists_without_api_key_on_exchange_fail
     let auth = load_auth_dot_json(codex_home.path(), AuthCredentialsStoreMode::File)
         .context("auth.json should load after login succeeds")?
         .context("auth.json written")?;
-    assert!(auth.openai_api_key.is_none());
+    assert!(auth.api_key.is_none());
     let tokens = auth.tokens.expect("tokens persisted");
     assert_eq!(tokens.access_token, "access-token-123");
     assert_eq!(tokens.refresh_token, "refresh-token-123");

@@ -366,8 +366,9 @@ pub(crate) async fn review_plan_candidate(
     let submit_result = reviewer
         .submit(Op::UserTurn {
             items: prompt_items,
-            cwd: turn_context.cwd.clone(),
+            cwd: turn_context.cwd.to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             model: review_model.clone(),
             effort: turn_context.reasoning_effort,
@@ -722,6 +723,7 @@ async fn interrupt_and_drain_reviewer(
 fn describe_turn_item(item: &codex_protocol::items::TurnItem) -> &'static str {
     match item {
         codex_protocol::items::TurnItem::UserMessage(_) => "a user message",
+        codex_protocol::items::TurnItem::HookPrompt(_) => "a hook prompt",
         codex_protocol::items::TurnItem::AgentMessage(_) => "an agent message",
         codex_protocol::items::TurnItem::Plan(_) => "a plan item",
         codex_protocol::items::TurnItem::Reasoning(_) => "a reasoning item",

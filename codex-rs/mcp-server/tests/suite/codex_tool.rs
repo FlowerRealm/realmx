@@ -400,7 +400,11 @@ async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
     );
 
     let requests = server.received_requests().await.unwrap();
-    let request = requests[0].body_json::<serde_json::Value>()?;
+    let request = requests
+        .iter()
+        .find(|request| request.url.path() == "/v1/responses")
+        .ok_or_else(|| anyhow::anyhow!("expected a /v1/responses request"))?
+        .body_json::<serde_json::Value>()?;
     let instructions = request["instructions"]
         .as_str()
         .expect("responses request should include instructions");

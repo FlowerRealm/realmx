@@ -1242,7 +1242,7 @@ The JSON-RPC auth/account surface is provider-aware. Use it to inspect whether t
 
 Codex supports these authentication modes. The current mode is surfaced in `account/updated` (`authMode`) and `account/read`, alongside the active `providerId` / `providerName`.
 
-- **API key (`apiKey`)**: Caller supplies an API key via `account/login/start` with `type: "apiKey"`. For the built-in OpenAI provider, Codex persists it in CLI auth storage. For non-OpenAI providers, Codex persists it in provider-scoped secure storage instead of `config.toml`.
+- **API key (`apiKey`)**: Caller supplies an API key via `account/login/start` with `type: "apiKey"`. For the built-in OpenAI provider, Codex persists it in CLI auth storage. For non-OpenAI providers, Codex persists it in the provider's `config.toml` entry.
 - **Provider OAuth (`oauth`)**: For non-OpenAI providers that expose an OAuth URL, start via `account/login/start` with `type: "oauth"`. Codex persists the provider-scoped OAuth tokens in MCP OAuth storage.
 - **ChatGPT managed (`chatgpt`)**: OpenAI-only. Codex owns the ChatGPT OAuth flow and refresh tokens. Start via `account/login/start` with `type: "chatgpt"`; Codex persists tokens and refreshes them automatically.
 

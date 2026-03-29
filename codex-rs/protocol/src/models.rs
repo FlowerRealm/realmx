@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use codex_utils_image::PromptImageMode;
-use codex_utils_image::load_for_prompt;
+use codex_utils_image::load_for_prompt_bytes;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::ser::Serializer;
 use ts_rs::TS;
 
+use crate::config_types::ApprovalsReviewer;
 use crate::config_types::CollaborationMode;
 use crate::config_types::SandboxMode;
 use crate::protocol::AskForApproval;
@@ -22,7 +23,7 @@ use crate::protocol::SandboxPolicy;
 use crate::protocol::WritableRoot;
 use crate::user_input::UserInput;
 use codex_execpolicy::Policy;
-use codex_git::GhostCommit;
+use codex_git_utils::GhostCommit;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_image::error::ImageProcessingError;
 use schemars::JsonSchema;
@@ -231,6 +232,8 @@ pub enum ResponseInputItem {
     },
     FunctionCallOutput {
         call_id: String,
+        #[ts(as = "FunctionCallOutputBody")]
+        #[schemars(with = "FunctionCallOutputBody")]
         output: FunctionCallOutputPayload,
     },
     McpToolCallOutput {
@@ -239,6 +242,11 @@ pub enum ResponseInputItem {
     },
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
+        #[ts(as = "FunctionCallOutputBody")]
+        #[schemars(with = "FunctionCallOutputBody")]
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
@@ -306,6 +314,7 @@ pub enum ResponseItem {
     Reasoning {
         #[serde(default, skip_serializing)]
         #[ts(skip)]
+        #[schemars(skip)]
         id: String,
         summary: Vec<ReasoningItemReasoningSummary>,
         #[serde(default, skip_serializing_if = "should_serialize_reasoning_content")]
@@ -356,6 +365,8 @@ pub enum ResponseItem {
     // We keep this behavior centralized in `FunctionCallOutputPayload`.
     FunctionCallOutput {
         call_id: String,
+        #[ts(as = "FunctionCallOutputBody")]
+        #[schemars(with = "FunctionCallOutputBody")]
         output: FunctionCallOutputPayload,
     },
     CustomToolCall {
@@ -375,6 +386,11 @@ pub enum ResponseItem {
     // text or structured content items.
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
+        #[ts(as = "FunctionCallOutputBody")]
+        #[schemars(with = "FunctionCallOutputBody")]
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
@@ -463,11 +479,10 @@ const APPROVAL_POLICY_UNLESS_TRUSTED: &str =
 const APPROVAL_POLICY_ON_FAILURE: &str =
     include_str!("prompts/permissions/approval_policy/on_failure.md");
 const APPROVAL_POLICY_ON_REQUEST_RULE: &str =
-    include_str!("prompts/permissions/approval_policy/on_request_rule.md");
+    include_str!("prompts/permissions/approval_policy/on_request.md");
 const APPROVAL_POLICY_ON_REQUEST_RULE_REQUEST_PERMISSION: &str =
     include_str!("prompts/permissions/approval_policy/on_request_rule_request_permission.md");
-const GUARDIAN_APPROVAL_FEATURE: &str =
-    include_str!("prompts/permissions/approval_policy/guardian.md");
+const GUARDIAN_SUBAGENT_APPROVAL_SUFFIX: &str = "`approvals_reviewer` is `guardian_subagent`: Sandbox escalations with require_escalated will be reviewed for compliance with the policy. If a rejection happens, you should proceed only with a materially safer alternative, or inform the user of the risk and send a final message to ask for approval.";
 
 const SANDBOX_MODE_DANGER_FULL_ACCESS: &str =
     include_str!("prompts/permissions/sandbox_mode/danger_full_access.md");
@@ -478,6 +493,14 @@ const SANDBOX_MODE_READ_ONLY: &str = include_str!("prompts/permissions/sandbox_m
 const REALTIME_START_INSTRUCTIONS: &str = include_str!("prompts/realtime/realtime_start.md");
 const REALTIME_END_INSTRUCTIONS: &str = include_str!("prompts/realtime/realtime_end.md");
 
+struct PermissionsPromptConfig<'a> {
+    approval_policy: AskForApproval,
+    approvals_reviewer: ApprovalsReviewer,
+    exec_policy: &'a Policy,
+    exec_permission_approvals_enabled: bool,
+    request_permissions_tool_enabled: bool,
+}
+
 impl DeveloperInstructions {
     pub fn new<T: Into<String>>(text: T) -> Self {
         Self { text: text.into() }
@@ -485,7 +508,7 @@ impl DeveloperInstructions {
 
     pub fn from(
         approval_policy: AskForApproval,
-        guardian_approval_enabled: bool,
+        approvals_reviewer: ApprovalsReviewer,
         exec_policy: &Policy,
         exec_permission_approvals_enabled: bool,
         request_permissions_tool_enabled: bool,
@@ -520,20 +543,21 @@ impl DeveloperInstructions {
                 with_request_permissions_tool(APPROVAL_POLICY_UNLESS_TRUSTED)
             }
             AskForApproval::OnFailure => with_request_permissions_tool(APPROVAL_POLICY_ON_FAILURE),
-            AskForApproval::OnRequest => {
-                let mut instructions = on_request_instructions();
-                if guardian_approval_enabled {
-                    instructions.push_str("\n\n");
-                    instructions.push_str(GUARDIAN_APPROVAL_FEATURE);
-                }
-                instructions
-            }
+            AskForApproval::OnRequest => on_request_instructions(),
             AskForApproval::Granular(granular_config) => granular_instructions(
                 granular_config,
                 exec_policy,
                 exec_permission_approvals_enabled,
                 request_permissions_tool_enabled,
             ),
+        };
+
+        let text = if approvals_reviewer == ApprovalsReviewer::GuardianSubagent
+            && approval_policy != AskForApproval::Never
+        {
+            format!("{text}\n\n{GUARDIAN_SUBAGENT_APPROVAL_SUFFIX}")
+        } else {
+            text
         };
 
         DeveloperInstructions::new(text)
@@ -585,7 +609,7 @@ impl DeveloperInstructions {
     pub fn from_policy(
         sandbox_policy: &SandboxPolicy,
         approval_policy: AskForApproval,
-        guardian_approval_enabled: bool,
+        approvals_reviewer: ApprovalsReviewer,
         exec_policy: &Policy,
         cwd: &Path,
         exec_permission_approvals_enabled: bool,
@@ -610,13 +634,13 @@ impl DeveloperInstructions {
         DeveloperInstructions::from_permissions_with_network(
             sandbox_mode,
             network_access,
-            DeveloperInstructions::from(
+            PermissionsPromptConfig {
                 approval_policy,
-                guardian_approval_enabled,
+                approvals_reviewer,
                 exec_policy,
                 exec_permission_approvals_enabled,
                 request_permissions_tool_enabled,
-            ),
+            },
             writable_roots,
         )
     }
@@ -638,7 +662,7 @@ impl DeveloperInstructions {
     fn from_permissions_with_network(
         sandbox_mode: SandboxMode,
         network_access: NetworkAccess,
-        permission_instructions: DeveloperInstructions,
+        config: PermissionsPromptConfig<'_>,
         writable_roots: Option<Vec<WritableRoot>>,
     ) -> Self {
         let start_tag = DeveloperInstructions::new("<permissions instructions>");
@@ -648,7 +672,13 @@ impl DeveloperInstructions {
                 sandbox_mode,
                 network_access,
             ))
-            .concat(permission_instructions)
+            .concat(DeveloperInstructions::from(
+                config.approval_policy,
+                config.approvals_reviewer,
+                config.exec_policy,
+                config.exec_permission_approvals_enabled,
+                config.request_permissions_tool_enabled,
+            ))
             .concat(DeveloperInstructions::from_writable_roots(writable_roots))
             .concat(end_tag)
     }
@@ -932,7 +962,7 @@ fn invalid_image_error_placeholder(
 fn unsupported_image_error_placeholder(path: &std::path::Path, mime: &str) -> ContentItem {
     ContentItem::InputText {
         text: format!(
-            "Codex cannot attach image at `{}`: unsupported image format `{}`.",
+            "Codex cannot attach image at `{}`: unsupported image `{}`.",
             path.display(),
             mime
         ),
@@ -941,10 +971,11 @@ fn unsupported_image_error_placeholder(path: &std::path::Path, mime: &str) -> Co
 
 pub fn local_image_content_items_with_label_number(
     path: &std::path::Path,
+    file_bytes: Vec<u8>,
     label_number: Option<usize>,
     mode: PromptImageMode,
 ) -> Vec<ContentItem> {
-    match load_for_prompt(path, mode) {
+    match load_for_prompt_bytes(path, file_bytes, mode) {
         Ok(image) => {
             let mut items = Vec::with_capacity(3);
             if let Some(label_number) = label_number {
@@ -962,28 +993,20 @@ pub fn local_image_content_items_with_label_number(
             }
             items
         }
-        Err(err) => {
-            if matches!(&err, ImageProcessingError::Read { .. }) {
+        Err(err) => match &err {
+            ImageProcessingError::Read { .. } | ImageProcessingError::Encode { .. } => {
                 vec![local_image_error_placeholder(path, &err)]
-            } else if err.is_invalid_image() {
-                vec![invalid_image_error_placeholder(path, &err)]
-            } else {
-                let Some(mime_guess) = mime_guess::from_path(path).first() else {
-                    return vec![local_image_error_placeholder(
-                        path,
-                        "unsupported MIME type (unknown)",
-                    )];
-                };
-                let mime = mime_guess.essence_str().to_owned();
-                if !mime.starts_with("image/") {
-                    return vec![local_image_error_placeholder(
-                        path,
-                        format!("unsupported MIME type `{mime}`"),
-                    )];
-                }
-                vec![unsupported_image_error_placeholder(path, &mime)]
             }
-        }
+            ImageProcessingError::Decode { .. } if err.is_invalid_image() => {
+                vec![invalid_image_error_placeholder(path, &err)]
+            }
+            ImageProcessingError::Decode { .. } => {
+                vec![local_image_error_placeholder(path, &err)]
+            }
+            ImageProcessingError::UnsupportedImageFormat { mime } => {
+                vec![unsupported_image_error_placeholder(path, mime)]
+            }
+        },
     }
 }
 
@@ -1004,9 +1027,15 @@ impl From<ResponseInputItem> for ResponseItem {
                 let output = output.into_function_call_output_payload();
                 Self::FunctionCallOutput { call_id, output }
             }
-            ResponseInputItem::CustomToolCallOutput { call_id, output } => {
-                Self::CustomToolCallOutput { call_id, output }
-            }
+            ResponseInputItem::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            } => Self::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            },
             ResponseInputItem::ToolSearchOutput {
                 call_id,
                 status,
@@ -1111,11 +1140,15 @@ impl From<Vec<UserInput>> for ResponseInputItem {
                     }
                     UserInput::LocalImage { path } => {
                         image_index += 1;
-                        local_image_content_items_with_label_number(
-                            &path,
-                            Some(image_index),
-                            PromptImageMode::ResizeToFit,
-                        )
+                        match std::fs::read(&path) {
+                            Ok(file_bytes) => local_image_content_items_with_label_number(
+                                &path,
+                                file_bytes,
+                                Some(image_index),
+                                PromptImageMode::ResizeToFit,
+                            ),
+                            Err(err) => vec![local_image_error_placeholder(&path, err)],
+                        }
                     }
                     UserInput::Skill { .. } | UserInput::Mention { .. } => Vec::new(), // Tool bodies are injected later in core
                 })
@@ -1914,13 +1947,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnRequest,
-                false,
-                &Policy::empty(),
-                false,
-                false,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnRequest,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: false,
+                request_permissions_tool_enabled: false,
+            },
             None,
         );
 
@@ -1948,7 +1981,7 @@ mod tests {
         let instructions = DeveloperInstructions::from_policy(
             &policy,
             AskForApproval::UnlessTrusted,
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             &PathBuf::from("/tmp"),
             false,
@@ -1971,13 +2004,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnRequest,
-                false,
-                &exec_policy,
-                false,
-                false,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnRequest,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &exec_policy,
+                exec_permission_approvals_enabled: false,
+                request_permissions_tool_enabled: false,
+            },
             None,
         );
 
@@ -1992,13 +2025,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::UnlessTrusted,
-                false,
-                &Policy::empty(),
-                false,
-                true,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::UnlessTrusted,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: false,
+                request_permissions_tool_enabled: true,
+            },
             None,
         );
 
@@ -2012,13 +2045,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnFailure,
-                false,
-                &Policy::empty(),
-                false,
-                true,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnFailure,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: false,
+                request_permissions_tool_enabled: true,
+            },
             None,
         );
 
@@ -2032,13 +2065,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnRequest,
-                false,
-                &Policy::empty(),
-                true,
-                false,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnRequest,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: true,
+                request_permissions_tool_enabled: false,
+            },
             None,
         );
 
@@ -2052,13 +2085,13 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnRequest,
-                false,
-                &Policy::empty(),
-                false,
-                true,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnRequest,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: false,
+                request_permissions_tool_enabled: true,
+            },
             None,
         );
 
@@ -2116,19 +2149,48 @@ mod tests {
         let instructions = DeveloperInstructions::from_permissions_with_network(
             SandboxMode::WorkspaceWrite,
             NetworkAccess::Enabled,
-            DeveloperInstructions::from(
-                AskForApproval::OnRequest,
-                false,
-                &Policy::empty(),
-                true,
-                true,
-            ),
+            PermissionsPromptConfig {
+                approval_policy: AskForApproval::OnRequest,
+                approvals_reviewer: ApprovalsReviewer::User,
+                exec_policy: &Policy::empty(),
+                exec_permission_approvals_enabled: true,
+                request_permissions_tool_enabled: true,
+            },
             None,
         );
 
         let text = instructions.into_text();
         assert!(text.contains("with_additional_permissions"));
         assert!(text.contains("# request_permissions Tool"));
+    }
+
+    #[test]
+    fn guardian_subagent_approvals_append_guardian_specific_guidance() {
+        let text = DeveloperInstructions::from(
+            AskForApproval::OnRequest,
+            ApprovalsReviewer::GuardianSubagent,
+            &Policy::empty(),
+            false,
+            false,
+        )
+        .into_text();
+
+        assert!(text.contains("`approvals_reviewer` is `guardian_subagent`"));
+        assert!(text.contains("materially safer alternative"));
+    }
+
+    #[test]
+    fn guardian_subagent_approvals_omit_guardian_specific_guidance_when_approval_is_never() {
+        let text = DeveloperInstructions::from(
+            AskForApproval::Never,
+            ApprovalsReviewer::GuardianSubagent,
+            &Policy::empty(),
+            false,
+            false,
+        )
+        .into_text();
+
+        assert!(!text.contains("`approvals_reviewer` is `guardian_subagent`"));
     }
 
     fn granular_categories_section(title: &str, categories: &[&str]) -> String {
@@ -2173,7 +2235,7 @@ mod tests {
                 request_permissions: true,
                 mcp_elicitations: false,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             true,
             false,
@@ -2207,7 +2269,7 @@ mod tests {
                 request_permissions: true,
                 mcp_elicitations: true,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             true,
             false,
@@ -2240,7 +2302,7 @@ mod tests {
                 request_permissions: true,
                 mcp_elicitations: true,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             false,
             false,
@@ -2273,7 +2335,7 @@ mod tests {
                 request_permissions: true,
                 mcp_elicitations: true,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             true,
             true,
@@ -2289,7 +2351,7 @@ mod tests {
                 request_permissions: false,
                 mcp_elicitations: true,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             true,
             true,
@@ -2309,7 +2371,7 @@ mod tests {
                 request_permissions: true,
                 mcp_elicitations: false,
             }),
-            false,
+            ApprovalsReviewer::User,
             &Policy::empty(),
             true,
             false,
@@ -2457,6 +2519,7 @@ mod tests {
     fn serializes_custom_tool_image_outputs_as_array() -> Result<()> {
         let item = ResponseInputItem::CustomToolCallOutput {
             call_id: "call1".into(),
+            name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::InputImage {
                     image_url: "data:image/png;base64,BASE64".into(),
@@ -2960,8 +3023,8 @@ mod tests {
                 match &content[0] {
                     ContentItem::InputText { text } => {
                         assert!(
-                            text.contains("unsupported MIME type `application/json`"),
-                            "placeholder should mention unsupported MIME: {text}"
+                            text.contains("unsupported image `application/json`"),
+                            "placeholder should mention unsupported image MIME: {text}"
                         );
                         assert!(
                             text.contains(&json_path.display().to_string()),
@@ -2995,7 +3058,7 @@ mod tests {
             ResponseInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 let expected = format!(
-                    "Codex cannot attach image at `{}`: unsupported image format `image/svg+xml`.",
+                    "Codex cannot attach image at `{}`: unsupported image `image/svg+xml`.",
                     svg_path.display()
                 );
                 match &content[0] {

@@ -1,6 +1,7 @@
 use crate::bespoke_event_handling::apply_bespoke_event_handling;
 use crate::command_exec::CommandExecManager;
 use crate::command_exec::StartCommandExecParams;
+use crate::config_api::apply_runtime_feature_enablement;
 use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::error_code::INVALID_PARAMS_ERROR_CODE;
@@ -12,7 +13,6 @@ use crate::models::supported_models;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::OutgoingMessageSender;
-use crate::outgoing_message::OutgoingNotification;
 use crate::outgoing_message::RequestContext;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::thread_status::ThreadWatchManager;
@@ -32,6 +32,7 @@ use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::CancelLoginAccountResponse;
 use codex_app_server_protocol::CancelLoginAccountStatus;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::CodexErrorInfo as AppServerCodexErrorInfo;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CommandExecParams;
@@ -64,7 +65,6 @@ use codex_app_server_protocol::GetConversationSummaryParams;
 use codex_app_server_protocol::GetConversationSummaryResponse;
 use codex_app_server_protocol::GitDiffToRemoteResponse;
 use codex_app_server_protocol::GitInfo as ApiGitInfo;
-use codex_app_server_protocol::HazelnutScope as ApiHazelnutScope;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ListMcpServerStatusParams;
 use codex_app_server_protocol::ListMcpServerStatusResponse;
@@ -72,6 +72,7 @@ use codex_app_server_protocol::LoginAccountParams;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LoginApiKeyParams;
 use codex_app_server_protocol::LogoutAccountResponse;
+use codex_app_server_protocol::MarketplaceInterface;
 use codex_app_server_protocol::McpServerOauthLoginCompletedNotification;
 use codex_app_server_protocol::McpServerOauthLoginParams;
 use codex_app_server_protocol::McpServerOauthLoginResponse;
@@ -94,7 +95,6 @@ use codex_app_server_protocol::PluginSource;
 use codex_app_server_protocol::PluginSummary;
 use codex_app_server_protocol::PluginUninstallParams;
 use codex_app_server_protocol::PluginUninstallResponse;
-use codex_app_server_protocol::ProductSurface as ApiProductSurface;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ReviewDelivery as ApiReviewDelivery;
 use codex_app_server_protocol::ReviewStartParams;
@@ -108,10 +108,6 @@ use codex_app_server_protocol::SkillsConfigWriteParams;
 use codex_app_server_protocol::SkillsConfigWriteResponse;
 use codex_app_server_protocol::SkillsListParams;
 use codex_app_server_protocol::SkillsListResponse;
-use codex_app_server_protocol::SkillsRemoteReadParams;
-use codex_app_server_protocol::SkillsRemoteReadResponse;
-use codex_app_server_protocol::SkillsRemoteWriteParams;
-use codex_app_server_protocol::SkillsRemoteWriteResponse;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadActivePlan;
 use codex_app_server_protocol::ThreadActivePlanRow;
@@ -153,6 +149,8 @@ use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadRollbackParams;
 use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
+use codex_app_server_protocol::ThreadShellCommandParams;
+use codex_app_server_protocol::ThreadShellCommandResponse;
 use codex_app_server_protocol::ThreadSortKey;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStartParams;
@@ -166,6 +164,7 @@ use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::ThreadUnsubscribeStatus;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
@@ -183,9 +182,11 @@ use codex_backend_client::Client as BackendClient;
 use codex_chatgpt::connectors;
 use codex_cloud_requirements::cloud_requirements_loader;
 use codex_core::AuthManager;
+use codex_core::AuthScope;
 use codex_core::CodexAuth;
 use codex_core::CodexThread;
 use codex_core::Cursor as RolloutCursor;
+use codex_core::ForkSnapshot;
 use codex_core::NewThread;
 use codex_core::ProviderCredentialMode;
 use codex_core::RolloutRecorder;
@@ -195,9 +196,9 @@ use codex_core::ThreadConfigSnapshot;
 use codex_core::ThreadManager;
 use codex_core::ThreadSortKey as CoreThreadSortKey;
 use codex_core::activate_provider_api_key;
+use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
-use codex_core::auth::login_with_api_key;
-use codex_core::auth::login_with_chatgpt_auth_tokens;
+use codex_core::auth::login_with_api_key_for_scope;
 use codex_core::clear_provider_credentials;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -208,21 +209,20 @@ use codex_core::config::types::McpServerTransportConfig;
 use codex_core::config_loader::CloudRequirementsLoadError;
 use codex_core::config_loader::CloudRequirementsLoadErrorCode;
 use codex_core::config_loader::CloudRequirementsLoader;
+use codex_core::config_loader::LoaderOverrides;
+use codex_core::config_loader::load_config_layers_state;
 use codex_core::default_client::set_default_client_residency_requirement;
 use codex_core::detect_provider_credential_mode;
 use codex_core::error::CodexErr;
 use codex_core::error::Result as CodexResult;
+use codex_core::exec::ExecCapturePolicy;
 use codex_core::exec::ExecExpiration;
 use codex_core::exec::ExecParams;
 use codex_core::exec_env::create_env;
-use codex_core::features::FEATURES;
-use codex_core::features::Feature;
-use codex_core::features::Stage;
 use codex_core::find_archived_thread_path_by_id_str;
 use codex_core::find_thread_name_by_id;
 use codex_core::find_thread_names_by_ids;
 use codex_core::find_thread_path_by_id_str;
-use codex_core::git_info::git_diff_to_remote;
 use codex_core::mcp::auth::discover_supported_scopes;
 use codex_core::mcp::auth::resolve_oauth_scopes;
 use codex_core::mcp::collect_mcp_snapshot;
@@ -233,12 +233,14 @@ use codex_core::plan_workspace::PlanWorkspace;
 use codex_core::plan_workspace::PlanWorkspacePlan;
 use codex_core::plan_workspace::PlanWorkspacePlanSource;
 use codex_core::plugins::MarketplaceError;
-use codex_core::plugins::MarketplacePluginSourceSummary;
+use codex_core::plugins::MarketplacePluginSource;
+use codex_core::plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 use codex_core::plugins::PluginInstallError as CorePluginInstallError;
 use codex_core::plugins::PluginInstallRequest;
 use codex_core::plugins::PluginReadRequest;
 use codex_core::plugins::PluginUninstallError as CorePluginUninstallError;
 use codex_core::plugins::load_plugin_apps;
+use codex_core::plugins::load_plugin_mcp_servers;
 use codex_core::provider_login_capabilities;
 use codex_core::provider_oauth_url;
 use codex_core::read_head_for_summary;
@@ -246,17 +248,20 @@ use codex_core::read_session_meta_line;
 use codex_core::resolve_provider_credential;
 use codex_core::rollout_date_parts;
 use codex_core::sandboxing::SandboxPermissions;
-use codex_core::skills::remote::export_remote_skill;
-use codex_core::skills::remote::list_remote_skills;
 use codex_core::state_db::StateDbHandle;
 use codex_core::state_db::get_state_db;
 use codex_core::state_db::reconcile_rollout;
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_core::windows_sandbox::WindowsSandboxSetupMode as CoreWindowsSandboxSetupMode;
 use codex_core::windows_sandbox::WindowsSandboxSetupRequest;
+use codex_features::FEATURES;
+use codex_features::Feature;
+use codex_features::Stage;
 use codex_feedback::CodexFeedback;
+use codex_git_utils::git_diff_to_remote;
 use codex_login::ServerOptions as LoginServerOptions;
 use codex_login::ShutdownHandle;
+use codex_login::auth::login_with_chatgpt_auth_tokens_for_scope;
 use codex_login::run_login_server;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::CollaborationMode;
@@ -279,8 +284,6 @@ use codex_protocol::protocol::McpAuthStatus as CoreMcpAuthStatus;
 use codex_protocol::protocol::McpServerRefreshConfig;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
-use codex_protocol::protocol::RemoteSkillHazelnutScope;
-use codex_protocol::protocol::RemoteSkillProductSurface;
 use codex_protocol::protocol::ReviewDelivery as CoreReviewDelivery;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::ReviewTarget as CoreReviewTarget;
@@ -294,10 +297,13 @@ use codex_protocol::user_input::UserInput as CoreInputItem;
 use codex_rmcp_client::OauthLoginCancelHandle;
 use codex_rmcp_client::perform_oauth_login_return_url;
 use codex_state::StateRuntime;
+use codex_state::ThreadMetadata;
 use codex_state::ThreadMetadataBuilder;
 use codex_state::log_db::LogDbLayer;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
 use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -330,6 +336,7 @@ use codex_app_server_protocol::ServerRequest;
 
 mod apps_list_helpers;
 mod plugin_app_helpers;
+mod plugin_mcp_oauth;
 
 use crate::filters::compute_source_filters;
 use crate::filters::source_kind_matches;
@@ -351,6 +358,7 @@ struct ThreadListFilters {
 // Duration before a ChatGPT login attempt is abandoned.
 const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APP_LIST_LOAD_TIMEOUT: Duration = Duration::from_secs(90);
+
 enum ActiveLoginKind {
     Chatgpt {
         shutdown_handle: ShutdownHandle,
@@ -387,24 +395,6 @@ enum ThreadShutdownResult {
     TimedOut,
 }
 
-fn convert_remote_scope(scope: ApiHazelnutScope) -> RemoteSkillHazelnutScope {
-    match scope {
-        ApiHazelnutScope::WorkspaceShared => RemoteSkillHazelnutScope::WorkspaceShared,
-        ApiHazelnutScope::AllShared => RemoteSkillHazelnutScope::AllShared,
-        ApiHazelnutScope::Personal => RemoteSkillHazelnutScope::Personal,
-        ApiHazelnutScope::Example => RemoteSkillHazelnutScope::Example,
-    }
-}
-
-fn convert_remote_product_surface(product_surface: ApiProductSurface) -> RemoteSkillProductSurface {
-    match product_surface {
-        ApiProductSurface::Chatgpt => RemoteSkillProductSurface::Chatgpt,
-        ApiProductSurface::Codex => RemoteSkillProductSurface::Codex,
-        ApiProductSurface::Api => RemoteSkillProductSurface::Api,
-        ApiProductSurface::Atlas => RemoteSkillProductSurface::Atlas,
-    }
-}
-
 impl Drop for ActiveLogin {
     fn drop(&mut self) {
         match &self.kind {
@@ -421,7 +411,8 @@ pub(crate) struct CodexMessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     arg0_paths: Arg0DispatchPaths,
     config: Arc<Config>,
-    cli_overrides: Vec<(String, TomlValue)>,
+    cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
+    runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
     cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
     pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
@@ -459,13 +450,21 @@ enum EnsureConversationListenerResult {
     ConnectionClosed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefreshTokenRequestOutcome {
+    NotAttemptedOrSucceeded,
+    FailedTransiently,
+    FailedPermanently,
+}
+
 pub(crate) struct CodexMessageProcessorArgs {
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) thread_manager: Arc<ThreadManager>,
     pub(crate) outgoing: Arc<OutgoingMessageSender>,
     pub(crate) arg0_paths: Arg0DispatchPaths,
     pub(crate) config: Arc<Config>,
-    pub(crate) cli_overrides: Vec<(String, TomlValue)>,
+    pub(crate) cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
+    pub(crate) runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
     pub(crate) cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
     pub(crate) feedback: CodexFeedback,
     pub(crate) log_db: Option<LogDbLayer>,
@@ -477,13 +476,26 @@ impl CodexMessageProcessor {
         self.thread_manager.skills_manager().clear_cache();
     }
 
-    pub(crate) async fn maybe_start_curated_repo_sync_for_latest_config(&self) {
+    pub(crate) async fn sync_models_manager_provider_from_config(&self, config: &Config) {
+        self.thread_manager
+            .get_models_manager()
+            .replace_provider(
+                config.model_provider_id.clone(),
+                config.model_provider.clone(),
+            )
+            .await;
+    }
+
+    pub(crate) async fn maybe_start_plugin_startup_tasks_for_latest_config(&self) {
         match self.load_latest_config(/*fallback_cwd*/ None).await {
             Ok(config) => self
                 .thread_manager
                 .plugins_manager()
-                .maybe_start_curated_repo_sync_for_config(&config),
-            Err(err) => warn!("failed to load latest config for curated plugin sync: {err:?}"),
+                .maybe_start_plugin_startup_tasks_for_config(
+                    &config,
+                    self.thread_manager.auth_manager(),
+                ),
+            Err(err) => warn!("failed to load latest config for plugin startup tasks: {err:?}"),
         }
     }
 
@@ -492,7 +504,9 @@ impl CodexMessageProcessor {
             &self.config.codex_home,
             &self.config.model_provider_id,
             &self.config.model_provider,
-            self.auth_manager.auth_cached().as_ref(),
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+                .as_ref(),
             self.config.mcp_oauth_credentials_store_mode,
         )
         .ok()
@@ -507,8 +521,10 @@ impl CodexMessageProcessor {
         }
     }
 
-    async fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
-        let auth = self.auth_manager.auth_cached();
+    fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
+        let auth = self
+            .auth_manager
+            .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()));
         let capabilities = provider_login_capabilities(
             &self.config.model_provider_id,
             &self.config.model_provider,
@@ -559,6 +575,7 @@ impl CodexMessageProcessor {
             arg0_paths,
             config,
             cli_overrides,
+            runtime_feature_enablement,
             cloud_requirements,
             feedback,
             log_db,
@@ -570,6 +587,7 @@ impl CodexMessageProcessor {
             arg0_paths,
             config,
             cli_overrides,
+            runtime_feature_enablement,
             cloud_requirements,
             active_login: Arc::new(Mutex::new(None)),
             pending_thread_unloads: Arc::new(Mutex::new(HashSet::new())),
@@ -590,7 +608,7 @@ impl CodexMessageProcessor {
     ) -> Result<Config, JSONRPCErrorError> {
         let cloud_requirements = self.current_cloud_requirements();
         let mut config = codex_core::config::ConfigBuilder::default()
-            .cli_overrides(self.cli_overrides.clone())
+            .cli_overrides(self.current_cli_overrides())
             .fallback_cwd(fallback_cwd)
             .cloud_requirements(cloud_requirements)
             .build()
@@ -600,6 +618,8 @@ impl CodexMessageProcessor {
                 message: format!("failed to reload config: {err}"),
                 data: None,
             })?;
+        apply_runtime_feature_enablement(&mut config, &self.current_runtime_feature_enablement());
+        config.codex_self_exe = self.arg0_paths.codex_self_exe.clone();
         config.codex_linux_sandbox_exe = self.arg0_paths.codex_linux_sandbox_exe.clone();
         config.main_execve_wrapper_exe = self.arg0_paths.main_execve_wrapper_exe.clone();
         Ok(config)
@@ -607,6 +627,20 @@ impl CodexMessageProcessor {
 
     fn current_cloud_requirements(&self) -> CloudRequirementsLoader {
         self.cloud_requirements
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn current_cli_overrides(&self) -> Vec<(String, TomlValue)> {
+        self.cli_overrides
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn current_runtime_feature_enablement(&self) -> BTreeMap<String, bool> {
+        self.runtime_feature_enablement
             .read()
             .map(|guard| guard.clone())
             .unwrap_or_default()
@@ -804,6 +838,10 @@ impl CodexMessageProcessor {
                 self.thread_read(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadShellCommand { request_id, params } => {
+                self.thread_shell_command(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::SkillsList { request_id, params } => {
                 self.skills_list(to_connection_request_id(request_id), params)
                     .await;
@@ -814,14 +852,6 @@ impl CodexMessageProcessor {
             }
             ClientRequest::PluginRead { request_id, params } => {
                 self.plugin_read(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::SkillsRemoteList { request_id, params } => {
-                self.skills_remote_list(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::SkillsRemoteExport { request_id, params } => {
-                self.skills_remote_export(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::AppsList { request_id, params } => {
@@ -983,7 +1013,8 @@ impl CodexMessageProcessor {
             }
             ClientRequest::ConfigRead { .. }
             | ClientRequest::ConfigValueWrite { .. }
-            | ClientRequest::ConfigBatchWrite { .. } => {
+            | ClientRequest::ConfigBatchWrite { .. }
+            | ClientRequest::ExperimentalFeatureEnablementSet { .. } => {
                 warn!("Config request reached CodexMessageProcessor unexpectedly");
             }
             ClientRequest::FsReadFile { .. }
@@ -992,7 +1023,9 @@ impl CodexMessageProcessor {
             | ClientRequest::FsGetMetadata { .. }
             | ClientRequest::FsReadDirectory { .. }
             | ClientRequest::FsRemove { .. }
-            | ClientRequest::FsCopy { .. } => {
+            | ClientRequest::FsCopy { .. }
+            | ClientRequest::FsWatch { .. }
+            | ClientRequest::FsUnwatch { .. } => {
                 warn!("Filesystem request reached CodexMessageProcessor unexpectedly");
             }
             ClientRequest::ConfigRequirementsRead { .. } => {
@@ -1061,7 +1094,11 @@ impl CodexMessageProcessor {
         let provider = self.config.model_provider.clone();
         let capabilities = provider_login_capabilities(&provider_id, &provider);
 
-        if capabilities.uses_openai_auth() && self.auth_manager.is_external_auth_active() {
+        if capabilities.uses_openai_auth()
+            && self
+                .auth_manager
+                .is_external_auth_active_for_provider(Some(provider_id.as_str()))
+        {
             return Err(self.external_auth_active_error());
         }
 
@@ -1095,10 +1132,11 @@ impl CodexMessageProcessor {
         }
 
         let result = if capabilities.uses_openai_auth() {
-            login_with_api_key(
+            login_with_api_key_for_scope(
                 &self.config.codex_home,
+                &AuthScope::provider(provider_id.clone()),
                 &params.api_key,
-                self.config.cli_auth_credentials_store_mode,
+                AuthCredentialsStoreMode::File,
             )
             .map_err(std::io::Error::other)
         } else {
@@ -1150,7 +1188,7 @@ impl CodexMessageProcessor {
 
                 self.outgoing
                     .send_server_notification(ServerNotification::AccountUpdated(
-                        self.current_account_updated_notification().await,
+                        self.current_account_updated_notification(),
                     ))
                     .await;
             }
@@ -1176,7 +1214,10 @@ impl CodexMessageProcessor {
             });
         }
 
-        if self.auth_manager.is_external_auth_active() {
+        if self
+            .auth_manager
+            .is_external_auth_active_for_provider(Some(config.model_provider_id.as_str()))
+        {
             return Err(self.external_auth_active_error());
         }
 
@@ -1188,7 +1229,7 @@ impl CodexMessageProcessor {
             });
         }
 
-        Ok(LoginServerOptions {
+        let mut opts = LoginServerOptions {
             open_browser: false,
             ..LoginServerOptions::new(
                 config.codex_home.clone(),
@@ -1196,7 +1237,9 @@ impl CodexMessageProcessor {
                 config.forced_chatgpt_workspace_id.clone(),
                 config.cli_auth_credentials_store_mode,
             )
-        })
+        };
+        opts.auth_scope = AuthScope::provider(config.model_provider_id.clone());
+        Ok(opts)
     }
 
     async fn login_chatgpt_v2(&mut self, request_id: ConnectionRequestId) {
@@ -1227,7 +1270,7 @@ impl CodexMessageProcessor {
                     let cloud_requirements = self.cloud_requirements.clone();
                     let chatgpt_base_url = self.config.chatgpt_base_url.clone();
                     let codex_home = self.config.codex_home.clone();
-                    let cli_overrides = self.cli_overrides.clone();
+                    let cli_overrides = self.current_cli_overrides();
                     let provider_id = self.config.model_provider_id.clone();
                     let provider_name = self.config.model_provider.name.clone();
                     let auth_url = server.auth_url.clone();
@@ -1272,7 +1315,8 @@ impl CodexMessageProcessor {
                             .await;
 
                             // Notify clients with the actual current auth mode.
-                            let auth = auth_manager.auth_cached();
+                            let auth =
+                                auth_manager.auth_cached_for_provider(Some(provider_id.as_str()));
                             let payload_v2 = AccountUpdatedNotification {
                                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
@@ -1354,7 +1398,7 @@ impl CodexMessageProcessor {
             provider.env_http_headers.clone(),
             &oauth_scopes,
             oauth_resource.as_deref(),
-            None,
+            /*timeout_secs*/ None,
             self.config.mcp_oauth_callback_port,
             self.config.mcp_oauth_callback_url.as_deref(),
         )
@@ -1558,8 +1602,9 @@ impl CodexMessageProcessor {
             return;
         }
 
-        if let Err(err) = login_with_chatgpt_auth_tokens(
+        if let Err(err) = login_with_chatgpt_auth_tokens_for_scope(
             &self.config.codex_home,
+            &AuthScope::provider(self.config.model_provider_id.clone()),
             &access_token,
             &chatgpt_account_id,
             chatgpt_plan_type.as_deref(),
@@ -1579,11 +1624,9 @@ impl CodexMessageProcessor {
             self.config.chatgpt_base_url.clone(),
             self.config.codex_home.clone(),
         );
-        sync_default_client_residency_requirement(
-            &self.cli_overrides,
-            self.cloud_requirements.as_ref(),
-        )
-        .await;
+        let cli_overrides = self.current_cli_overrides();
+        sync_default_client_residency_requirement(&cli_overrides, self.cloud_requirements.as_ref())
+            .await;
 
         self.outgoing
             .send_response(request_id, LoginAccountResponse::ChatgptAuthTokens {})
@@ -1602,7 +1645,7 @@ impl CodexMessageProcessor {
 
         self.outgoing
             .send_server_notification(ServerNotification::AccountUpdated(
-                self.current_account_updated_notification().await,
+                self.current_account_updated_notification(),
             ))
             .await;
     }
@@ -1621,7 +1664,10 @@ impl CodexMessageProcessor {
         }
 
         if capabilities.uses_openai_auth() {
-            if let Err(err) = self.auth_manager.logout() {
+            if let Err(err) = self
+                .auth_manager
+                .logout_for_provider(Some(self.config.model_provider_id.as_str()))
+            {
                 return Err(JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
                     message: format!("logout failed: {err}"),
@@ -1631,7 +1677,7 @@ impl CodexMessageProcessor {
 
             return Ok(self
                 .auth_manager
-                .auth_cached()
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
                 .as_ref()
                 .map(CodexAuth::api_auth_mode));
         }
@@ -1675,18 +1721,31 @@ impl CodexMessageProcessor {
         }
     }
 
-    async fn refresh_token_if_requested(&self, do_refresh: bool) {
+    async fn refresh_token_if_requested(&self, do_refresh: bool) -> RefreshTokenRequestOutcome {
         if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
             .uses_openai_auth()
         {
-            return;
+            return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
-        if self.auth_manager.is_external_auth_active() {
-            return;
+        if self
+            .auth_manager
+            .is_external_auth_active_for_provider(Some(self.config.model_provider_id.as_str()))
+        {
+            return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
-        if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
+        if do_refresh
+            && let Err(err) = self
+                .auth_manager
+                .refresh_token_for_provider(Some(self.config.model_provider_id.as_str()))
+                .await
+        {
+            if err.failed_reason().is_some() {
+                return RefreshTokenRequestOutcome::FailedPermanently;
+            }
             tracing::warn!("failed to refresh token while getting account: {err}");
+            return RefreshTokenRequestOutcome::FailedTransiently;
         }
+        RefreshTokenRequestOutcome::NotAttemptedOrSucceeded
     }
 
     async fn get_auth_status(&self, request_id: ConnectionRequestId, params: GetAuthStatusParams) {
@@ -1697,26 +1756,45 @@ impl CodexMessageProcessor {
             &self.config.model_provider,
         );
 
-        self.refresh_token_if_requested(do_refresh).await;
+        let refresh_outcome = self.refresh_token_if_requested(do_refresh).await;
         let requires_auth = capabilities.requires_auth();
         let requires_openai_auth = capabilities.uses_openai_auth();
         let auth_method = self
             .current_provider_credential_mode()
             .map(Self::protocol_auth_mode);
+        let auth = if do_refresh {
+            self.auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+        } else {
+            self.auth_manager
+                .auth_for_provider(Some(self.config.model_provider_id.as_str()))
+                .await
+        };
         let auth_token = if include_token && requires_auth {
-            match resolve_provider_credential(
-                &self.config.codex_home,
-                &self.config.model_provider_id,
-                &self.config.model_provider,
-                self.auth_manager.auth_cached(),
-                self.config.mcp_oauth_credentials_store_mode,
-            )
-            .await
-            {
-                Ok(credential) => credential.token,
-                Err(err) => {
-                    tracing::warn!("failed to get token for auth status: {err}");
-                    None
+            let permanent_refresh_failure = matches!(
+                refresh_outcome,
+                RefreshTokenRequestOutcome::FailedPermanently
+            ) || auth
+                .as_ref()
+                .is_some_and(|auth| self.auth_manager.refresh_failure_for_auth(auth).is_some());
+
+            if permanent_refresh_failure && requires_openai_auth {
+                None
+            } else {
+                match resolve_provider_credential(
+                    &self.config.codex_home,
+                    &self.config.model_provider_id,
+                    &self.config.model_provider,
+                    auth,
+                    self.config.mcp_oauth_credentials_store_mode,
+                )
+                .await
+                {
+                    Ok(credential) => credential.token,
+                    Err(err) => {
+                        tracing::warn!("failed to get token for auth status: {err}");
+                        None
+                    }
                 }
             }
         } else {
@@ -1764,7 +1842,10 @@ impl CodexMessageProcessor {
         let account = match self.current_provider_credential_mode() {
             Some(ProviderCredentialMode::ApiKey) => Some(Account::ApiKey {}),
             Some(ProviderCredentialMode::OAuth) => Some(Account::Oauth {}),
-            Some(ProviderCredentialMode::Chatgpt) => match self.auth_manager.auth_cached() {
+            Some(ProviderCredentialMode::Chatgpt) => match self
+                .auth_manager
+                .auth_cached_for_provider(Some(self.config.model_provider_id.as_str()))
+            {
                 Some(auth) => {
                     let email = auth.get_account_email();
                     let plan_type = auth.account_plan_type();
@@ -1830,17 +1911,11 @@ impl CodexMessageProcessor {
         ),
         JSONRPCErrorError,
     > {
-        if !provider_login_capabilities(&self.config.model_provider_id, &self.config.model_provider)
-            .uses_openai_auth()
-        {
-            return Err(JSONRPCErrorError {
-                code: INVALID_REQUEST_ERROR_CODE,
-                message: "chatgpt authentication required to read rate limits".to_string(),
-                data: None,
-            });
-        }
-
-        let Some(auth) = self.auth_manager.auth().await else {
+        let Some(auth) = self
+            .auth_manager
+            .auth_for_provider(Some(self.config.model_provider_id.as_str()))
+            .await
+        else {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
                 message: "codex account authentication required to read rate limits".to_string(),
@@ -1966,7 +2041,7 @@ impl CodexMessageProcessor {
             return;
         }
 
-        let cwd = cwd.unwrap_or_else(|| self.config.cwd.clone());
+        let cwd = cwd.unwrap_or_else(|| self.config.cwd.to_path_buf());
         let mut env = create_env(
             &self.config.permissions.shell_environment_policy,
             /*thread_id*/ None,
@@ -2040,11 +2115,17 @@ impl CodexMessageProcessor {
                 None => ExecExpiration::DefaultTimeout,
             }
         };
+        let capture_policy = if disable_output_cap {
+            ExecCapturePolicy::FullBuffer
+        } else {
+            ExecCapturePolicy::ShellTool
+        };
         let sandbox_cwd = self.config.cwd.clone();
         let exec_params = ExecParams {
             command,
             cwd: cwd.clone(),
             expiration,
+            capture_policy,
             env,
             network: started_network_proxy
                 .as_ref()
@@ -2227,8 +2308,8 @@ impl CodexMessageProcessor {
             personality,
         );
         typesafe_overrides.ephemeral = ephemeral;
-        let cli_overrides = self.cli_overrides.clone();
         let cloud_requirements = self.current_cloud_requirements();
+        let cli_overrides = self.current_cli_overrides();
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),
@@ -2238,10 +2319,12 @@ impl CodexMessageProcessor {
             codex_home: self.config.codex_home.clone(),
         };
         let request_trace = request_context.request_trace();
+        let runtime_feature_enablement = self.current_runtime_feature_enablement();
         let thread_start_task = async move {
             Self::thread_start_task(
                 listener_task_context,
                 cli_overrides,
+                runtime_feature_enablement,
                 cloud_requirements,
                 request_id,
                 config,
@@ -2265,6 +2348,13 @@ impl CodexMessageProcessor {
             .is_err()
         {
             warn!("timed out waiting for background tasks to shut down; proceeding");
+        }
+    }
+
+    pub(crate) async fn cancel_active_login(&self) {
+        let mut guard = self.active_login.lock().await;
+        if let Some(active_login) = guard.take() {
+            drop(active_login);
         }
     }
 
@@ -2307,6 +2397,7 @@ impl CodexMessageProcessor {
     async fn thread_start_task(
         listener_task_context: ListenerTaskContext,
         cli_overrides: Vec<(String, TomlValue)>,
+        runtime_feature_enablement: BTreeMap<String, bool>,
         cloud_requirements: CloudRequirementsLoader,
         request_id: ConnectionRequestId,
         config_overrides: Option<HashMap<String, serde_json::Value>>,
@@ -2322,6 +2413,8 @@ impl CodexMessageProcessor {
             config_overrides,
             typesafe_overrides,
             &cloud_requirements,
+            &listener_task_context.codex_home,
+            &runtime_feature_enablement,
         )
         .await
         {
@@ -3374,6 +3467,58 @@ impl CodexMessageProcessor {
         }
     }
 
+    async fn thread_shell_command(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadShellCommandParams,
+    ) {
+        let ThreadShellCommandParams { thread_id, command } = params;
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            self.outgoing
+                .send_error(
+                    request_id,
+                    JSONRPCErrorError {
+                        code: INVALID_REQUEST_ERROR_CODE,
+                        message: "command must not be empty".to_string(),
+                        data: None,
+                    },
+                )
+                .await;
+            return;
+        }
+
+        let (_, thread) = match self.load_thread(&thread_id).await {
+            Ok(v) => v,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match self
+            .submit_core_op(
+                &request_id,
+                thread.as_ref(),
+                Op::RunUserShellCommand { command },
+            )
+            .await
+        {
+            Ok(_) => {
+                self.outgoing
+                    .send_response(request_id, ThreadShellCommandResponse {})
+                    .await;
+            }
+            Err(err) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to start shell command: {err}"),
+                )
+                .await;
+            }
+        }
+    }
+
     async fn thread_list(&self, request_id: ConnectionRequestId, params: ThreadListParams) {
         let ThreadListParams {
             cursor,
@@ -3754,7 +3899,7 @@ impl CodexMessageProcessor {
             approval_policy,
             approvals_reviewer,
             sandbox,
-            config: request_overrides,
+            config: mut request_overrides,
             base_instructions,
             developer_instructions,
             personality,
@@ -3780,7 +3925,7 @@ impl CodexMessageProcessor {
         };
 
         let history_cwd = thread_history.session_cwd();
-        let typesafe_overrides = self.build_thread_config_overrides(
+        let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
             service_tier,
@@ -3792,15 +3937,26 @@ impl CodexMessageProcessor {
             developer_instructions,
             personality,
         );
+        let persisted_resume_metadata = self
+            .load_and_apply_persisted_resume_metadata(
+                &thread_history,
+                &mut request_overrides,
+                &mut typesafe_overrides,
+            )
+            .await;
 
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
         let cloud_requirements = self.current_cloud_requirements();
+        let cli_overrides = self.current_cli_overrides();
+        let runtime_feature_enablement = self.current_runtime_feature_enablement();
         let config = match derive_config_for_cwd(
-            &self.cli_overrides,
+            &cli_overrides,
             request_overrides,
             typesafe_overrides,
             history_cwd,
             &cloud_requirements,
+            &self.config.codex_home,
+            &runtime_feature_enablement,
         )
         .await
         {
@@ -3854,18 +4010,22 @@ impl CodexMessageProcessor {
                     "thread",
                 );
 
-                let Some(mut thread) = self
+                let mut thread = match self
                     .load_thread_from_resume_source_or_send_internal(
-                        request_id.clone(),
                         thread_id,
                         thread.as_ref(),
                         &response_history,
                         rollout_path.as_path(),
                         fallback_model_provider.as_str(),
+                        persisted_resume_metadata.as_ref(),
                     )
                     .await
-                else {
-                    return;
+                {
+                    Ok(thread) => thread,
+                    Err(message) => {
+                        self.send_internal_error(request_id, message).await;
+                        return;
+                    }
                 };
 
                 self.thread_watch_manager
@@ -3906,6 +4066,25 @@ impl CodexMessageProcessor {
                 self.outgoing.send_error(request_id, error).await;
             }
         }
+    }
+
+    async fn load_and_apply_persisted_resume_metadata(
+        &self,
+        thread_history: &InitialHistory,
+        request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
+        typesafe_overrides: &mut ConfigOverrides,
+    ) -> Option<ThreadMetadata> {
+        let InitialHistory::Resumed(resumed_history) = thread_history else {
+            return None;
+        };
+        let state_db_ctx = get_state_db(&self.config).await?;
+        let persisted_metadata = state_db_ctx
+            .get_thread(resumed_history.conversation_id)
+            .await
+            .ok()
+            .flatten()?;
+        merge_persisted_resume_metadata(request_overrides, typesafe_overrides, &persisted_metadata);
+        Some(persisted_metadata)
     }
 
     async fn resume_running_thread(
@@ -4024,6 +4203,7 @@ impl CodexMessageProcessor {
                 existing_thread_id,
                 rollout_path.as_path(),
                 config_snapshot.model_provider_id.as_str(),
+                /*persisted_metadata*/ None,
             )
             .await
             {
@@ -4155,13 +4335,13 @@ impl CodexMessageProcessor {
 
     async fn load_thread_from_resume_source_or_send_internal(
         &self,
-        request_id: ConnectionRequestId,
         thread_id: ThreadId,
         thread: &CodexThread,
         thread_history: &InitialHistory,
         rollout_path: &Path,
         fallback_provider: &str,
-    ) -> Option<Thread> {
+        persisted_resume_metadata: Option<&ThreadMetadata>,
+    ) -> std::result::Result<Thread, String> {
         let thread = match thread_history {
             InitialHistory::Resumed(resumed) => {
                 load_thread_summary_for_rollout(
@@ -4169,6 +4349,7 @@ impl CodexMessageProcessor {
                     resumed.conversation_id,
                     resumed.rollout_path.as_path(),
                     fallback_provider,
+                    persisted_resume_metadata,
                 )
                 .await
             }
@@ -4186,31 +4367,18 @@ impl CodexMessageProcessor {
                 "failed to build resume response for thread {thread_id}: initial history missing"
             )),
         };
-        let mut thread = match thread {
-            Ok(thread) => thread,
-            Err(message) => {
-                self.send_internal_error(request_id, message).await;
-                return None;
-            }
-        };
+        let mut thread = thread?;
         thread.id = thread_id.to_string();
         thread.path = Some(rollout_path.to_path_buf());
         let history_items = thread_history.get_rollout_items();
-        if let Err(message) = populate_thread_turns(
+        populate_thread_turns(
             &mut thread,
             ThreadTurnSource::HistoryItems(&history_items),
             /*active_turn*/ None,
         )
-        .await
-        {
-            self.send_internal_error(request_id, message).await;
-            return None;
-        }
-        if let Err(message) = self.attach_thread_name(thread_id, &mut thread).await {
-            self.send_internal_error(request_id, message).await;
-            return None;
-        }
-        Some(thread)
+        .await?;
+        self.attach_thread_name(thread_id, &mut thread).await?;
+        Ok(thread)
     }
 
     async fn attach_thread_name(
@@ -4419,12 +4587,16 @@ impl CodexMessageProcessor {
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
         let cloud_requirements = self.current_cloud_requirements();
+        let cli_overrides = self.current_cli_overrides();
+        let runtime_feature_enablement = self.current_runtime_feature_enablement();
         let config = match derive_config_for_cwd(
-            &self.cli_overrides,
+            &cli_overrides,
             request_overrides,
             typesafe_overrides,
             history_cwd,
             &cloud_requirements,
+            &self.config.codex_home,
+            &runtime_feature_enablement,
         )
         .await
         {
@@ -4447,7 +4619,7 @@ impl CodexMessageProcessor {
         } = match self
             .thread_manager
             .fork_thread(
-                usize::MAX,
+                ForkSnapshot::Interrupted,
                 config,
                 rollout_path.clone(),
                 persist_extended_history,
@@ -4549,8 +4721,27 @@ impl CodexMessageProcessor {
             }
             thread
         };
+        if (thread.preview.is_empty() || thread.turns.is_empty())
+            && let Ok(history_items) = read_rollout_items_from_rollout(rollout_path.as_path()).await
+        {
+            if thread.preview.is_empty() {
+                thread.preview = preview_from_rollout_items(&history_items);
+            }
+            if thread.turns.is_empty()
+                && let Err(message) = populate_thread_turns(
+                    &mut thread,
+                    ThreadTurnSource::HistoryItems(&history_items),
+                    /*active_turn*/ None,
+                )
+                .await
+            {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        }
 
-        if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
+        if thread.turns.is_empty()
+            && let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
             && let Err(message) = populate_thread_turns(
                 &mut thread,
                 ThreadTurnSource::RolloutPath(fork_rollout_path.as_path()),
@@ -4688,16 +4879,7 @@ impl CodexMessageProcessor {
         let mut items = Vec::with_capacity(requested_page_size);
         let mut next_cursor: Option<String> = None;
 
-        let model_provider_filter = match model_providers {
-            Some(providers) => {
-                if providers.is_empty() {
-                    None
-                } else {
-                    Some(providers)
-                }
-            }
-            None => Some(vec![self.config.model_provider_id.clone()]),
-        };
+        let model_provider_filter = model_providers.filter(|providers| !providers.is_empty());
         let fallback_provider = self.config.model_provider_id.clone();
         let (allowed_sources_vec, source_kind_filter) = compute_source_filters(source_kinds);
         let allowed_sources = allowed_sources_vec.as_slice();
@@ -4806,8 +4988,14 @@ impl CodexMessageProcessor {
             limit,
             cursor,
             include_hidden,
+            force_refresh,
         } = params;
-        let models = supported_models(thread_manager, include_hidden.unwrap_or(false)).await;
+        let models = supported_models(
+            thread_manager,
+            include_hidden.unwrap_or(false),
+            force_refresh,
+        )
+        .await;
         let total = models.len();
 
         if total == 0 {
@@ -5006,20 +5194,28 @@ impl CodexMessageProcessor {
             }
         };
 
-        let configured_servers = self
-            .thread_manager
-            .mcp_manager()
-            .configured_servers(&config);
+        if let Err(error) = self.queue_mcp_server_refresh_for_config(&config).await {
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        let response = McpServerRefreshResponse {};
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn queue_mcp_server_refresh_for_config(
+        &self,
+        config: &Config,
+    ) -> Result<(), JSONRPCErrorError> {
+        let configured_servers = self.thread_manager.mcp_manager().configured_servers(config);
         let mcp_servers = match serde_json::to_value(configured_servers) {
             Ok(value) => value,
             Err(err) => {
-                let error = JSONRPCErrorError {
+                return Err(JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
                     message: format!("failed to serialize MCP servers: {err}"),
                     data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
-                return;
+                });
             }
         };
 
@@ -5027,15 +5223,13 @@ impl CodexMessageProcessor {
             match serde_json::to_value(config.mcp_oauth_credentials_store_mode) {
                 Ok(value) => value,
                 Err(err) => {
-                    let error = JSONRPCErrorError {
+                    return Err(JSONRPCErrorError {
                         code: INTERNAL_ERROR_CODE,
                         message: format!(
                             "failed to serialize MCP OAuth credentials store mode: {err}"
                         ),
                         data: None,
-                    };
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
+                    });
                 }
             };
 
@@ -5048,8 +5242,7 @@ impl CodexMessageProcessor {
         // active turn to avoid work for threads that never resume.
         let thread_manager = Arc::clone(&self.thread_manager);
         thread_manager.refresh_mcp_servers(refresh_config).await;
-        let response = McpServerRefreshResponse {};
-        self.outgoing.send_response(request_id, response).await;
+        Ok(())
     }
 
     async fn mcp_server_oauth_login(
@@ -5323,6 +5516,7 @@ impl CodexMessageProcessor {
             MarketplaceError::InvalidMarketplaceFile { .. }
             | MarketplaceError::PluginNotFound { .. }
             | MarketplaceError::PluginNotAvailable { .. }
+            | MarketplaceError::PluginsDisabled
             | MarketplaceError::InvalidPlugin(_) => {
                 self.send_invalid_request_error(request_id, err.to_string())
                     .await;
@@ -5838,7 +6032,7 @@ impl CodexMessageProcessor {
             per_cwd_extra_user_roots,
         } = params;
         let cwds = if cwds.is_empty() {
-            vec![self.config.cwd.clone()]
+            vec![self.config.cwd.to_path_buf()]
         } else {
             cwds
         };
@@ -5875,14 +6069,71 @@ impl CodexMessageProcessor {
                 .extend(valid_extra_roots);
         }
 
+        let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
         let skills_manager = self.thread_manager.skills_manager();
+        let plugins_manager = self.thread_manager.plugins_manager();
+        let cli_overrides = self.current_cli_overrides();
         let mut data = Vec::new();
         for cwd in cwds {
             let extra_roots = extra_roots_by_cwd
                 .get(&cwd)
                 .map_or(&[][..], std::vec::Vec::as_slice);
+            let cwd_abs = match AbsolutePathBuf::try_from(cwd.as_path()) {
+                Ok(path) => path,
+                Err(err) => {
+                    let error_path = cwd.clone();
+                    data.push(codex_app_server_protocol::SkillsListEntry {
+                        cwd,
+                        skills: Vec::new(),
+                        errors: errors_to_info(&[codex_core::skills::SkillError {
+                            path: error_path,
+                            message: err.to_string(),
+                        }]),
+                    });
+                    continue;
+                }
+            };
+            let config_layer_stack = match load_config_layers_state(
+                &self.config.codex_home,
+                Some(cwd_abs),
+                &cli_overrides,
+                LoaderOverrides::default(),
+                CloudRequirementsLoader::default(),
+            )
+            .await
+            {
+                Ok(config_layer_stack) => config_layer_stack,
+                Err(err) => {
+                    let error_path = cwd.clone();
+                    data.push(codex_app_server_protocol::SkillsListEntry {
+                        cwd,
+                        skills: Vec::new(),
+                        errors: errors_to_info(&[codex_core::skills::SkillError {
+                            path: error_path,
+                            message: err.to_string(),
+                        }]),
+                    });
+                    continue;
+                }
+            };
+            let effective_skill_roots = plugins_manager.effective_skill_roots_for_layer_stack(
+                &config_layer_stack,
+                config.features.enabled(Feature::Plugins),
+            );
+            let skills_input = codex_core::skills::SkillsLoadInput::new(
+                cwd.clone(),
+                effective_skill_roots,
+                config_layer_stack,
+                config.bundled_skills_enabled(),
+            );
             let outcome = skills_manager
-                .skills_for_cwd_with_extra_user_roots(&cwd, force_reload, extra_roots)
+                .skills_for_cwd_with_extra_user_roots(&skills_input, force_reload, extra_roots)
                 .await;
             let errors = errors_to_info(&outcome.errors);
             let skills = skills_to_info(&outcome.skills, &outcome.disabled_paths);
@@ -5915,9 +6166,12 @@ impl CodexMessageProcessor {
         let mut remote_sync_error = None;
 
         if force_remote_sync {
-            let auth = self.auth_manager.auth().await;
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
             match plugins_manager
-                .sync_plugins_from_remote(&config, auth.as_ref())
+                .sync_plugins_from_remote(&config, auth.as_ref(), /*additive_only*/ false)
                 .await
             {
                 Ok(sync_result) => {
@@ -5947,15 +6201,27 @@ impl CodexMessageProcessor {
             };
         }
 
-        let data = match tokio::task::spawn_blocking(move || {
-            let marketplaces = plugins_manager.list_marketplaces_for_config(&config, &roots)?;
-            Ok::<Vec<PluginMarketplaceEntry>, MarketplaceError>(
-                marketplaces
+        let config_for_marketplace_listing = config.clone();
+        let plugins_manager_for_marketplace_listing = plugins_manager.clone();
+        let (data, marketplace_load_errors) = match tokio::task::spawn_blocking(move || {
+            let outcome = plugins_manager_for_marketplace_listing
+                .list_marketplaces_for_config(&config_for_marketplace_listing, &roots)?;
+            Ok::<
+                (
+                    Vec<PluginMarketplaceEntry>,
+                    Vec<codex_app_server_protocol::MarketplaceLoadErrorInfo>,
+                ),
+                MarketplaceError,
+            >((
+                outcome
+                    .marketplaces
                     .into_iter()
                     .map(|marketplace| PluginMarketplaceEntry {
                         name: marketplace.name,
                         path: marketplace.path,
-                        display_name: marketplace.display_name,
+                        interface: marketplace.interface.map(|interface| MarketplaceInterface {
+                            display_name: interface.display_name,
+                        }),
                         plugins: marketplace
                             .plugins
                             .into_iter()
@@ -5965,18 +6231,26 @@ impl CodexMessageProcessor {
                                 enabled: plugin.enabled,
                                 name: plugin.name,
                                 source: marketplace_plugin_source_to_info(plugin.source),
-                                install_policy: plugin.install_policy.into(),
-                                auth_policy: plugin.auth_policy.into(),
+                                install_policy: plugin.policy.installation.into(),
+                                auth_policy: plugin.policy.authentication.into(),
                                 interface: plugin.interface.map(plugin_interface_to_info),
                             })
                             .collect(),
                     })
                     .collect(),
-            )
+                outcome
+                    .errors
+                    .into_iter()
+                    .map(|err| codex_app_server_protocol::MarketplaceLoadErrorInfo {
+                        marketplace_path: err.path,
+                        message: err.message,
+                    })
+                    .collect(),
+            ))
         })
         .await
         {
-            Ok(Ok(data)) => data,
+            Ok(Ok(outcome)) => outcome,
             Ok(Err(err)) => {
                 self.send_marketplace_error(request_id, err, "list marketplace plugins")
                     .await;
@@ -5992,12 +6266,39 @@ impl CodexMessageProcessor {
             }
         };
 
+        let auth = self
+            .auth_manager
+            .auth_for_provider(Some(config.model_provider_id.as_str()))
+            .await;
+        let featured_plugin_ids = if data
+            .iter()
+            .any(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
+        {
+            match plugins_manager
+                .featured_plugin_ids_for_config(&config, auth.as_ref())
+                .await
+            {
+                Ok(featured_plugin_ids) => featured_plugin_ids,
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        "plugin/list featured plugin fetch failed; returning empty featured ids"
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         self.outgoing
             .send_response(
                 request_id,
                 PluginListResponse {
                     marketplaces: data,
+                    marketplace_load_errors,
                     remote_sync_error,
+                    featured_plugin_ids,
                 },
             )
             .await;
@@ -6046,6 +6347,17 @@ impl CodexMessageProcessor {
         };
         let app_summaries =
             plugin_app_helpers::load_plugin_app_summaries(&config, &outcome.plugin.apps).await;
+        let visible_skills = outcome
+            .plugin
+            .skills
+            .iter()
+            .filter(|skill| {
+                skill.matches_product_restriction_for_product(
+                    self.thread_manager.session_source().restriction_product(),
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let plugin = PluginDetail {
             marketplace_name: outcome.marketplace_name,
             marketplace_path: outcome.marketplace_path,
@@ -6055,12 +6367,12 @@ impl CodexMessageProcessor {
                 source: marketplace_plugin_source_to_info(outcome.plugin.source),
                 installed: outcome.plugin.installed,
                 enabled: outcome.plugin.enabled,
-                install_policy: outcome.plugin.install_policy.into(),
-                auth_policy: outcome.plugin.auth_policy.into(),
+                install_policy: outcome.plugin.policy.installation.into(),
+                auth_policy: outcome.plugin.policy.authentication.into(),
                 interface: outcome.plugin.interface.map(plugin_interface_to_info),
             },
             description: outcome.plugin.description,
-            skills: plugin_skills_to_info(&outcome.plugin.skills),
+            skills: plugin_skills_to_info(&visible_skills, &outcome.plugin.disabled_skill_paths),
             apps: app_summaries,
             mcp_servers: outcome.plugin.mcp_server_names,
         };
@@ -6070,86 +6382,35 @@ impl CodexMessageProcessor {
             .await;
     }
 
-    async fn skills_remote_list(
-        &self,
-        request_id: ConnectionRequestId,
-        params: SkillsRemoteReadParams,
-    ) {
-        let hazelnut_scope = convert_remote_scope(params.hazelnut_scope);
-        let product_surface = convert_remote_product_surface(params.product_surface);
-        let enabled = if params.enabled { Some(true) } else { None };
-
-        let auth = self.auth_manager.auth().await;
-        match list_remote_skills(
-            &self.config,
-            auth.as_ref(),
-            hazelnut_scope,
-            product_surface,
-            enabled,
-        )
-        .await
-        {
-            Ok(skills) => {
-                let data = skills
-                    .into_iter()
-                    .map(|skill| codex_app_server_protocol::RemoteSkillSummary {
-                        id: skill.id,
-                        name: skill.name,
-                        description: skill.description,
-                    })
-                    .collect();
-                self.outgoing
-                    .send_response(request_id, SkillsRemoteReadResponse { data })
-                    .await;
-            }
-            Err(err) => {
-                self.send_internal_error(
-                    request_id,
-                    format!("failed to list remote skills: {err}"),
-                )
-                .await;
-            }
-        }
-    }
-
-    async fn skills_remote_export(
-        &self,
-        request_id: ConnectionRequestId,
-        params: SkillsRemoteWriteParams,
-    ) {
-        let SkillsRemoteWriteParams { hazelnut_id } = params;
-        let auth = self.auth_manager.auth().await;
-        let response = export_remote_skill(&self.config, auth.as_ref(), hazelnut_id.as_str()).await;
-
-        match response {
-            Ok(downloaded) => {
-                self.outgoing
-                    .send_response(
-                        request_id,
-                        SkillsRemoteWriteResponse {
-                            id: downloaded.id,
-                            path: downloaded.path,
-                        },
-                    )
-                    .await;
-            }
-            Err(err) => {
-                self.send_internal_error(
-                    request_id,
-                    format!("failed to download remote skill: {err}"),
-                )
-                .await;
-            }
-        }
-    }
-
     async fn skills_config_write(
         &self,
         request_id: ConnectionRequestId,
         params: SkillsConfigWriteParams,
     ) {
-        let SkillsConfigWriteParams { path, enabled } = params;
-        let edits = vec![ConfigEdit::SetSkillConfig { path, enabled }];
+        let SkillsConfigWriteParams {
+            path,
+            name,
+            enabled,
+        } = params;
+        let edit = match (path, name) {
+            (Some(path), None) => ConfigEdit::SetSkillConfig {
+                path: path.into_path_buf(),
+                enabled,
+            },
+            (None, Some(name)) if !name.trim().is_empty() => {
+                ConfigEdit::SetSkillConfigByName { name, enabled }
+            }
+            _ => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_PARAMS_ERROR_CODE,
+                    message: "skills/config/write requires exactly one of path or name".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let edits = vec![edit];
         let result = ConfigEditsBuilder::new(&self.config.codex_home)
             .with_edits(edits)
             .apply()
@@ -6157,6 +6418,7 @@ impl CodexMessageProcessor {
 
         match result {
             Ok(()) => {
+                self.thread_manager.plugins_manager().clear_cache();
                 self.thread_manager.skills_manager().clear_cache();
                 self.outgoing
                     .send_response(
@@ -6182,6 +6444,7 @@ impl CodexMessageProcessor {
         let PluginInstallParams {
             marketplace_path,
             plugin_name,
+            force_remote_sync,
         } = params;
         let config_cwd = marketplace_path.as_path().parent().map(Path::to_path_buf);
 
@@ -6191,7 +6454,26 @@ impl CodexMessageProcessor {
             marketplace_path,
         };
 
-        match plugins_manager.install_plugin(request).await {
+        let install_result = if force_remote_sync {
+            let config = match self.load_latest_config(config_cwd.clone()).await {
+                Ok(config) => config,
+                Err(err) => {
+                    self.outgoing.send_error(request_id, err).await;
+                    return;
+                }
+            };
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
+            plugins_manager
+                .install_plugin_with_remote_sync(&config, auth.as_ref(), request)
+                .await
+        } else {
+            plugins_manager.install_plugin(request).await
+        };
+
+        match install_result {
             Ok(result) => {
                 let config = match self.load_latest_config(config_cwd).await {
                     Ok(config) => config,
@@ -6202,6 +6484,22 @@ impl CodexMessageProcessor {
                         self.config.as_ref().clone()
                     }
                 };
+
+                self.clear_plugin_related_caches();
+
+                let plugin_mcp_servers = load_plugin_mcp_servers(result.installed_path.as_path());
+
+                if !plugin_mcp_servers.is_empty() {
+                    if let Err(err) = self.queue_mcp_server_refresh_for_config(&config).await {
+                        warn!(
+                            plugin = result.plugin_id.as_key(),
+                            "failed to queue MCP refresh after plugin install: {err:?}"
+                        );
+                    }
+                    self.start_plugin_mcp_oauth_logins(&config, plugin_mcp_servers)
+                        .await;
+                }
+
                 let plugin_apps = load_plugin_apps(result.installed_path.as_path());
                 let apps_needing_auth = if plugin_apps.is_empty()
                     || !config.features.apps_enabled(Some(&self.auth_manager)).await
@@ -6262,7 +6560,6 @@ impl CodexMessageProcessor {
                     )
                 };
 
-                self.clear_plugin_related_caches();
                 self.outgoing
                     .send_response(
                         request_id,
@@ -6292,6 +6589,13 @@ impl CodexMessageProcessor {
                         )
                         .await;
                     }
+                    CorePluginInstallError::Remote(err) => {
+                        self.send_internal_error(
+                            request_id,
+                            format!("failed to enable remote plugin: {err}"),
+                        )
+                        .await;
+                    }
                     CorePluginInstallError::Join(err) => {
                         self.send_internal_error(
                             request_id,
@@ -6316,9 +6620,32 @@ impl CodexMessageProcessor {
         request_id: ConnectionRequestId,
         params: PluginUninstallParams,
     ) {
+        let PluginUninstallParams {
+            plugin_id,
+            force_remote_sync,
+        } = params;
         let plugins_manager = self.thread_manager.plugins_manager();
 
-        match plugins_manager.uninstall_plugin(params.plugin_id).await {
+        let uninstall_result = if force_remote_sync {
+            let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+                Ok(config) => config,
+                Err(err) => {
+                    self.outgoing.send_error(request_id, err).await;
+                    return;
+                }
+            };
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
+            plugins_manager
+                .uninstall_plugin_with_remote_sync(&config, auth.as_ref(), plugin_id)
+                .await
+        } else {
+            plugins_manager.uninstall_plugin(plugin_id).await
+        };
+
+        match uninstall_result {
             Ok(()) => {
                 self.clear_plugin_related_caches();
                 self.outgoing
@@ -6337,6 +6664,13 @@ impl CodexMessageProcessor {
                         self.send_internal_error(
                             request_id,
                             format!("failed to clear plugin config: {err}"),
+                        )
+                        .await;
+                    }
+                    CorePluginUninstallError::Remote(err) => {
+                        self.send_internal_error(
+                            request_id,
+                            format!("failed to uninstall remote plugin: {err}"),
                         )
                         .await;
                     }
@@ -6451,6 +6785,9 @@ impl CodexMessageProcessor {
 
         match turn_id {
             Ok(turn_id) => {
+                self.outgoing
+                    .record_request_turn_id(&request_id, &turn_id)
+                    .await;
                 let turn = Turn {
                     id: turn_id.clone(),
                     items: vec![],
@@ -6503,6 +6840,9 @@ impl CodexMessageProcessor {
             .await;
             return;
         }
+        self.outgoing
+            .record_request_turn_id(&request_id, &params.expected_turn_id)
+            .await;
         if let Err(error) = Self::validate_v2_input_limit(&params.input) {
             self.outgoing.send_error(request_id, error).await;
             return;
@@ -6523,24 +6863,57 @@ impl CodexMessageProcessor {
                 self.outgoing.send_response(request_id, response).await;
             }
             Err(err) => {
-                let (code, message) = match err {
+                let (code, message, data) = match err {
                     SteerInputError::NoActiveTurn(_) => (
                         INVALID_REQUEST_ERROR_CODE,
                         "no active turn to steer".to_string(),
+                        None,
                     ),
                     SteerInputError::ExpectedTurnMismatch { expected, actual } => (
                         INVALID_REQUEST_ERROR_CODE,
                         format!("expected active turn id `{expected}` but found `{actual}`"),
+                        None,
                     ),
+                    SteerInputError::ActiveTurnNotSteerable { turn_kind } => {
+                        let message = match turn_kind {
+                            codex_protocol::protocol::NonSteerableTurnKind::Review => {
+                                "cannot steer a review turn".to_string()
+                            }
+                            codex_protocol::protocol::NonSteerableTurnKind::Compact => {
+                                "cannot steer a compact turn".to_string()
+                            }
+                        };
+                        let error = TurnError {
+                            message: message.clone(),
+                            codex_error_info: Some(
+                                AppServerCodexErrorInfo::ActiveTurnNotSteerable {
+                                    turn_kind: turn_kind.into(),
+                                },
+                            ),
+                            additional_details: None,
+                        };
+                        let data = match serde_json::to_value(error) {
+                            Ok(data) => Some(data),
+                            Err(error) => {
+                                tracing::error!(
+                                    ?error,
+                                    "failed to serialize active-turn-not-steerable turn error"
+                                );
+                                None
+                            }
+                        };
+                        (INVALID_REQUEST_ERROR_CODE, message, data)
+                    }
                     SteerInputError::EmptyInput => (
                         INVALID_REQUEST_ERROR_CODE,
                         "input must not be empty".to_string(),
+                        None,
                     ),
                 };
                 let error = JSONRPCErrorError {
                     code,
                     message,
-                    data: None,
+                    data,
                 };
                 self.outgoing.send_error(request_id, error).await;
             }
@@ -6842,7 +7215,7 @@ impl CodexMessageProcessor {
         } = self
             .thread_manager
             .fork_thread(
-                usize::MAX,
+                ForkSnapshot::Interrupted,
                 config,
                 rollout_path,
                 /*persist_extended_history*/ false,
@@ -6983,7 +7356,10 @@ impl CodexMessageProcessor {
         request_id: ConnectionRequestId,
         params: TurnInterruptParams,
     ) {
-        let TurnInterruptParams { thread_id, .. } = params;
+        let TurnInterruptParams { thread_id, turn_id } = params;
+        self.outgoing
+            .record_request_turn_id(&request_id, &turn_id)
+            .await;
 
         let (thread_uuid, thread) = match self.load_thread(&thread_id).await {
             Ok(v) => v,
@@ -7161,43 +7537,9 @@ impl CodexMessageProcessor {
                             }
                         };
 
-                        // For now, we send a notification for every event,
-                        // Legacy `codex/event/*` notifications are still
-                        // produced here because the in-process app-server lane
-                        // (`codex exec` and other in-process consumers) still
-                        // depends on them. External transports now drop
-                        // `OutgoingMessage::Notification` in `transport.rs`,
-                        // so stdio/websocket clients only observe the typed
-                        // `ServerNotification` translations emitted below.
-                        //
-                        // TODO: remove this raw legacy-notification emission
-                        // entirely once the remaining in-process consumers are
-                        // migrated off `codex/event/*`.
-                        let event_formatted = match &event.msg {
-                            EventMsg::TurnStarted(_) => "task_started",
-                            EventMsg::TurnComplete(_) => "task_complete",
-                            _ => &event.msg.to_string(),
-                        };
-                        let request_event_name = format!("codex/event/{event_formatted}");
-                        tracing::trace!(
-                            conversation_id = %conversation_id,
-                            "app-server event: {request_event_name}"
-                        );
-                        let mut params = match serde_json::to_value(event.clone()) {
-                            Ok(serde_json::Value::Object(map)) => map,
-                            Ok(_) => {
-                                error!("event did not serialize to an object");
-                                continue;
-                            }
-                            Err(err) => {
-                                error!("failed to serialize event: {err}");
-                                continue;
-                            }
-                        };
-                        params.insert(
-                            "conversationId".to_string(),
-                            conversation_id.to_string().into(),
-                        );
+                        // Track the event before emitting any typed
+                        // translations so thread-local state such as raw event
+                        // opt-in stays synchronized with the conversation.
                         let raw_events_enabled = {
                             let mut thread_state = thread_state.lock().await;
                             thread_state.track_current_turn_event(&event.msg);
@@ -7208,18 +7550,6 @@ impl CodexMessageProcessor {
                             .await;
                         if let EventMsg::RawResponseItem(_) = &event.msg && !raw_events_enabled {
                             continue;
-                        }
-
-                        if !subscribed_connection_ids.is_empty() {
-                            outgoing_for_task
-                                .send_notification_to_connections(
-                                    &subscribed_connection_ids,
-                                    OutgoingNotification {
-                                        method: request_event_name,
-                                        params: Some(params.into()),
-                                    },
-                                )
-                                .await;
                         }
 
                         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
@@ -7556,12 +7886,13 @@ impl CodexMessageProcessor {
             WindowsSandboxSetupMode::Unelevated => CoreWindowsSandboxSetupMode::Unelevated,
         };
         let config = Arc::clone(&self.config);
-        let cli_overrides = self.cli_overrides.clone();
         let cloud_requirements = self.current_cloud_requirements();
         let command_cwd = params
             .cwd
             .map(PathBuf::from)
-            .unwrap_or_else(|| config.cwd.clone());
+            .unwrap_or_else(|| config.cwd.to_path_buf());
+        let cli_overrides = self.current_cli_overrides();
+        let runtime_feature_enablement = self.current_runtime_feature_enablement();
         let outgoing = Arc::clone(&self.outgoing);
         let connection_id = request_id.connection_id;
 
@@ -7575,6 +7906,8 @@ impl CodexMessageProcessor {
                 },
                 Some(command_cwd.clone()),
                 &cloud_requirements,
+                &config.codex_home,
+                &runtime_feature_enablement,
             )
             .await;
             let setup_result = match derived_config {
@@ -7582,7 +7915,7 @@ impl CodexMessageProcessor {
                     let setup_request = WindowsSandboxSetupRequest {
                         mode,
                         policy: config.permissions.sandbox_policy.get().clone(),
-                        policy_cwd: config.cwd.clone(),
+                        policy_cwd: config.cwd.to_path_buf(),
                         command_cwd,
                         env_map: std::env::vars().collect(),
                         codex_home: config.codex_home.clone(),
@@ -8036,6 +8369,36 @@ fn collect_resume_override_mismatches(
     mismatch_details
 }
 
+fn merge_persisted_resume_metadata(
+    request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
+    typesafe_overrides: &mut ConfigOverrides,
+    persisted_metadata: &ThreadMetadata,
+) {
+    if has_model_resume_override(request_overrides.as_ref(), typesafe_overrides) {
+        return;
+    }
+
+    typesafe_overrides.model = persisted_metadata.model.clone();
+
+    if let Some(reasoning_effort) = persisted_metadata.reasoning_effort {
+        request_overrides.get_or_insert_with(HashMap::new).insert(
+            "model_reasoning_effort".to_string(),
+            serde_json::Value::String(reasoning_effort.to_string()),
+        );
+    }
+}
+
+fn has_model_resume_override(
+    request_overrides: Option<&HashMap<String, serde_json::Value>>,
+    typesafe_overrides: &ConfigOverrides,
+) -> bool {
+    typesafe_overrides.model.is_some()
+        || typesafe_overrides.model_provider.is_some()
+        || request_overrides.is_some_and(|overrides| overrides.contains_key("model"))
+        || request_overrides
+            .is_some_and(|overrides| overrides.contains_key("model_reasoning_effort"))
+}
+
 fn skills_to_info(
     skills: &[codex_core::skills::SkillMetadata],
     disabled_paths: &std::collections::HashSet<PathBuf>,
@@ -8082,7 +8445,10 @@ fn skills_to_info(
         .collect()
 }
 
-fn plugin_skills_to_info(skills: &[codex_core::skills::SkillMetadata]) -> Vec<SkillSummary> {
+fn plugin_skills_to_info(
+    skills: &[codex_core::skills::SkillMetadata],
+    disabled_skill_paths: &std::collections::HashSet<PathBuf>,
+) -> Vec<SkillSummary> {
     skills
         .iter()
         .map(|skill| SkillSummary {
@@ -8100,12 +8466,13 @@ fn plugin_skills_to_info(skills: &[codex_core::skills::SkillMetadata]) -> Vec<Sk
                 }
             }),
             path: skill.path_to_skills_md.clone(),
+            enabled: !disabled_skill_paths.contains(&skill.path_to_skills_md),
         })
         .collect()
 }
 
 fn plugin_interface_to_info(
-    interface: codex_core::plugins::PluginManifestInterfaceSummary,
+    interface: codex_core::plugins::PluginManifestInterface,
 ) -> PluginInterface {
     PluginInterface {
         display_name: interface.display_name,
@@ -8125,9 +8492,9 @@ fn plugin_interface_to_info(
     }
 }
 
-fn marketplace_plugin_source_to_info(source: MarketplacePluginSourceSummary) -> PluginSource {
+fn marketplace_plugin_source_to_info(source: MarketplacePluginSource) -> PluginSource {
     match source {
-        MarketplacePluginSourceSummary::Local { path } => PluginSource::Local { path },
+        MarketplacePluginSource::Local { path } => PluginSource::Local { path },
     }
 }
 
@@ -8259,6 +8626,8 @@ async fn derive_config_from_params(
     request_overrides: Option<HashMap<String, serde_json::Value>>,
     typesafe_overrides: ConfigOverrides,
     cloud_requirements: &CloudRequirementsLoader,
+    codex_home: &Path,
+    runtime_feature_enablement: &BTreeMap<String, bool>,
 ) -> std::io::Result<Config> {
     let merged_cli_overrides = cli_overrides
         .iter()
@@ -8271,12 +8640,15 @@ async fn derive_config_from_params(
         )
         .collect::<Vec<_>>();
 
-    codex_core::config::ConfigBuilder::default()
+    let mut config = codex_core::config::ConfigBuilder::default()
+        .codex_home(codex_home.to_path_buf())
         .cli_overrides(merged_cli_overrides)
         .harness_overrides(typesafe_overrides)
         .cloud_requirements(cloud_requirements.clone())
         .build()
-        .await
+        .await?;
+    apply_runtime_feature_enablement(&mut config, runtime_feature_enablement);
+    Ok(config)
 }
 
 async fn derive_config_for_cwd(
@@ -8285,6 +8657,8 @@ async fn derive_config_for_cwd(
     typesafe_overrides: ConfigOverrides,
     cwd: Option<PathBuf>,
     cloud_requirements: &CloudRequirementsLoader,
+    codex_home: &Path,
+    runtime_feature_enablement: &BTreeMap<String, bool>,
 ) -> std::io::Result<Config> {
     let merged_cli_overrides = cli_overrides
         .iter()
@@ -8297,13 +8671,16 @@ async fn derive_config_for_cwd(
         )
         .collect::<Vec<_>>();
 
-    codex_core::config::ConfigBuilder::default()
+    let mut config = codex_core::config::ConfigBuilder::default()
+        .codex_home(codex_home.to_path_buf())
         .cli_overrides(merged_cli_overrides)
         .harness_overrides(typesafe_overrides)
         .fallback_cwd(cwd)
         .cloud_requirements(cloud_requirements.clone())
         .build()
-        .await
+        .await?;
+    apply_runtime_feature_enablement(&mut config, runtime_feature_enablement);
+    Ok(config)
 }
 
 async fn read_history_cwd_from_state_db(
@@ -8346,26 +8723,7 @@ async fn read_summary_from_state_db_context_by_thread_id(
         Ok(Some(metadata)) => metadata,
         Ok(None) | Err(_) => return None,
     };
-    Some(summary_from_state_db_metadata(
-        metadata.id,
-        metadata.rollout_path,
-        metadata.first_user_message,
-        metadata
-            .created_at
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
-        metadata
-            .updated_at
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
-        metadata.model_provider,
-        metadata.cwd,
-        metadata.cli_version,
-        metadata.source,
-        metadata.agent_nickname,
-        metadata.agent_role,
-        metadata.git_sha,
-        metadata.git_branch,
-        metadata.git_origin_url,
-    ))
+    Some(summary_from_thread_metadata(&metadata))
 }
 
 async fn summary_from_thread_list_item(
@@ -8474,6 +8832,29 @@ fn summary_from_state_db_metadata(
         source,
         git_info,
     }
+}
+
+fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> ConversationSummary {
+    summary_from_state_db_metadata(
+        metadata.id,
+        metadata.rollout_path.clone(),
+        metadata.first_user_message.clone(),
+        metadata
+            .created_at
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        metadata
+            .updated_at
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        metadata.model_provider.clone(),
+        metadata.cwd.clone(),
+        metadata.cli_version.clone(),
+        metadata.source.clone(),
+        metadata.agent_nickname.clone(),
+        metadata.agent_role.clone(),
+        metadata.git_sha.clone(),
+        metadata.git_branch.clone(),
+        metadata.git_origin_url.clone(),
+    )
 }
 
 pub(crate) async fn read_summary_from_rollout(
@@ -8612,7 +8993,7 @@ fn extract_conversation_summary(
 
 fn map_git_info(git_info: &CoreGitInfo) -> ConversationGitInfo {
     ConversationGitInfo {
-        sha: git_info.commit_hash.clone(),
+        sha: git_info.commit_hash.as_ref().map(|sha| sha.0.clone()),
         branch: git_info.branch.clone(),
         origin_url: git_info.repository_url.clone(),
     }
@@ -8623,6 +9004,7 @@ async fn load_thread_summary_for_rollout(
     thread_id: ThreadId,
     rollout_path: &Path,
     fallback_provider: &str,
+    persisted_metadata: Option<&ThreadMetadata>,
 ) -> std::result::Result<Thread, String> {
     let mut thread = read_summary_from_rollout(rollout_path, fallback_provider)
         .await
@@ -8633,7 +9015,12 @@ async fn load_thread_summary_for_rollout(
                 rollout_path.display()
             )
         })?;
-    if let Some(summary) = read_summary_from_state_db_by_thread_id(config, thread_id).await {
+    if let Some(persisted_metadata) = persisted_metadata {
+        merge_mutable_thread_metadata(
+            &mut thread,
+            summary_to_thread(summary_from_thread_metadata(persisted_metadata)),
+        );
+    } else if let Some(summary) = read_summary_from_state_db_by_thread_id(config, thread_id).await {
         merge_mutable_thread_metadata(&mut thread, summary_to_thread(summary));
     }
     Ok(thread)
@@ -8674,6 +9061,7 @@ fn with_thread_spawn_agent_metadata(
             codex_protocol::protocol::SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth,
+                agent_path,
                 agent_nickname: existing_agent_nickname,
                 agent_role: existing_agent_role,
             },
@@ -8681,6 +9069,7 @@ fn with_thread_spawn_agent_metadata(
             codex_protocol::protocol::SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth,
+                agent_path,
                 agent_nickname: agent_nickname.or(existing_agent_nickname),
                 agent_role: agent_role.or(existing_agent_role),
             },
@@ -8789,6 +9178,7 @@ mod tests {
     use anyhow::Result;
     use codex_app_server_protocol::ServerRequestPayload;
     use codex_app_server_protocol::ToolRequestUserInputParams;
+    use codex_protocol::openai_models::ReasoningEffort;
     use codex_protocol::protocol::SessionSource;
     use codex_protocol::protocol::SubAgentSource;
     use pretty_assertions::assert_eq;
@@ -8918,6 +9308,178 @@ mod tests {
             collect_resume_override_mismatches(&request, &config_snapshot),
             vec!["service_tier requested=Some(Fast) active=Some(Flex)".to_string()]
         );
+    }
+
+    fn test_thread_metadata(
+        model: Option<&str>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) -> Result<ThreadMetadata> {
+        let thread_id = ThreadId::from_string("3f941c35-29b3-493b-b0a4-e25800d9aeb0")?;
+        let mut builder = ThreadMetadataBuilder::new(
+            thread_id,
+            PathBuf::from("/tmp/rollout.jsonl"),
+            Utc::now(),
+            codex_protocol::protocol::SessionSource::default(),
+        );
+        builder.model_provider = Some("mock_provider".to_string());
+        let mut metadata = builder.build("mock_provider");
+        metadata.model = model.map(ToString::to_string);
+        metadata.reasoning_effort = reasoning_effort;
+        Ok(metadata)
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_prefers_persisted_model_and_reasoning_effort() -> Result<()>
+    {
+        let mut request_overrides = None;
+        let mut typesafe_overrides = ConfigOverrides::default();
+        let persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), Some(ReasoningEffort::High))?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(
+            typesafe_overrides.model,
+            Some("gpt-5.1-codex-max".to_string())
+        );
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model_reasoning_effort".to_string(),
+                serde_json::Value::String("high".to_string()),
+            )]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_preserves_explicit_overrides() -> Result<()> {
+        let mut request_overrides = Some(HashMap::from([(
+            "model_reasoning_effort".to_string(),
+            serde_json::Value::String("low".to_string()),
+        )]));
+        let mut typesafe_overrides = ConfigOverrides {
+            model: Some("gpt-5.2-codex".to_string()),
+            ..Default::default()
+        };
+        let persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), Some(ReasoningEffort::High))?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(typesafe_overrides.model, Some("gpt-5.2-codex".to_string()));
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model_reasoning_effort".to_string(),
+                serde_json::Value::String("low".to_string()),
+            )]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_skips_persisted_values_when_model_overridden() -> Result<()>
+    {
+        let mut request_overrides = Some(HashMap::from([(
+            "model".to_string(),
+            serde_json::Value::String("gpt-5.2-codex".to_string()),
+        )]));
+        let mut typesafe_overrides = ConfigOverrides::default();
+        let persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), Some(ReasoningEffort::High))?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(typesafe_overrides.model, None);
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model".to_string(),
+                serde_json::Value::String("gpt-5.2-codex".to_string()),
+            )]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_skips_persisted_values_when_provider_overridden()
+    -> Result<()> {
+        let mut request_overrides = None;
+        let mut typesafe_overrides = ConfigOverrides {
+            model_provider: Some("oss".to_string()),
+            ..Default::default()
+        };
+        let persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), Some(ReasoningEffort::High))?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(typesafe_overrides.model, None);
+        assert_eq!(typesafe_overrides.model_provider, Some("oss".to_string()));
+        assert_eq!(request_overrides, None);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_skips_persisted_values_when_reasoning_effort_overridden()
+    -> Result<()> {
+        let mut request_overrides = Some(HashMap::from([(
+            "model_reasoning_effort".to_string(),
+            serde_json::Value::String("low".to_string()),
+        )]));
+        let mut typesafe_overrides = ConfigOverrides::default();
+        let persisted_metadata =
+            test_thread_metadata(Some("gpt-5.1-codex-max"), Some(ReasoningEffort::High))?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(typesafe_overrides.model, None);
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model_reasoning_effort".to_string(),
+                serde_json::Value::String("low".to_string()),
+            )]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn merge_persisted_resume_metadata_skips_missing_values() -> Result<()> {
+        let mut request_overrides = None;
+        let mut typesafe_overrides = ConfigOverrides::default();
+        let persisted_metadata = test_thread_metadata(None, None)?;
+
+        merge_persisted_resume_metadata(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &persisted_metadata,
+        );
+
+        assert_eq!(typesafe_overrides.model, None);
+        assert_eq!(request_overrides, None);
+        Ok(())
     }
 
     #[test]
@@ -9058,6 +9620,7 @@ mod tests {
             source: SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth: 1,
+                agent_path: None,
                 agent_nickname: None,
                 agent_role: None,
             }),
@@ -9117,6 +9680,7 @@ mod tests {
                     request_id: sent_request_id,
                     ..
                 }),
+            ..
         } = request_message
         else {
             panic!("expected tool request to be sent to the subscribed connection");
@@ -9150,6 +9714,7 @@ mod tests {
             serde_json::to_string(&SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: ThreadId::from_string("ad7f0408-99b8-4f6e-a46f-bd0eec433370")?,
                 depth: 1,
+                agent_path: None,
                 agent_nickname: None,
                 agent_role: None,
             }))?;
