@@ -1680,6 +1680,9 @@ impl AuthManager {
         let Some(selection_before_reload) = auth_before_reload.as_ref() else {
             return Ok(());
         };
+        if matches!(selection_before_reload.auth, CodexAuth::ApiKey(_)) {
+            return Ok(());
+        }
         let expected_account_id = auth_before_reload
             .as_ref()
             .and_then(|auth| auth.auth.get_account_id());

@@ -504,17 +504,14 @@ impl ModelsManager {
             .auth_manager
             .auth_for_provider(Some(provider_id.as_str()))
             .await;
-        if !matches!(
-            auth.as_ref().map(CodexAuth::api_auth_mode),
-            Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
-        ) {
+        let provider = self.provider.read().await.clone();
+        if provider.uses_openai_auth() && auth.is_none() {
             info!(
                 provider_id,
-                "models cache: skipping remote models refresh without ChatGPT auth"
+                "models cache: skipping remote models refresh without OpenAI auth"
             );
             return Ok(());
         }
-        let provider = self.provider.read().await.clone();
         let api_auth_mode = auth.as_ref().map(CodexAuth::api_auth_mode);
         let telemetry_auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let provider_generation = self.provider_generation.load(Ordering::SeqCst);

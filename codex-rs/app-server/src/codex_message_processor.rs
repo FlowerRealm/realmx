@@ -1871,7 +1871,11 @@ impl CodexMessageProcessor {
         ),
         JSONRPCErrorError,
     > {
-        let Some(auth) = self.auth_manager.auth().await else {
+        let Some(auth) = self
+            .auth_manager
+            .auth_for_provider(Some(self.config.model_provider_id.as_str()))
+            .await
+        else {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
                 message: "codex account authentication required to read rate limits".to_string(),
@@ -4552,6 +4556,22 @@ impl CodexMessageProcessor {
             }
             thread
         };
+        if thread.preview.is_empty()
+            && let Ok(history_items) = read_rollout_items_from_rollout(rollout_path.as_path()).await
+        {
+            thread.preview = preview_from_rollout_items(&history_items);
+            if thread.turns.is_empty()
+                && let Err(message) = populate_thread_turns(
+                    &mut thread,
+                    ThreadTurnSource::HistoryItems(&history_items),
+                    /*active_turn*/ None,
+                )
+                .await
+            {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        }
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
             && let Err(message) = populate_thread_turns(
@@ -4691,16 +4711,7 @@ impl CodexMessageProcessor {
         let mut items = Vec::with_capacity(requested_page_size);
         let mut next_cursor: Option<String> = None;
 
-        let model_provider_filter = match model_providers {
-            Some(providers) => {
-                if providers.is_empty() {
-                    None
-                } else {
-                    Some(providers)
-                }
-            }
-            None => Some(vec![self.config.model_provider_id.clone()]),
-        };
+        let model_provider_filter = model_providers.filter(|providers| !providers.is_empty());
         let fallback_provider = self.config.model_provider_id.clone();
         let (allowed_sources_vec, source_kind_filter) = compute_source_filters(source_kinds);
         let allowed_sources = allowed_sources_vec.as_slice();
@@ -5954,9 +5965,12 @@ impl CodexMessageProcessor {
             }
         };
         let mut remote_sync_error = None;
-        let auth = self.auth_manager.auth().await;
 
         if force_remote_sync {
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
             match plugins_manager
                 .sync_plugins_from_remote(&config, auth.as_ref(), /*additive_only*/ false)
                 .await
@@ -6053,6 +6067,10 @@ impl CodexMessageProcessor {
             }
         };
 
+        let auth = self
+            .auth_manager
+            .auth_for_provider(Some(config.model_provider_id.as_str()))
+            .await;
         let featured_plugin_ids = if data
             .iter()
             .any(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
@@ -6245,7 +6263,10 @@ impl CodexMessageProcessor {
                     return;
                 }
             };
-            let auth = self.auth_manager.auth().await;
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
             plugins_manager
                 .install_plugin_with_remote_sync(&config, auth.as_ref(), request)
                 .await
@@ -6414,7 +6435,10 @@ impl CodexMessageProcessor {
                     return;
                 }
             };
-            let auth = self.auth_manager.auth().await;
+            let auth = self
+                .auth_manager
+                .auth_for_provider(Some(config.model_provider_id.as_str()))
+                .await;
             plugins_manager
                 .uninstall_plugin_with_remote_sync(&config, auth.as_ref(), plugin_id)
                 .await
