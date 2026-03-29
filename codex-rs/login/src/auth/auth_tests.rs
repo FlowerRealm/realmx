@@ -248,6 +248,50 @@ fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
     assert_eq!(manager.refresh_failure_for_auth(&updated_auth), None);
 }
 
+#[test]
+fn refresh_failure_ignores_last_refresh_when_matching_auth() {
+    let codex_home = tempdir().unwrap();
+    write_auth_file(
+        AuthFileParams {
+            api_key: None,
+            chatgpt_plan_type: Some("pro".to_string()),
+            chatgpt_account_id: Some("org_mine".to_string()),
+        },
+        codex_home.path(),
+    )
+    .expect("failed to write auth file");
+
+    let auth = CodexAuth::from_auth_storage(codex_home.path(), AuthCredentialsStoreMode::File)
+        .expect("load auth")
+        .expect("auth available");
+    let mut updated_auth_dot_json = auth
+        .get_current_auth_json()
+        .expect("AuthDotJson should exist");
+    updated_auth_dot_json.last_refresh = Some(chrono::Utc::now());
+    let reloaded_auth = CodexAuth::from_auth_dot_json(
+        codex_home.path(),
+        updated_auth_dot_json,
+        AuthCredentialsStoreMode::File,
+        crate::default_client::create_client(),
+    )
+    .expect("reloaded auth should parse");
+
+    let manager = AuthManager::from_auth_for_testing(auth);
+    let error = RefreshTokenFailedError::new(
+        RefreshTokenFailedReason::Exhausted,
+        "refresh token already used",
+    );
+    let selection = manager
+        .select_cached_auth(&AuthScope::Default)
+        .expect("cached auth should exist");
+    manager.record_permanent_refresh_failure_if_unchanged(&selection, &error);
+
+    assert_eq!(
+        manager.refresh_failure_for_auth(&reloaded_auth),
+        Some(error)
+    );
+}
+
 struct AuthFileParams {
     api_key: Option<String>,
     chatgpt_plan_type: Option<String>,

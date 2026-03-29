@@ -7029,7 +7029,7 @@ impl CodexMessageProcessor {
         } = self
             .thread_manager
             .fork_thread(
-                usize::MAX,
+                ForkSnapshot::Interrupted,
                 config,
                 rollout_path,
                 /*persist_extended_history*/ false,

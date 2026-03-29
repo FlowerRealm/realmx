@@ -1077,6 +1077,17 @@ fn auth_dot_json_for_refresh(auth: &CodexAuth) -> AuthDotJson {
     }
 }
 
+fn normalize_refresh_failure_auth_dot_json(mut auth_dot_json: AuthDotJson) -> AuthDotJson {
+    // `last_refresh` changes across reloads for the same credentials, so it is
+    // noise for permanent refresh failure identity.
+    auth_dot_json.last_refresh = None;
+    auth_dot_json
+}
+
+fn refresh_failure_auth_dot_json(auth: &CodexAuth) -> AuthDotJson {
+    normalize_refresh_failure_auth_dot_json(auth_dot_json_for_refresh(auth))
+}
+
 impl CachedAuth {
     fn from_test_auth(auth: CodexAuth) -> Self {
         let auth_dot_json = auth_dot_json_for_refresh(&auth);
@@ -1400,7 +1411,7 @@ impl AuthManager {
     }
 
     pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenFailedError> {
-        let auth_dot_json = auth_dot_json_for_refresh(auth);
+        let auth_dot_json = refresh_failure_auth_dot_json(auth);
         self.inner.read().ok().and_then(|cached| {
             cached
                 .permanent_refresh_failure
@@ -1520,7 +1531,9 @@ impl AuthManager {
         {
             guard.permanent_refresh_failure = Some(AuthScopedRefreshFailure {
                 scope: attempted_selection.scope.clone(),
-                auth_dot_json: attempted_selection.auth_dot_json.clone(),
+                auth_dot_json: normalize_refresh_failure_auth_dot_json(
+                    attempted_selection.auth_dot_json.clone(),
+                ),
                 error: error.clone(),
             });
         }
@@ -1606,7 +1619,12 @@ impl AuthManager {
                             guard.ephemeral_store.as_ref(),
                             guard.managed_store.as_ref(),
                         )
-                        .map(|selection| (selection.scope, selection.auth_dot_json));
+                        .map(|selection| {
+                            (
+                                selection.scope,
+                                normalize_refresh_failure_auth_dot_json(selection.auth_dot_json),
+                            )
+                        });
                     cached_auth != Some((failure.scope.clone(), failure.auth_dot_json.clone()))
                 });
             if clear_permanent_refresh_failure {

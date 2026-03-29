@@ -374,6 +374,8 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -494,6 +496,8 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -610,6 +614,8 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
         codex_home.path(),
         CreateConfigTomlParams {
             forced_workspace_id: Some("org-expected".to_string()),
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -731,6 +737,8 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
