@@ -3639,6 +3639,7 @@ impl Session {
         state.clone_history()
     }
 
+    #[cfg(test)]
     pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {
         let state = self.state.lock().await;
         state.reference_context_item()
@@ -4473,6 +4474,8 @@ mod handlers {
     use crate::tasks::UserShellCommandMode;
     use crate::tasks::UserShellCommandTask;
     use crate::tasks::execute_user_shell_command;
+    use crate::workspace_snapshot::apply_workspace_snapshot_to_restore_options;
+    use crate::workspace_snapshot::resolve_workspace_snapshot_paths;
     use codex_git::RestoreGhostCommitOptions;
     use codex_git::restore_ghost_commit_with_options;
     use codex_protocol::custom_prompts::CustomPrompt;
@@ -5203,10 +5206,14 @@ mod handlers {
             .await;
 
             let repo_path = turn_context.cwd.clone();
+            let workspace_snapshot_paths =
+                resolve_workspace_snapshot_paths(turn_context.config.as_ref(), repo_path.as_path());
             let ghost_snapshot = turn_context.ghost_snapshot.clone();
             let restore_result = tokio::task::spawn_blocking(move || {
-                let options =
-                    RestoreGhostCommitOptions::new(&repo_path).ghost_snapshot(ghost_snapshot);
+                let options = apply_workspace_snapshot_to_restore_options(
+                    RestoreGhostCommitOptions::new(&repo_path).ghost_snapshot(ghost_snapshot),
+                    &workspace_snapshot_paths,
+                );
                 restore_ghost_commit_with_options(&options, &ghost_commit)
             })
             .await;

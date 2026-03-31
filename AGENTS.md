@@ -193,4 +193,3 @@ These guidelines apply to app-server protocol work in `codex-rs`, especially:
 - Validate with `cargo test -p codex-app-server-protocol`.
 - Avoid boilerplate tests that only assert experimental field markers for individual
   request fields in `common.rs`; rely on schema generation/tests and behavioral coverage instead.
-- Avoid run test in local anymore, please run test in Github CI, that's very important, don't run test locally, you must run it in remotely

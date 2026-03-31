@@ -22,6 +22,8 @@ pub enum GitToolingError {
     },
     #[error("{path:?} is not a git repository")]
     NotAGitRepository { path: PathBuf },
+    #[error("shadow git directory is required for non-git workspace {workspace_root:?}")]
+    ShadowGitDirRequired { workspace_root: PathBuf },
     #[error("path {path:?} must be relative to the repository root")]
     NonRelativePath { path: PathBuf },
     #[error("path {path:?} escapes the repository root")]

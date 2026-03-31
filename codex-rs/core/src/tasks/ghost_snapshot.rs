@@ -4,10 +4,11 @@ use crate::protocol::WarningEvent;
 use crate::state::TaskKind;
 use crate::tasks::SessionTask;
 use crate::tasks::SessionTaskContext;
+use crate::workspace_snapshot::apply_workspace_snapshot_to_create_options;
+use crate::workspace_snapshot::resolve_workspace_snapshot_paths;
 use async_trait::async_trait;
 use codex_git::CreateGhostCommitOptions;
 use codex_git::GhostSnapshotReport;
-use codex_git::GitToolingError;
 use codex_git::create_ghost_commit_with_report;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::user_input::UserInput;
@@ -63,7 +64,7 @@ impl SessionTask for GhostSnapshotTask {
                                 .send_event(
                                     &ctx_for_warning,
                                     EventMsg::Warning(WarningEvent {
-                                        message: "Repository snapshot is taking longer than expected. Large untracked or ignored files can slow snapshots; consider adding large files or directories to .gitignore or disabling `undo` in your config.".to_string()
+                                        message: "Workspace snapshot is taking longer than expected. Large untracked or ignored files can slow snapshots; consider adding large files or directories to .gitignore or disabling `undo` in your config.".to_string()
                                     }),
                                 )
                                 .await;
@@ -81,12 +82,17 @@ impl SessionTask for GhostSnapshotTask {
                 _ = cancellation_token.cancelled() => true,
                 _ = async {
                     let repo_path = ctx_for_task.cwd.clone();
+                    let workspace_snapshot_paths =
+                        resolve_workspace_snapshot_paths(ctx_for_task.config.as_ref(), &repo_path);
                     let ghost_snapshot = ctx_for_task.ghost_snapshot.clone();
                     let ghost_snapshot_for_commit = ghost_snapshot.clone();
                     // Required to run in a dedicated blocking pool.
                     match tokio::task::spawn_blocking(move || {
-                        let options =
-                            CreateGhostCommitOptions::new(&repo_path).ghost_snapshot(ghost_snapshot_for_commit);
+                        let options = apply_workspace_snapshot_to_create_options(
+                            CreateGhostCommitOptions::new(&repo_path)
+                                .ghost_snapshot(ghost_snapshot_for_commit),
+                            &workspace_snapshot_paths,
+                        );
                         create_ghost_commit_with_report(&options)
                     })
                     .await
@@ -116,18 +122,12 @@ impl SessionTask for GhostSnapshotTask {
                                 .await;
                             info!("ghost commit captured: {}", ghost_commit.id());
                         }
-                        Ok(Err(err)) => match err {
-                            GitToolingError::NotAGitRepository { .. } => info!(
+                        Ok(Err(err)) => {
+                            warn!(
                                 sub_id = ctx_for_task.sub_id.as_str(),
-                                "skipping ghost snapshot because current directory is not a Git repository"
-                            ),
-                            _ => {
-                                warn!(
-                                    sub_id = ctx_for_task.sub_id.as_str(),
-                                    "failed to capture ghost snapshot: {err}"
-                                );
-                            }
-                        },
+                                "failed to capture ghost snapshot: {err}"
+                            );
+                        }
                         Err(err) => {
                             warn!(
                                 sub_id = ctx_for_task.sub_id.as_str(),
@@ -201,7 +201,7 @@ fn format_large_untracked_warning(
         parts.push(format!("{remaining} more"));
     }
     Some(format!(
-        "Repository snapshot ignored large untracked directories (>= {threshold} files): {}. These directories are excluded from snapshots and undo cleanup. Adjust `ghost_snapshot.ignore_large_untracked_dirs` to change this behavior.",
+        "Workspace snapshot ignored large untracked directories (>= {threshold} files): {}. These directories are excluded from snapshots and undo cleanup. Adjust `ghost_snapshot.ignore_large_untracked_dirs` to change this behavior.",
         parts.join(", ")
     ))
 }
@@ -230,7 +230,7 @@ fn format_ignored_untracked_files_warning(
     }
 
     Some(format!(
-        "Repository snapshot ignored untracked files larger than {}: {}. These files are preserved during undo cleanup, but their contents are not captured in the snapshot. Adjust `ghost_snapshot.ignore_large_untracked_files` to change this behavior. To avoid this message in the future, update your `.gitignore`.",
+        "Workspace snapshot ignored untracked files larger than {}: {}. These files are preserved during undo cleanup, but their contents are not captured in the snapshot. Adjust `ghost_snapshot.ignore_large_untracked_files` to change this behavior. To avoid this message in the future, update your `.gitignore`.",
         format_bytes(threshold),
         parts.join(", ")
     ))

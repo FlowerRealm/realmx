@@ -78,6 +78,7 @@ pub mod token_data;
 mod truncate;
 mod unified_exec;
 pub mod windows_sandbox;
+mod workspace_snapshot;
 pub use client::X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER;
 pub use codex_rmcp_client::OAuthCredentialsStoreMode;
 pub use codex_rmcp_client::OauthLoginHandle;

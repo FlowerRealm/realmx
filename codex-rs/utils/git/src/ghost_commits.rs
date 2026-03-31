@@ -12,14 +12,8 @@ use tempfile::Builder;
 use crate::GhostCommit;
 use crate::GitToolingError;
 use crate::operations::apply_repo_prefix_to_force_include;
-use crate::operations::ensure_git_repository;
 use crate::operations::normalize_relative_path;
-use crate::operations::repo_subdir;
-use crate::operations::resolve_head;
-use crate::operations::resolve_repository_root;
-use crate::operations::run_git_for_status;
-use crate::operations::run_git_for_stdout;
-use crate::operations::run_git_for_stdout_all;
+use crate::workspace::SnapshotWorkspace;
 
 /// Default commit message used for ghost commits when none is provided.
 const DEFAULT_COMMIT_MESSAGE: &str = "codex snapshot";
@@ -50,6 +44,8 @@ const DEFAULT_IGNORED_DIR_NAMES: &[&str] = &[
 /// Options to control ghost commit creation.
 pub struct CreateGhostCommitOptions<'a> {
     pub repo_path: &'a Path,
+    pub workspace_root: Option<PathBuf>,
+    pub shadow_git_dir: Option<PathBuf>,
     pub message: Option<&'a str>,
     pub force_include: Vec<PathBuf>,
     pub ghost_snapshot: GhostSnapshotConfig,
@@ -58,6 +54,8 @@ pub struct CreateGhostCommitOptions<'a> {
 /// Options to control ghost commit restoration.
 pub struct RestoreGhostCommitOptions<'a> {
     pub repo_path: &'a Path,
+    pub workspace_root: Option<PathBuf>,
+    pub shadow_git_dir: Option<PathBuf>,
     pub ghost_snapshot: GhostSnapshotConfig,
 }
 
@@ -104,6 +102,8 @@ impl<'a> CreateGhostCommitOptions<'a> {
     pub fn new(repo_path: &'a Path) -> Self {
         Self {
             repo_path,
+            workspace_root: None,
+            shadow_git_dir: None,
             message: None,
             force_include: Vec::new(),
             ghost_snapshot: GhostSnapshotConfig::default(),
@@ -118,6 +118,16 @@ impl<'a> CreateGhostCommitOptions<'a> {
 
     pub fn ghost_snapshot(mut self, ghost_snapshot: GhostSnapshotConfig) -> Self {
         self.ghost_snapshot = ghost_snapshot;
+        self
+    }
+
+    pub fn workspace_root(mut self, workspace_root: PathBuf) -> Self {
+        self.workspace_root = Some(workspace_root);
+        self
+    }
+
+    pub fn shadow_git_dir(mut self, shadow_git_dir: PathBuf) -> Self {
+        self.shadow_git_dir = Some(shadow_git_dir);
         self
     }
 
@@ -158,12 +168,24 @@ impl<'a> RestoreGhostCommitOptions<'a> {
     pub fn new(repo_path: &'a Path) -> Self {
         Self {
             repo_path,
+            workspace_root: None,
+            shadow_git_dir: None,
             ghost_snapshot: GhostSnapshotConfig::default(),
         }
     }
 
     pub fn ghost_snapshot(mut self, ghost_snapshot: GhostSnapshotConfig) -> Self {
         self.ghost_snapshot = ghost_snapshot;
+        self
+    }
+
+    pub fn workspace_root(mut self, workspace_root: PathBuf) -> Self {
+        self.workspace_root = Some(workspace_root);
+        self
+    }
+
+    pub fn shadow_git_dir(mut self, shadow_git_dir: PathBuf) -> Self {
+        self.shadow_git_dir = Some(shadow_git_dir);
         self
     }
 
@@ -262,14 +284,16 @@ pub fn create_ghost_commit(
 pub fn capture_ghost_snapshot_report(
     options: &CreateGhostCommitOptions<'_>,
 ) -> Result<GhostSnapshotReport, GitToolingError> {
-    ensure_git_repository(options.repo_path)?;
-
-    let repo_root = resolve_repository_root(options.repo_path)?;
-    let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
-    let force_include = prepare_force_include(repo_prefix.as_deref(), &options.force_include)?;
+    let workspace = SnapshotWorkspace::resolve(
+        options.repo_path,
+        options.workspace_root.as_deref(),
+        options.shadow_git_dir.as_deref(),
+    )?;
+    let repo_prefix = workspace.repo_prefix();
+    let force_include = prepare_force_include(repo_prefix, &options.force_include)?;
     let existing_untracked = capture_existing_untracked(
-        repo_root.as_path(),
-        repo_prefix.as_deref(),
+        &workspace,
+        repo_prefix,
         options.ghost_snapshot.ignore_large_untracked_files,
         options.ghost_snapshot.ignore_large_untracked_dirs,
         &force_include,
@@ -279,7 +303,7 @@ pub fn capture_ghost_snapshot_report(
         .ignored_untracked_files
         .iter()
         .map(|file| IgnoredUntrackedFile {
-            path: to_session_relative_path(file.path.as_path(), repo_prefix.as_deref()),
+            path: to_session_relative_path(file.path.as_path(), repo_prefix),
             byte_size: file.byte_size,
         })
         .collect::<Vec<_>>();
@@ -287,7 +311,7 @@ pub fn capture_ghost_snapshot_report(
         .ignored_large_untracked_dirs
         .iter()
         .map(|dir| LargeUntrackedDir {
-            path: to_session_relative_path(dir.path.as_path(), repo_prefix.as_deref()),
+            path: to_session_relative_path(dir.path.as_path(), repo_prefix),
             file_count: dir.file_count,
         })
         .collect::<Vec<_>>();
@@ -302,15 +326,17 @@ pub fn capture_ghost_snapshot_report(
 pub fn create_ghost_commit_with_report(
     options: &CreateGhostCommitOptions<'_>,
 ) -> Result<(GhostCommit, GhostSnapshotReport), GitToolingError> {
-    ensure_git_repository(options.repo_path)?;
-
-    let repo_root = resolve_repository_root(options.repo_path)?;
-    let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
-    let parent = resolve_head(repo_root.as_path())?;
-    let force_include = prepare_force_include(repo_prefix.as_deref(), &options.force_include)?;
+    let workspace = SnapshotWorkspace::resolve(
+        options.repo_path,
+        options.workspace_root.as_deref(),
+        options.shadow_git_dir.as_deref(),
+    )?;
+    let repo_prefix = workspace.repo_prefix();
+    let parent = resolve_head_for_workspace(&workspace)?;
+    let force_include = prepare_force_include(repo_prefix, &options.force_include)?;
     let status_snapshot = capture_status_snapshot(
-        repo_root.as_path(),
-        repo_prefix.as_deref(),
+        &workspace,
+        repo_prefix,
         options.ghost_snapshot.ignore_large_untracked_files,
         options.ghost_snapshot.ignore_large_untracked_dirs,
         &force_include,
@@ -321,7 +347,7 @@ pub fn create_ghost_commit_with_report(
         .ignored_untracked_files
         .iter()
         .map(|file| IgnoredUntrackedFile {
-            path: to_session_relative_path(file.path.as_path(), repo_prefix.as_deref()),
+            path: to_session_relative_path(file.path.as_path(), repo_prefix),
             byte_size: file.byte_size,
         })
         .collect::<Vec<_>>();
@@ -329,7 +355,7 @@ pub fn create_ghost_commit_with_report(
         .ignored_large_untracked_dirs
         .iter()
         .map(|dir| LargeUntrackedDir {
-            path: to_session_relative_path(dir.path.as_path(), repo_prefix.as_deref()),
+            path: to_session_relative_path(dir.path.as_path(), repo_prefix),
             file_count: dir.file_count,
         })
         .collect::<Vec<_>>();
@@ -349,10 +375,9 @@ pub fn create_ghost_commit_with_report(
     // Pre-populate the temporary index with HEAD so unchanged tracked files
     // are included in the snapshot tree.
     if let Some(parent_sha) = parent.as_deref() {
-        run_git_for_status(
-            repo_root.as_path(),
+        workspace.run_git_for_status_with_env(
             vec![OsString::from("read-tree"), OsString::from(parent_sha)],
-            Some(base_env.as_slice()),
+            base_env.as_slice(),
         )?;
     }
 
@@ -361,7 +386,7 @@ pub fn create_ghost_commit_with_report(
     let index_paths = dedupe_paths(index_paths);
     // Stage tracked + new files into the temp index so write-tree reflects the working tree.
     // We use `git add --all` to make deletions show up in the snapshot tree too.
-    add_paths_to_index(repo_root.as_path(), base_env.as_slice(), &index_paths)?;
+    add_paths_to_index(&workspace, base_env.as_slice(), &index_paths)?;
     if !force_include.is_empty() {
         let mut args = Vec::with_capacity(force_include.len() + 2);
         args.push(OsString::from("add"));
@@ -371,14 +396,11 @@ pub fn create_ghost_commit_with_report(
                 .iter()
                 .map(|path| OsString::from(path.as_os_str())),
         );
-        run_git_for_status(repo_root.as_path(), args, Some(base_env.as_slice()))?;
+        workspace.run_git_for_status_with_env(args, base_env.as_slice())?;
     }
 
-    let tree_id = run_git_for_stdout(
-        repo_root.as_path(),
-        vec![OsString::from("write-tree")],
-        Some(base_env.as_slice()),
-    )?;
+    let tree_id = workspace
+        .run_git_for_stdout_with_env(vec![OsString::from("write-tree")], base_env.as_slice())?;
 
     let mut commit_env = base_env;
     commit_env.extend(default_commit_identity());
@@ -395,11 +417,7 @@ pub fn create_ghost_commit_with_report(
     // `git commit-tree` writes a detached commit object without updating refs,
     // which keeps snapshots out of the user's branch history.
     // Retrieve commit ID.
-    let commit_id = run_git_for_stdout(
-        repo_root.as_path(),
-        commit_args,
-        Some(commit_env.as_slice()),
-    )?;
+    let commit_id = workspace.run_git_for_stdout_with_env(commit_args, commit_env.as_slice())?;
 
     let ghost_commit = GhostCommit::new(
         commit_id,
@@ -433,20 +451,22 @@ pub fn restore_ghost_commit_with_options(
     options: &RestoreGhostCommitOptions<'_>,
     commit: &GhostCommit,
 ) -> Result<(), GitToolingError> {
-    ensure_git_repository(options.repo_path)?;
-
-    let repo_root = resolve_repository_root(options.repo_path)?;
-    let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
+    let workspace = SnapshotWorkspace::resolve(
+        options.repo_path,
+        options.workspace_root.as_deref(),
+        options.shadow_git_dir.as_deref(),
+    )?;
+    let repo_prefix = workspace.repo_prefix();
     let current_untracked = capture_existing_untracked(
-        repo_root.as_path(),
-        repo_prefix.as_deref(),
+        &workspace,
+        repo_prefix,
         options.ghost_snapshot.ignore_large_untracked_files,
         options.ghost_snapshot.ignore_large_untracked_dirs,
         &[],
     )?;
-    restore_to_commit_inner(repo_root.as_path(), repo_prefix.as_deref(), commit.id())?;
+    restore_to_commit_inner(&workspace, repo_prefix, commit.id())?;
     remove_new_untracked(
-        repo_root.as_path(),
+        workspace.repo_root(),
         commit.preexisting_untracked_files(),
         commit.preexisting_untracked_dirs(),
         current_untracked,
@@ -455,17 +475,17 @@ pub fn restore_ghost_commit_with_options(
 
 /// Restore the working tree to match the given commit ID.
 pub fn restore_to_commit(repo_path: &Path, commit_id: &str) -> Result<(), GitToolingError> {
-    ensure_git_repository(repo_path)?;
-
-    let repo_root = resolve_repository_root(repo_path)?;
-    let repo_prefix = repo_subdir(repo_root.as_path(), repo_path);
-    restore_to_commit_inner(repo_root.as_path(), repo_prefix.as_deref(), commit_id)
+    let workspace = SnapshotWorkspace::resolve(
+        repo_path, /*workspace_root*/ None, /*shadow_git_dir*/ None,
+    )?;
+    let repo_prefix = workspace.repo_prefix();
+    restore_to_commit_inner(&workspace, repo_prefix, commit_id)
 }
 
 /// Restores the working tree and index to the given commit using `git restore`.
 /// The repository root and optional repository-relative prefix limit the restore scope.
 fn restore_to_commit_inner(
-    repo_root: &Path,
+    workspace: &SnapshotWorkspace,
     repo_prefix: Option<&Path>,
     commit_id: &str,
 ) -> Result<(), GitToolingError> {
@@ -489,7 +509,7 @@ fn restore_to_commit_inner(
         restore_args.push(OsString::from("."));
     }
 
-    run_git_for_status(repo_root, restore_args, /*env*/ None)?;
+    workspace.run_git_for_status(restore_args)?;
     Ok(())
 }
 
@@ -512,7 +532,7 @@ struct StatusSnapshot {
 /// Captures the working tree status under `repo_root`, optionally limited by `repo_prefix`.
 /// Returns the result as a `StatusSnapshot`.
 fn capture_status_snapshot(
-    repo_root: &Path,
+    workspace: &SnapshotWorkspace,
     repo_prefix: Option<&Path>,
     ignore_large_untracked_files: Option<i64>,
     ignore_large_untracked_dirs: Option<i64>,
@@ -532,7 +552,7 @@ fn capture_status_snapshot(
         args.push(prefix.as_os_str().to_os_string());
     }
 
-    let output = run_git_for_stdout_all(repo_root, args, /*env*/ None)?;
+    let output = workspace.run_git_for_stdout_all(args)?;
     if output.is_empty() {
         return Ok(StatusSnapshot::default());
     }
@@ -568,7 +588,7 @@ fn capture_status_snapshot(
                 if should_ignore_for_snapshot(&normalized) {
                     continue;
                 }
-                let absolute = repo_root.join(&normalized);
+                let absolute = workspace.repo_root().join(&normalized);
                 let is_dir = absolute.is_dir();
                 if is_dir {
                     snapshot.untracked.dirs.push(normalized);
@@ -677,20 +697,34 @@ fn capture_status_snapshot(
 /// Captures the untracked and ignored entries under `repo_root`, optionally limited by `repo_prefix`.
 /// Returns the result as an `UntrackedSnapshot`.
 fn capture_existing_untracked(
-    repo_root: &Path,
+    workspace: &SnapshotWorkspace,
     repo_prefix: Option<&Path>,
     ignore_large_untracked_files: Option<i64>,
     ignore_large_untracked_dirs: Option<i64>,
     force_include: &[PathBuf],
 ) -> Result<UntrackedSnapshot, GitToolingError> {
     Ok(capture_status_snapshot(
-        repo_root,
+        workspace,
         repo_prefix,
         ignore_large_untracked_files,
         ignore_large_untracked_dirs,
         force_include,
     )?
     .untracked)
+}
+
+fn resolve_head_for_workspace(
+    workspace: &SnapshotWorkspace,
+) -> Result<Option<String>, GitToolingError> {
+    match workspace.run_git_for_stdout([
+        OsString::from("rev-parse"),
+        OsString::from("--verify"),
+        OsString::from("HEAD"),
+    ]) {
+        Ok(sha) => Ok(Some(sha)),
+        Err(GitToolingError::GitCommand { status, .. }) if status.code() == Some(128) => Ok(None),
+        Err(other) => Err(other),
+    }
 }
 
 fn extract_status_path_after_fields(record: &str, fields_before_path: i64) -> Option<&str> {
@@ -755,7 +789,7 @@ fn untracked_file_size(path: &Path) -> io::Result<Option<i64>> {
 }
 
 fn add_paths_to_index(
-    repo_root: &Path,
+    workspace: &SnapshotWorkspace,
     env: &[(OsString, OsString)],
     paths: &[PathBuf],
 ) -> Result<(), GitToolingError> {
@@ -772,7 +806,7 @@ fn add_paths_to_index(
         ];
         args.extend(chunk.iter().map(|path| path.as_os_str().to_os_string()));
         // Chunk the argv to avoid oversized command lines on large repos.
-        run_git_for_status(repo_root, args, Some(env))?;
+        workspace.run_git_for_status_with_env(args, env)?;
     }
 
     Ok(())

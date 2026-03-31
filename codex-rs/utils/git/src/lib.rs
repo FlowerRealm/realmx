@@ -7,6 +7,7 @@ mod errors;
 mod ghost_commits;
 mod operations;
 mod platform;
+mod workspace;
 
 pub use apply::ApplyGitRequest;
 pub use apply::ApplyGitResult;
@@ -33,6 +34,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use ts_rs::TS;
+pub use workspace::ShadowGitWorkspace;
 
 type CommitID = String;
 

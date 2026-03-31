@@ -2,7 +2,6 @@ mod compact;
 mod ghost_snapshot;
 mod regular;
 mod review;
-mod undo;
 mod user_shell;
 
 use std::sync::Arc;
@@ -50,7 +49,6 @@ pub(crate) use compact::CompactTask;
 pub(crate) use ghost_snapshot::GhostSnapshotTask;
 pub(crate) use regular::RegularTask;
 pub(crate) use review::ReviewTask;
-pub(crate) use undo::UndoTask;
 pub(crate) use user_shell::UserShellCommandMode;
 pub(crate) use user_shell::UserShellCommandTask;
 pub(crate) use user_shell::execute_user_shell_command;

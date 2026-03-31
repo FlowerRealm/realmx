@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use codex_config::CONFIG_TOML_FILE;
 use codex_core::CodexThread;
 use codex_core::features::Feature;
 use codex_protocol::protocol::EventMsg;
@@ -24,16 +25,65 @@ use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
+use tempfile::TempDir;
 
 #[allow(clippy::expect_used)]
 async fn undo_harness() -> Result<TestCodexHarness> {
+    undo_harness_with_config(|_| {}).await
+}
+
+#[allow(clippy::expect_used)]
+async fn undo_harness_with_config(
+    mutator: impl FnOnce(&mut codex_core::config::Config) + Send + 'static,
+) -> Result<TestCodexHarness> {
     let builder = test_codex().with_model("gpt-5.1").with_config(|config| {
         config.include_apply_patch_tool = true;
         config
             .features
             .enable(Feature::GhostCommit)
             .expect("test config should allow feature update");
+        mutator(config);
     });
+    TestCodexHarness::with_builder(builder).await
+}
+
+#[allow(clippy::expect_used)]
+async fn undo_harness_in_nested_cwd(
+    nested_rel: &'static str,
+    mutator: impl FnOnce(&mut codex_core::config::Config) + Send + 'static,
+) -> Result<TestCodexHarness> {
+    let builder = test_codex()
+        .with_model("gpt-5.1")
+        .with_config(move |config| {
+            config.include_apply_patch_tool = true;
+            config
+                .features
+                .enable(Feature::GhostCommit)
+                .expect("test config should allow feature update");
+            config.cwd = config.cwd.join(nested_rel);
+            mutator(config);
+        });
+    TestCodexHarness::with_builder(builder).await
+}
+
+#[allow(clippy::expect_used)]
+async fn undo_harness_in_nested_cwd_with_home(
+    nested_rel: &'static str,
+    home: Arc<TempDir>,
+    mutator: impl FnOnce(&mut codex_core::config::Config) + Send + 'static,
+) -> Result<TestCodexHarness> {
+    let builder = test_codex()
+        .with_home(home)
+        .with_model("gpt-5.1")
+        .with_config(move |config| {
+            config.include_apply_patch_tool = true;
+            config
+                .features
+                .enable(Feature::GhostCommit)
+                .expect("test config should allow feature update");
+            config.cwd = config.cwd.join(nested_rel);
+            mutator(config);
+        });
     TestCodexHarness::with_builder(builder).await
 }
 
@@ -238,6 +288,89 @@ async fn undo_restores_untracked_file_edit() -> Result<()> {
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
     assert_eq!(fs::read_to_string(&notes)?, "original\n");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn undo_restores_non_git_project_using_default_root_marker() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let harness = undo_harness_in_nested_cwd("apps/web", |_| {}).await?;
+    let project_root = harness
+        .test()
+        .config
+        .cwd
+        .parent()
+        .and_then(Path::parent)
+        .context("nested cwd should have a project root")?
+        .to_path_buf();
+    fs::create_dir_all(harness.test().config.cwd.as_path())?;
+    fs::write(
+        project_root.join("package.json"),
+        "{\n  \"name\": \"demo\"\n}\n",
+    )?;
+    fs::write(project_root.join("root.txt"), "before\n")?;
+
+    run_apply_patch_turn(
+        &harness,
+        "update project root file",
+        "undo-non-git-default",
+        "*** Begin Patch\n*** Update File: ../../root.txt\n@@\n-before\n+after\n*** End Patch",
+        "done",
+    )
+    .await?;
+
+    let root_file = project_root.join("root.txt");
+    assert_eq!(fs::read_to_string(&root_file)?, "after\n");
+
+    let codex = Arc::clone(&harness.test().codex);
+    expect_successful_undo(&codex).await?;
+
+    assert_eq!(fs::read_to_string(&root_file)?, "before\n");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn undo_restores_non_git_project_using_custom_root_marker() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let home = Arc::new(TempDir::new()?);
+    fs::write(
+        home.path().join(CONFIG_TOML_FILE),
+        "project_root_markers = [\".workspace-root\"]\n",
+    )?;
+    let harness =
+        undo_harness_in_nested_cwd_with_home("nested/workspace/app", home, |_| {}).await?;
+    let project_root = harness
+        .test()
+        .config
+        .cwd
+        .parent()
+        .and_then(Path::parent)
+        .context("nested cwd should have a project root")?
+        .to_path_buf();
+    fs::create_dir_all(harness.test().config.cwd.as_path())?;
+    fs::write(project_root.join(".workspace-root"), "x\n")?;
+    fs::write(project_root.join("shared.txt"), "before\n")?;
+
+    run_apply_patch_turn(
+        &harness,
+        "update custom-root project file",
+        "undo-non-git-custom",
+        "*** Begin Patch\n*** Update File: ../../shared.txt\n@@\n-before\n+after\n*** End Patch",
+        "done",
+    )
+    .await?;
+
+    let shared_file = project_root.join("shared.txt");
+    assert_eq!(fs::read_to_string(&shared_file)?, "after\n");
+
+    let codex = Arc::clone(&harness.test().codex);
+    expect_successful_undo(&codex).await?;
+
+    assert_eq!(fs::read_to_string(&shared_file)?, "before\n");
 
     Ok(())
 }
