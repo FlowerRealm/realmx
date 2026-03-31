@@ -68,10 +68,8 @@ impl MessageProcessor {
             CollaborationModesConfig {
                 default_mode_request_user_input: config
                     .features
-                    .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
-                plan_workflow_enabled: config
-                    .features
-                    .enabled(codex_core::features::Feature::PlanWorkflow),
+                    .enabled(Feature::DefaultModeRequestUserInput),
+                plan_workflow_enabled: config.features.enabled(Feature::PlanWorkflow),
             },
             environment_manager,
         ));

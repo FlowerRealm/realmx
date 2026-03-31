@@ -287,34 +287,6 @@ pub struct InProcessClientStartArgs {
 }
 
 impl InProcessClientStartArgs {
-    fn shared_core_managers(&self) -> SharedCoreManagers {
-        let auth_manager = AuthManager::shared(
-            self.config.codex_home.clone(),
-            self.enable_codex_api_key_env,
-            self.config.cli_auth_credentials_store_mode,
-        );
-        let thread_manager = Arc::new(ThreadManager::new(
-            self.config.as_ref(),
-            auth_manager.clone(),
-            self.session_source.clone(),
-            CollaborationModesConfig {
-                default_mode_request_user_input: self
-                    .config
-                    .features
-                    .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
-                plan_workflow_enabled: self
-                    .config
-                    .features
-                    .enabled(codex_core::features::Feature::PlanWorkflow),
-            },
-        ));
-
-        SharedCoreManagers {
-            auth_manager,
-            thread_manager,
-        }
-    }
-
     /// Builds initialize params from caller-provided metadata.
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
@@ -1850,11 +1822,10 @@ mod tests {
             CollaborationModesConfig {
                 default_mode_request_user_input: config
                     .features
-                    .enabled(codex_core::features::Feature::DefaultModeRequestUserInput),
-                plan_workflow_enabled: config
-                    .features
-                    .enabled(codex_core::features::Feature::PlanWorkflow),
+                    .enabled(Feature::DefaultModeRequestUserInput),
+                plan_workflow_enabled: config.features.enabled(Feature::PlanWorkflow),
             },
+            Arc::new(EnvironmentManager::from_env()),
         ));
         event_tx
             .send(InProcessServerEvent::Lagged { skipped: 3 })

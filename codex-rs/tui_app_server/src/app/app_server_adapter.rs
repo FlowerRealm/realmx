@@ -80,11 +80,17 @@ use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 #[cfg(test)]
 use codex_protocol::protocol::PlanDeltaEvent;
+#[cfg(test)]
 use codex_protocol::protocol::PlanReviewActivityEvent;
+#[cfg(test)]
 use codex_protocol::protocol::PlanReviewMessageDeltaEvent;
+#[cfg(test)]
 use codex_protocol::protocol::PlanReviewReasoningDeltaEvent;
+#[cfg(test)]
 use codex_protocol::protocol::PlanReviewStatusEvent;
+#[cfg(test)]
 use codex_protocol::protocol::PlanReviewStatusKind;
+#[cfg(test)]
 use codex_protocol::protocol::RealtimeConversationClosedEvent;
 #[cfg(test)]
 use codex_protocol::protocol::RealtimeConversationRealtimeEvent;
@@ -362,6 +368,16 @@ fn server_notification_thread_target(
             Some(notification.thread_id.as_str())
         }
         ServerNotification::ReasoningTextDelta(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::PlanReviewStatus(notification) => Some(notification.thread_id.as_str()),
+        ServerNotification::PlanReviewMessageDelta(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::PlanReviewReasoningDelta(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::PlanReviewActivity(notification) => {
             Some(notification.thread_id.as_str())
         }
         ServerNotification::ContextCompacted(notification) => Some(notification.thread_id.as_str()),

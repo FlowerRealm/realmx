@@ -66,6 +66,24 @@ use codex_core::config::Config;
 use codex_core::message_history;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
+#[cfg(test)]
+use codex_protocol::items::AgentMessageContent;
+#[cfg(test)]
+use codex_protocol::items::AgentMessageItem;
+#[cfg(test)]
+use codex_protocol::items::ContextCompactionItem;
+#[cfg(test)]
+use codex_protocol::items::ImageGenerationItem;
+#[cfg(test)]
+use codex_protocol::items::PlanItem;
+#[cfg(test)]
+use codex_protocol::items::ReasoningItem;
+#[cfg(test)]
+use codex_protocol::items::TurnItem;
+#[cfg(test)]
+use codex_protocol::items::UserMessageItem;
+#[cfg(test)]
+use codex_protocol::items::WebSearchItem;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelUpgrade;
@@ -75,6 +93,10 @@ use codex_protocol::protocol::ConversationAudioParams;
 use codex_protocol::protocol::ConversationStartParams;
 use codex_protocol::protocol::ConversationTextParams;
 use codex_protocol::protocol::CreditsSnapshot;
+#[cfg(test)]
+use codex_protocol::protocol::EventMsg;
+#[cfg(test)]
+use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::ReviewRequest;
@@ -436,7 +458,7 @@ impl AppServerSession {
                     summary,
                     personality,
                     output_schema,
-                    collaboration_mode,
+                    collaboration_mode: collaboration_mode.map(Into::into),
                 },
             })
             .await
@@ -931,14 +953,8 @@ async fn started_thread_from_start_response(
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
     Ok(AppServerStartedThread {
-        session_configured: SessionConfiguredEvent {
-            initial_messages: thread_initial_messages(
-                &session_configured.session_id,
-                &response.thread,
-                show_raw_agent_reasoning,
-            ),
-            ..session_configured
-        },
+        session,
+        turns: response.thread.turns,
     })
 }
 
@@ -950,14 +966,8 @@ async fn started_thread_from_resume_response(
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
     Ok(AppServerStartedThread {
-        session_configured: SessionConfiguredEvent {
-            initial_messages: thread_initial_messages(
-                &session_configured.session_id,
-                &response.thread,
-                show_raw_agent_reasoning,
-            ),
-            ..session_configured
-        },
+        session,
+        turns: response.thread.turns,
     })
 }
 
@@ -1098,6 +1108,7 @@ async fn thread_session_state_from_thread_response(
     })
 }
 
+#[cfg(test)]
 fn thread_initial_messages(
     thread_id: &ThreadId,
     thread: &codex_app_server_protocol::Thread,
@@ -1148,6 +1159,7 @@ fn thread_initial_messages(
     (!events.is_empty()).then_some(events)
 }
 
+#[cfg(test)]
 fn turn_initial_messages(
     thread_id: &ThreadId,
     turn: &codex_app_server_protocol::Turn,
@@ -1169,6 +1181,7 @@ fn turn_initial_messages(
         .collect()
 }
 
+#[cfg(test)]
 fn app_server_thread_item_to_core(item: codex_app_server_protocol::ThreadItem) -> Option<TurnItem> {
     match item {
         codex_app_server_protocol::ThreadItem::UserMessage { id, content } => {
@@ -1180,13 +1193,33 @@ fn app_server_thread_item_to_core(item: codex_app_server_protocol::ThreadItem) -
                     .collect(),
             }))
         }
-        codex_app_server_protocol::ThreadItem::AgentMessage { id, text, phase } => {
-            Some(TurnItem::AgentMessage(AgentMessageItem {
-                id,
-                content: vec![AgentMessageContent::Text { text }],
-                phase,
-            }))
-        }
+        codex_app_server_protocol::ThreadItem::AgentMessage {
+            id,
+            text,
+            phase,
+            memory_citation,
+        } => Some(TurnItem::AgentMessage(AgentMessageItem {
+            id,
+            content: vec![AgentMessageContent::Text { text }],
+            phase,
+            memory_citation: memory_citation.map(|memory_citation| {
+                codex_protocol::memory_citation::MemoryCitation {
+                    entries: memory_citation
+                        .entries
+                        .into_iter()
+                        .map(
+                            |entry| codex_protocol::memory_citation::MemoryCitationEntry {
+                                path: entry.path,
+                                line_start: entry.line_start,
+                                line_end: entry.line_end,
+                                note: entry.note,
+                            },
+                        )
+                        .collect(),
+                    rollout_ids: memory_citation.thread_ids,
+                }
+            }),
+        })),
         codex_app_server_protocol::ThreadItem::Plan { id, text } => {
             Some(TurnItem::Plan(PlanItem { id, text }))
         }
@@ -1211,12 +1244,13 @@ fn app_server_thread_item_to_core(item: codex_app_server_protocol::ThreadItem) -
             status,
             revised_prompt,
             result,
+            saved_path,
         } => Some(TurnItem::ImageGeneration(ImageGenerationItem {
             id,
             status,
             revised_prompt,
             result,
-            saved_path: None,
+            saved_path,
         })),
         codex_app_server_protocol::ThreadItem::ContextCompaction { id } => {
             Some(TurnItem::ContextCompaction(ContextCompactionItem { id }))
@@ -1226,12 +1260,14 @@ fn app_server_thread_item_to_core(item: codex_app_server_protocol::ThreadItem) -
         | codex_app_server_protocol::ThreadItem::McpToolCall { .. }
         | codex_app_server_protocol::ThreadItem::DynamicToolCall { .. }
         | codex_app_server_protocol::ThreadItem::CollabAgentToolCall { .. }
+        | codex_app_server_protocol::ThreadItem::HookPrompt { .. }
         | codex_app_server_protocol::ThreadItem::ImageView { .. }
         | codex_app_server_protocol::ThreadItem::EnteredReviewMode { .. }
         | codex_app_server_protocol::ThreadItem::ExitedReviewMode { .. } => None,
     }
 }
 
+#[cfg(test)]
 fn app_server_web_search_action_to_core(
     action: codex_app_server_protocol::WebSearchAction,
 ) -> Option<codex_protocol::models::WebSearchAction> {

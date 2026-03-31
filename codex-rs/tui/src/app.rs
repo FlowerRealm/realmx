@@ -2366,6 +2366,7 @@ impl App {
                 default_mode_request_user_input: config
                     .features
                     .enabled(Feature::DefaultModeRequestUserInput),
+                plan_workflow_enabled: config.features.enabled(Feature::PlanWorkflow),
             },
             environment_manager,
         ));
@@ -3905,7 +3906,7 @@ impl App {
             AppEvent::UpdateUltraWorkReasoningEffort(effort) => {
                 self.config.ultra_work_reasoning_effort = effort;
                 self.chat_widget.set_ultra_work_reasoning_effort(effort);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::PersistFullAccessWarningAcknowledged => {
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)

@@ -63,7 +63,6 @@ use codex_core::config::resolve_oss_provider;
 use codex_core::config_loader::ConfigLoadError;
 use codex_core::config_loader::LoaderOverrides;
 use codex_core::config_loader::format_config_error_with_source;
-use codex_core::features::Feature;
 use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
 use codex_feedback::CodexFeedback;
@@ -474,10 +473,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     } = args;
 
     let mut event_processor: Box<dyn EventProcessor> = match json_mode {
-        true => Box::new(EventProcessorWithJsonOutput::new_with_plan_workflow(
-            last_message_file.clone(),
-            config.features.enabled(Feature::PlanWorkflow),
-        )),
+        true => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
         _ => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stderr_with_ansi,
             &config,

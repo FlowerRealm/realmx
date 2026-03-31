@@ -68,7 +68,6 @@ use codex_core::config::types::ApprovalsReviewer;
 use codex_core::config::types::Notifications;
 use codex_core::config::types::WindowsSandboxModeToml;
 use codex_core::config_loader::ConfigLayerStackOrdering;
-use codex_core::features::Feature;
 use codex_core::find_thread_name_by_id;
 use codex_core::mcp::McpManager;
 use codex_core::models_manager::manager::ModelsManager;
@@ -8117,7 +8116,6 @@ impl ChatWidget {
         effort: Option<ReasoningEffortConfig>,
     ) {
         self.config.ultra_work_reasoning_effort = effort;
-        let active_kind = self.active_mode_kind();
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
             && mask.mode.is_some_and(ModeKind::is_ultra_work_mode)
