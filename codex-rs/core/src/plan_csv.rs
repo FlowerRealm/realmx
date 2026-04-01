@@ -71,10 +71,10 @@ pub(crate) fn parse_plan_csv(markdown: &str) -> anyhow::Result<Vec<ThreadPlanIte
             return Err(anyhow::anyhow!("plan csv row {row_id} is missing path"));
         }
         let details = record.get(4).unwrap_or_default().trim().to_string();
-        let inputs = format.parse_list(&record, 5);
-        let outputs = format.parse_list(&record, 6);
-        let depends_on = format.parse_list(&record, 7);
-        let acceptance = format.parse_optional_string(&record, 8);
+        let inputs = format.parse_list(&record, /*index*/ 5);
+        let outputs = format.parse_list(&record, /*index*/ 6);
+        let depends_on = format.parse_list(&record, /*index*/ 7);
+        let acceptance = format.parse_optional_string(&record, /*index*/ 8);
         rows.push(ThreadPlanItemCreateParams {
             row_id,
             row_index: index as i64,
@@ -123,6 +123,31 @@ pub(crate) fn update_plan_from_thread_plan_items(
             })
             .collect(),
     }
+}
+
+pub(crate) fn render_plan_csv_markdown(
+    items: &[ThreadPlanItemCreateParams],
+) -> anyhow::Result<String> {
+    let mut writer = csv::Writer::from_writer(Vec::new());
+    writer.write_record(STRUCTURED_HEADERS)?;
+    for item in items {
+        writer.write_record([
+            item.row_id.as_str(),
+            item.status.as_str(),
+            item.step.as_str(),
+            item.path.as_str(),
+            item.details.as_str(),
+            join_pipe_list(item.inputs.as_slice()).as_str(),
+            join_pipe_list(item.outputs.as_slice()).as_str(),
+            join_pipe_list(item.depends_on.as_slice()).as_str(),
+            item.acceptance.as_deref().unwrap_or_default(),
+        ])?;
+    }
+    let csv = String::from_utf8(writer.into_inner().map_err(|err| err.into_error())?)?;
+    let csv = csv.trim_end_matches('\n');
+    Ok(format!(
+        "<proposed_plan>\n# Plan\n\n```csv\n{csv}\n```\n</proposed_plan>\n"
+    ))
 }
 
 fn extract_csv_block(markdown: &str) -> anyhow::Result<&str> {
@@ -192,6 +217,10 @@ fn split_pipe_list(value: &str) -> Vec<String> {
         .filter(|entry| !entry.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn join_pipe_list(values: &[String]) -> String {
+    values.join("|")
 }
 
 fn validate_dependencies(rows: &[ThreadPlanItemCreateParams]) -> anyhow::Result<()> {

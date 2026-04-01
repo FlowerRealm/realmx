@@ -990,6 +990,7 @@
         }
       },
       "required": [
+        "activePlan",
         "cliVersion",
         "createdAt",
         "cwd",
@@ -1053,28 +1054,46 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "details": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "inputs": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "outputs": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "path": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/definitions/TurnPlanStepStatus"
@@ -1084,12 +1103,6 @@
         }
       },
       "required": [
-        "dependsOn",
-        "details",
-        "id",
-        "inputs",
-        "outputs",
-        "path",
         "status",
         "step"
       ],

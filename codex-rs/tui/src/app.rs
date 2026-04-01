@@ -3570,7 +3570,7 @@ impl App {
                                 "Saved usage script for provider {provider_id} to {}",
                                 path.display()
                             ),
-                            None,
+                            /*hint*/ None,
                         );
                     }
                 }
@@ -3599,7 +3599,7 @@ impl App {
                                     "Removed usage script override for provider {provider_id} from {}",
                                     path.display()
                                 ),
-                                None,
+                                /*hint*/ None,
                             );
                         }
                     }

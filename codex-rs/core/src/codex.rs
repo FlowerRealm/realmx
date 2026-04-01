@@ -2730,7 +2730,14 @@ impl Session {
         let Some(state_db) = self.state_db() else {
             return Ok(());
         };
-        let rows = parse_plan_csv(plan_item.text.as_str())?;
+        let rows = match parse_plan_csv(plan_item.text.as_str()) {
+            Ok(rows) => rows,
+            Err(err) => {
+                self.clear_active_thread_plan_for_turn(turn_context.sub_id.as_str())
+                    .await?;
+                return Err(err);
+            }
+        };
         let active_plan = state_db
             .replace_active_thread_plan(
                 &codex_state::ThreadPlanSnapshotCreateParams {
@@ -2752,6 +2759,23 @@ impl Session {
         )
         .await;
         Ok(())
+    }
+
+    pub(crate) async fn clear_active_thread_plan_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> anyhow::Result<bool> {
+        let Some(state_db) = self.state_db() else {
+            return Ok(false);
+        };
+        let thread_id = self.conversation_id.to_string();
+        let Some(active_plan) = state_db.get_active_thread_plan(thread_id.as_str()).await? else {
+            return Ok(false);
+        };
+        if active_plan.snapshot.source_turn_id != turn_id {
+            return Ok(false);
+        }
+        state_db.clear_active_thread_plan(thread_id.as_str()).await
     }
 
     /// Adds an execpolicy amendment to both the in-memory and on-disk policies so future

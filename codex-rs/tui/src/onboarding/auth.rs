@@ -166,7 +166,7 @@ impl KeyboardHandler for AuthModeWidget {
                 self.select_option_by_index(/*index*/ 2);
             }
             KeyCode::Char('4') => {
-                self.select_option_by_index(3);
+                self.select_option_by_index(/*index*/ 3);
             }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
@@ -990,7 +990,7 @@ impl AuthModeWidget {
                 provider.env_http_headers.clone(),
                 &scopes,
                 oauth_resource.as_deref(),
-                None,
+                /*timeout_secs*/ None,
                 callback_port,
                 callback_uri.as_deref(),
             )
@@ -1340,8 +1340,8 @@ mod tests {
         let (widget, _tmp) = widget_for_provider();
 
         insta::assert_snapshot!(
-                                                                                            render(&widget, 72, 18),
-                                                                                            @r"
+                                                                                                                                                                                    render(&widget, 72, 18),
+                                                                                                                                                                                    @r"
 Connect Acme AI before continuing.
 Use an API key to continue.
 > 1. Provide your own API key
@@ -1351,7 +1351,7 @@ Use an API key to continue.
   Press Enter to continue
   Press Esc to go back
 "
-                                                                                        );
+                                                                                                                                                                                );
     }
 
     #[test]
@@ -1364,8 +1364,8 @@ Use an API key to continue.
             });
 
         insta::assert_snapshot!(
-                                                                                            render(&widget, 72, 18),
-                                                                                            @r"
+                                                                                                                                                                                    render(&widget, 72, 18),
+                                                                                                                                                                                    @r"
 Finish signing in via your browser
   If the link doesn't open automatically, open the following link to
 authenticate:
@@ -1373,7 +1373,7 @@ authenticate:
   Complete the OAuth flow in your browser, then return here.
 < Back to sign-in options (Esc)
 "
-                                                                                        );
+                                                                                                                                                                                );
     }
 
     #[test]
@@ -1385,8 +1385,8 @@ authenticate:
         });
 
         insta::assert_snapshot!(
-                                                                                            render(&widget, 72, 18),
-                                                                                            @r"
+                                                                                                                                                                                    render(&widget, 72, 18),
+                                                                                                                                                                                    @r"
 > Use your own API key for Acme AI
   Paste or type your provider API key below. It will be stored securely
 on this machine.
@@ -1396,7 +1396,7 @@ on this machine.
 < Back to sign-in options (Esc)
   Press Enter to save
 "
-                                                                                        );
+                                                                                                                                                                                );
     }
 
     #[test]
@@ -1409,13 +1409,13 @@ on this machine.
             });
 
         insta::assert_snapshot!(
-                                                                                            render(&widget, 72, 20),
-                                                                                            @r"
+                                                                                                                                                                                    render(&widget, 72, 20),
+                                                                                                                                                                                    @r"
 Finish signing in via your browser
   Requesting a one-time code...
 < Back to sign-in options (Esc)
 "
-                                                                                        );
+                                                                                                                                                                                );
     }
 
     /// Collects all buffer cell symbols that contain the OSC 8 open sequence

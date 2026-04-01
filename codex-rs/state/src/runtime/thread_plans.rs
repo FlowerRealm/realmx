@@ -7,6 +7,8 @@ use crate::ThreadPlanSnapshot;
 use crate::ThreadPlanSnapshotCreateParams;
 use crate::model::ThreadPlanItemRow;
 use crate::model::ThreadPlanSnapshotRow;
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 impl StateRuntime {
     pub async fn replace_active_thread_plan(
@@ -159,34 +161,120 @@ ORDER BY row_index ASC
         Ok(Some(ActiveThreadPlan { snapshot, items }))
     }
 
+    pub async fn clear_active_thread_plan(&self, thread_id: &str) -> anyhow::Result<bool> {
+        let now = Utc::now().timestamp();
+        let result = sqlx::query(
+            r#"
+UPDATE thread_plan_snapshots
+SET superseded_at = ?
+WHERE thread_id = ? AND superseded_at IS NULL
+            "#,
+        )
+        .bind(now)
+        .bind(thread_id)
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn update_active_thread_plan_item_status(
         &self,
         thread_id: &str,
         row_id: &str,
         status: ThreadPlanItemStatus,
     ) -> anyhow::Result<Option<ActiveThreadPlan>> {
-        let Some(snapshot) = self.get_active_thread_plan(thread_id).await? else {
+        self.update_active_thread_plan_item_statuses(thread_id, &[(row_id.to_string(), status)])
+            .await
+    }
+
+    pub async fn update_active_thread_plan_item_statuses(
+        &self,
+        thread_id: &str,
+        updates: &[(String, ThreadPlanItemStatus)],
+    ) -> anyhow::Result<Option<ActiveThreadPlan>> {
+        let Some(active_plan) = self.get_active_thread_plan(thread_id).await? else {
             return Ok(None);
         };
+
+        let mut updates_by_row_id = HashMap::with_capacity(updates.len());
+        let mut seen_row_ids = HashSet::with_capacity(updates.len());
+        for (row_id, status) in updates {
+            if !seen_row_ids.insert(row_id.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "duplicate active thread plan row update: {row_id}"
+                ));
+            }
+            updates_by_row_id.insert(row_id.as_str(), *status);
+        }
+
+        let mut in_progress_count = 0usize;
+        let mut found_row_ids = HashSet::with_capacity(updates.len());
+        for item in &active_plan.items {
+            let next_status = updates_by_row_id
+                .get(item.row_id.as_str())
+                .copied()
+                .unwrap_or(item.status);
+            if updates_by_row_id.contains_key(item.row_id.as_str()) {
+                found_row_ids.insert(item.row_id.as_str());
+            }
+            if matches!(next_status, ThreadPlanItemStatus::InProgress) {
+                in_progress_count = in_progress_count.saturating_add(1);
+            }
+        }
+
+        for (row_id, _) in updates {
+            if !found_row_ids.contains(row_id.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "active thread plan row not found: {row_id}"
+                ));
+            }
+        }
+        if in_progress_count > 1 {
+            return Err(anyhow::anyhow!(
+                "active thread plan may include at most one in_progress row"
+            ));
+        }
+
         let now = Utc::now().timestamp();
-        let completed_at = matches!(status, ThreadPlanItemStatus::Completed).then_some(now);
-        sqlx::query(
-            r#"
+        let mut tx = self.pool.begin().await?;
+        for item in &active_plan.items {
+            let Some(status) = updates_by_row_id.get(item.row_id.as_str()).copied() else {
+                continue;
+            };
+            let completed_at = match status {
+                ThreadPlanItemStatus::Completed => item
+                    .completed_at
+                    .map(|value| value.timestamp())
+                    .or(Some(now)),
+                ThreadPlanItemStatus::Pending | ThreadPlanItemStatus::InProgress => None,
+            };
+            let result = sqlx::query(
+                r#"
 UPDATE thread_plan_items
 SET
     status = ?,
     updated_at = ?,
     completed_at = ?
 WHERE snapshot_id = ? AND row_id = ?
-            "#,
-        )
-        .bind(status.as_str())
-        .bind(now)
-        .bind(completed_at)
-        .bind(snapshot.snapshot.id.as_str())
-        .bind(row_id)
-        .execute(self.pool.as_ref())
-        .await?;
+                "#,
+            )
+            .bind(status.as_str())
+            .bind(now)
+            .bind(completed_at)
+            .bind(active_plan.snapshot.id.as_str())
+            .bind(item.row_id.as_str())
+            .execute(&mut *tx)
+            .await?;
+            if result.rows_affected() != 1 {
+                return Err(anyhow::anyhow!(
+                    "failed to update active thread plan row {}: expected 1 row, got {}",
+                    item.row_id,
+                    result.rows_affected()
+                ));
+            }
+        }
+        tx.commit().await?;
+
         self.get_active_thread_plan(thread_id).await
     }
 }
@@ -272,6 +360,205 @@ mod tests {
             .expect("updated plan should exist");
         assert_eq!(updated.items[1].status, ThreadPlanItemStatus::Completed);
         assert!(updated.items[1].completed_at.is_some());
+
+        let _ = tokio::fs::remove_dir_all(codex_home).await;
+    }
+
+    #[tokio::test]
+    async fn update_active_thread_plan_rejects_multiple_in_progress_rows() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-2";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-2".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-2".to_string(),
+            source_item_id: "item-2".to_string(),
+            raw_markdown: "plan markdown".to_string(),
+        };
+        let items = vec![
+            ThreadPlanItemCreateParams {
+                row_id: "plan-01".to_string(),
+                row_index: 0,
+                status: ThreadPlanItemStatus::InProgress,
+                step: "Persist plan".to_string(),
+                path: "codex-rs/state/src/runtime/thread_plans.rs".to_string(),
+                details: "write active snapshot".to_string(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: None,
+            },
+            ThreadPlanItemCreateParams {
+                row_id: "plan-02".to_string(),
+                row_index: 1,
+                status: ThreadPlanItemStatus::Pending,
+                step: "Render plan".to_string(),
+                path: "codex-rs/tui/src/history_cell.rs".to_string(),
+                details: String::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: None,
+            },
+        ];
+
+        runtime
+            .replace_active_thread_plan(&snapshot, items.as_slice())
+            .await
+            .expect("create active plan");
+
+        let err = runtime
+            .update_active_thread_plan_item_status(
+                thread_id,
+                "plan-02",
+                ThreadPlanItemStatus::InProgress,
+            )
+            .await
+            .expect_err("should reject a second in_progress row");
+        assert_eq!(
+            err.to_string(),
+            "active thread plan may include at most one in_progress row"
+        );
+
+        let loaded = runtime
+            .get_active_thread_plan(thread_id)
+            .await
+            .expect("load active plan")
+            .expect("active plan should exist");
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(loaded.items[1].status, ThreadPlanItemStatus::Pending);
+
+        let _ = tokio::fs::remove_dir_all(codex_home).await;
+    }
+
+    #[tokio::test]
+    async fn batch_status_updates_are_atomic() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-3";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-3".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-3".to_string(),
+            source_item_id: "item-3".to_string(),
+            raw_markdown: "plan markdown".to_string(),
+        };
+        let items = vec![
+            ThreadPlanItemCreateParams {
+                row_id: "plan-01".to_string(),
+                row_index: 0,
+                status: ThreadPlanItemStatus::InProgress,
+                step: "Persist plan".to_string(),
+                path: "codex-rs/state/src/runtime/thread_plans.rs".to_string(),
+                details: String::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: None,
+            },
+            ThreadPlanItemCreateParams {
+                row_id: "plan-02".to_string(),
+                row_index: 1,
+                status: ThreadPlanItemStatus::Pending,
+                step: "Render plan".to_string(),
+                path: "codex-rs/tui/src/history_cell.rs".to_string(),
+                details: String::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: None,
+            },
+        ];
+
+        runtime
+            .replace_active_thread_plan(&snapshot, items.as_slice())
+            .await
+            .expect("create active plan");
+
+        let err = runtime
+            .update_active_thread_plan_item_statuses(
+                thread_id,
+                &[
+                    ("plan-01".to_string(), ThreadPlanItemStatus::Completed),
+                    ("plan-99".to_string(), ThreadPlanItemStatus::InProgress),
+                ],
+            )
+            .await
+            .expect_err("unknown row should fail the whole batch");
+        assert_eq!(err.to_string(), "active thread plan row not found: plan-99");
+
+        let loaded = runtime
+            .get_active_thread_plan(thread_id)
+            .await
+            .expect("load active plan")
+            .expect("active plan should exist");
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(loaded.items[1].status, ThreadPlanItemStatus::Pending);
+
+        let _ = tokio::fs::remove_dir_all(codex_home).await;
+    }
+
+    #[tokio::test]
+    async fn clear_active_thread_plan_supersedes_current_snapshot() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-4";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-4".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-4".to_string(),
+            source_item_id: "item-4".to_string(),
+            raw_markdown: "plan markdown".to_string(),
+        };
+        let items = vec![ThreadPlanItemCreateParams {
+            row_id: "plan-01".to_string(),
+            row_index: 0,
+            status: ThreadPlanItemStatus::InProgress,
+            step: "Persist plan".to_string(),
+            path: "codex-rs/state/src/runtime/thread_plans.rs".to_string(),
+            details: String::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            depends_on: Vec::new(),
+            acceptance: None,
+        }];
+
+        runtime
+            .replace_active_thread_plan(&snapshot, items.as_slice())
+            .await
+            .expect("create active plan");
+
+        assert!(
+            runtime
+                .clear_active_thread_plan(thread_id)
+                .await
+                .expect("clear active plan"),
+            "clearing an existing active plan should report a change"
+        );
+        assert_eq!(
+            runtime
+                .get_active_thread_plan(thread_id)
+                .await
+                .expect("load active plan after clear"),
+            None
+        );
+        assert!(
+            !runtime
+                .clear_active_thread_plan(thread_id)
+                .await
+                .expect("clearing a missing active plan should be a no-op"),
+            "clearing a missing active plan should report no change"
+        );
 
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }

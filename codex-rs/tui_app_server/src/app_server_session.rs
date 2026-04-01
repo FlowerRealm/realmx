@@ -1007,49 +1007,56 @@ fn thread_initial_messages(
     thread: &codex_app_server_protocol::Thread,
     show_raw_agent_reasoning: bool,
 ) -> Option<Vec<EventMsg>> {
-    let mut events: Vec<EventMsg> = thread
-        .active_plan
-        .as_ref()
-        .map(|active_plan| {
-            vec![EventMsg::PlanUpdate(
-                codex_protocol::plan_tool::UpdatePlanArgs {
-                    explanation: Some("Restored active plan".to_string()),
-                    plan: active_plan
-                        .rows
-                        .iter()
-                        .map(|row| codex_protocol::plan_tool::PlanItemArg {
-                            id: Some(row.id.clone()),
-                            step: row.step.clone(),
-                            status: match row.status {
-                                codex_app_server_protocol::TurnPlanStepStatus::Pending => {
-                                    codex_protocol::plan_tool::StepStatus::Pending
-                                }
-                                codex_app_server_protocol::TurnPlanStepStatus::InProgress => {
-                                    codex_protocol::plan_tool::StepStatus::InProgress
-                                }
-                                codex_app_server_protocol::TurnPlanStepStatus::Completed => {
-                                    codex_protocol::plan_tool::StepStatus::Completed
-                                }
-                            },
-                            path: Some(row.path.clone()),
-                            details: (!row.details.is_empty()).then_some(row.details.clone()),
-                            inputs: (!row.inputs.is_empty()).then_some(row.inputs.clone()),
-                            outputs: (!row.outputs.is_empty()).then_some(row.outputs.clone()),
-                            depends_on: (!row.depends_on.is_empty())
-                                .then_some(row.depends_on.clone()),
-                            acceptance: row.acceptance.clone(),
-                        })
-                        .collect(),
-                },
-            )]
-        })
-        .unwrap_or_default();
-    events.extend(
-        thread
-            .turns
+    let mut events = thread
+        .turns
+        .iter()
+        .flat_map(|turn| turn_initial_messages(thread_id, turn, show_raw_agent_reasoning))
+        .collect::<Vec<_>>();
+    if let Some(active_plan) = thread.active_plan.as_ref() {
+        let restored_plan = EventMsg::PlanUpdate(codex_protocol::plan_tool::UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: active_plan
+                .rows
+                .iter()
+                .map(|row| codex_protocol::plan_tool::PlanItemArg {
+                    id: row.id.clone(),
+                    step: row.step.clone(),
+                    status: match row.status {
+                        codex_app_server_protocol::TurnPlanStepStatus::Pending => {
+                            codex_protocol::plan_tool::StepStatus::Pending
+                        }
+                        codex_app_server_protocol::TurnPlanStepStatus::InProgress => {
+                            codex_protocol::plan_tool::StepStatus::InProgress
+                        }
+                        codex_app_server_protocol::TurnPlanStepStatus::Completed => {
+                            codex_protocol::plan_tool::StepStatus::Completed
+                        }
+                    },
+                    path: row.path.clone(),
+                    details: row.details.clone(),
+                    inputs: row.inputs.clone(),
+                    outputs: row.outputs.clone(),
+                    depends_on: row.depends_on.clone(),
+                    acceptance: row.acceptance.clone(),
+                })
+                .collect(),
+        });
+        let insert_at = events
             .iter()
-            .flat_map(|turn| turn_initial_messages(thread_id, turn, show_raw_agent_reasoning)),
-    );
+            .rposition(|event| {
+                matches!(
+                    event,
+                    EventMsg::ItemCompleted(ItemCompletedEvent {
+                        turn_id,
+                        item: TurnItem::Plan(PlanItem { id, .. }),
+                        ..
+                    }) if turn_id == &active_plan.source_turn_id && id == &active_plan.source_item_id
+                )
+            })
+            .map(|index| index + 1)
+            .unwrap_or(events.len());
+        events.insert(insert_at, restored_plan);
+    }
     (!events.is_empty()).then_some(events)
 }
 
@@ -1327,6 +1334,88 @@ mod tests {
                 assert_eq!(event.phase, None);
             }
             other => panic!("expected replayed agent message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_response_replays_active_plan_after_history_turns() {
+        let thread_id = ThreadId::new();
+        let response = ThreadResumeResponse {
+            thread: codex_app_server_protocol::Thread {
+                id: thread_id.to_string(),
+                preview: "hello".to_string(),
+                ephemeral: false,
+                model_provider: "openai".to_string(),
+                created_at: 1,
+                updated_at: 2,
+                status: ThreadStatus::Idle,
+                path: None,
+                cwd: PathBuf::from("/tmp/project"),
+                cli_version: "0.0.0".to_string(),
+                source: codex_protocol::protocol::SessionSource::Cli.into(),
+                agent_nickname: None,
+                agent_role: None,
+                git_info: None,
+                name: None,
+                turns: vec![Turn {
+                    id: "turn-1".to_string(),
+                    items: vec![codex_app_server_protocol::ThreadItem::Plan {
+                        id: "plan-item-1".to_string(),
+                        text: "historical plan".to_string(),
+                    }],
+                    status: TurnStatus::Completed,
+                    error: None,
+                }],
+                active_plan: Some(codex_app_server_protocol::ThreadActivePlan {
+                    snapshot_id: "snapshot-1".to_string(),
+                    source_turn_id: "turn-1".to_string(),
+                    source_item_id: "item-1".to_string(),
+                    raw_markdown: "current plan".to_string(),
+                    rows: vec![codex_app_server_protocol::ThreadActivePlanRow {
+                        id: Some("plan-01".to_string()),
+                        step: "Current".to_string(),
+                        status: codex_app_server_protocol::TurnPlanStepStatus::InProgress,
+                        path: Some("a.rs".to_string()),
+                        details: None,
+                        inputs: None,
+                        outputs: None,
+                        depends_on: None,
+                        acceptance: None,
+                    }],
+                }),
+            },
+            model: "gpt-5.4".to_string(),
+            model_provider: "openai".to_string(),
+            service_tier: None,
+            cwd: PathBuf::from("/tmp/project"),
+            approval_policy: codex_protocol::protocol::AskForApproval::Never.into(),
+            approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::User,
+            sandbox: codex_protocol::protocol::SandboxPolicy::new_read_only_policy().into(),
+            reasoning_effort: None,
+        };
+
+        let started =
+            started_thread_from_resume_response(&response, /*show_raw_agent_reasoning*/ false)
+                .expect("resume response should map");
+        let initial_messages = started
+            .session_configured
+            .initial_messages
+            .expect("resume response should restore replay history");
+
+        assert_eq!(initial_messages.len(), 2);
+        match &initial_messages[0] {
+            EventMsg::ItemCompleted(ItemCompletedEvent { item, .. }) => {
+                assert!(matches!(item, TurnItem::Plan(_)));
+            }
+            other => panic!("expected historical plan replay first, got {other:?}"),
+        }
+        match &initial_messages[1] {
+            EventMsg::PlanUpdate(update) => {
+                assert_eq!(update.explanation.as_deref(), Some("Restored active plan"));
+                assert_eq!(update.plan.len(), 1);
+                assert_eq!(update.plan[0].id.as_deref(), Some("plan-01"));
+            }
+            other => panic!("expected restored active plan last, got {other:?}"),
         }
     }
 }
