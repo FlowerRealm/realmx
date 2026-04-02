@@ -13,6 +13,7 @@ use codex_app_server_protocol::ThreadRollbackResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_state::StateRuntime;
@@ -179,7 +180,7 @@ async fn thread_rollback_drops_last_turns_and_persists_to_rollout() -> Result<()
 }
 
 #[tokio::test]
-async fn thread_rollback_returns_active_plan_from_state_db() -> Result<()> {
+async fn thread_rollback_clears_stale_active_plan_when_source_turn_is_rolled_back() -> Result<()> {
     let responses = vec![
         create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
@@ -220,11 +221,16 @@ async fn thread_rollback_returns_active_plan_from_state_db() -> Result<()> {
         mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
     )
     .await??;
-    let _completed = timeout(
+    let completed_notification = timeout(
         DEFAULT_READ_TIMEOUT,
         mcp.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
+    let completed: TurnCompletedNotification = serde_json::from_value(
+        completed_notification
+            .params
+            .expect("turn/completed params must be present"),
+    )?;
 
     let state_db =
         StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
@@ -234,7 +240,7 @@ async fn thread_rollback_returns_active_plan_from_state_db() -> Result<()> {
             &ThreadPlanSnapshotCreateParams {
                 id: "snapshot-rollback-1".to_string(),
                 thread_id: thread.id.clone(),
-                source_turn_id: "turn-plan".to_string(),
+                source_turn_id: completed.turn.id.clone(),
                 source_item_id: "item-plan".to_string(),
                 raw_markdown: "<proposed_plan>\n```csv\nid,status,step,path,details\nplan-01,in_progress,Restore active plan,codex-rs/app-server/src/bespoke_event_handling.rs,backfill rollback response\n```\n</proposed_plan>\n".to_string(),
             },
@@ -269,29 +275,37 @@ async fn thread_rollback_returns_active_plan_from_state_db() -> Result<()> {
         thread: rolled_back_thread,
     } = to_response::<ThreadRollbackResponse>(rollback_resp)?;
 
-    let active_plan = rolled_back_thread
-        .active_plan
-        .expect("thread/rollback should include active plan");
-    assert_eq!(active_plan.snapshot_id, "snapshot-rollback-1");
-    assert_eq!(active_plan.rows.len(), 1);
-    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
-    assert_eq!(
-        active_plan.rows[0].path.as_deref(),
-        Some("codex-rs/app-server/src/bespoke_event_handling.rs")
-    );
+    assert_eq!(rolled_back_thread.turns.len(), 0);
+    assert_eq!(rolled_back_thread.active_plan, None);
 
     let thread_json = rollback_result
         .get("thread")
         .and_then(Value::as_object)
         .expect("thread/rollback result.thread must be an object");
-    let active_plan_json = thread_json
-        .get("activePlan")
-        .and_then(Value::as_object)
-        .expect("thread/rollback must serialize thread.activePlan");
     assert_eq!(
-        active_plan_json.get("snapshotId").and_then(Value::as_str),
-        Some("snapshot-rollback-1")
+        thread_json.get("activePlan"),
+        Some(&Value::Null),
+        "thread/rollback must serialize cleared stale activePlan as null"
     );
+
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.id,
+            ..Default::default()
+        })
+        .await?;
+    let resume_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(resume_id)),
+    )
+    .await??;
+    let ThreadResumeResponse {
+        thread: resumed_thread,
+        ..
+    } = to_response::<ThreadResumeResponse>(resume_resp)?;
+
+    assert_eq!(resumed_thread.turns.len(), 0);
+    assert_eq!(resumed_thread.active_plan, None);
 
     Ok(())
 }

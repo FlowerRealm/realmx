@@ -5199,10 +5199,20 @@ mod handlers {
                 }
             };
 
+        let rollout_items = initial_history.get_rollout_items();
+        let rolled_back_turn_ids = {
+            let turns = codex_app_server_protocol::build_turns_from_rollout_items(&rollout_items);
+            let turns_to_remove = usize::try_from(num_turns).unwrap_or(usize::MAX);
+            turns
+                .into_iter()
+                .rev()
+                .take(turns_to_remove)
+                .map(|turn| turn.id)
+                .collect::<std::collections::HashSet<_>>()
+        };
         let rollback_event = ThreadRolledBackEvent { num_turns };
         let rollback_msg = EventMsg::ThreadRolledBack(rollback_event.clone());
-        let replay_items = initial_history
-            .get_rollout_items()
+        let replay_items = rollout_items
             .into_iter()
             .chain(std::iter::once(RolloutItem::EventMsg(rollback_msg.clone())))
             .collect::<Vec<_>>();
@@ -5212,6 +5222,15 @@ mod handlers {
         sess.apply_rollout_reconstruction(turn_context.as_ref(), replay_items.as_slice())
             .await;
         sess.recompute_token_usage(turn_context.as_ref()).await;
+        let thread_id = sess.conversation_id.to_string();
+        if !rolled_back_turn_ids.is_empty()
+            && let Some(state_db) = sess.state_db()
+            && let Ok(Some(active_plan)) = state_db.get_active_thread_plan(thread_id.as_str()).await
+            && rolled_back_turn_ids.contains(active_plan.snapshot.source_turn_id.as_str())
+            && let Err(err) = state_db.clear_active_thread_plan(thread_id.as_str()).await
+        {
+            warn!("failed to clear stale active thread plan after rollback: {err}");
+        }
 
         sess.deliver_event_raw(Event {
             id: turn_context.sub_id.clone(),
