@@ -113,6 +113,7 @@ mod tests {
             id: thread_id.to_string(),
             preview: String::new(),
             ephemeral: false,
+            active_plan: None,
             model_provider: "openai".to_string(),
             created_at: 0,
             updated_at: 0,

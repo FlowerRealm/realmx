@@ -3232,6 +3232,47 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
 }
 
 #[tokio::test]
+async fn replayed_active_plan_updates_history_without_showing_plan_popup() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+    chat.set_feature_enabled(Feature::CollaborationModes, true);
+    let plan_mask =
+        collaboration_modes::mask_for_kind(chat.models_manager.as_ref(), ModeKind::Plan)
+            .expect("expected plan collaboration mask");
+    chat.set_collaboration_mask(plan_mask);
+
+    chat.replay_initial_messages(vec![EventMsg::PlanUpdate(UpdatePlanArgs {
+        explanation: Some("Restored active plan".to_string()),
+        plan: vec![PlanItemArg {
+            id: Some("plan-01".to_string()),
+            step: "Resume implementation".to_string(),
+            status: StepStatus::InProgress,
+            path: Some("codex-rs/tui/src/chatwidget/tests.rs".to_string()),
+            details: Some("resume existing work".to_string()),
+            inputs: Some(vec!["thread snapshot".to_string()]),
+            outputs: Some(vec!["history cell".to_string()]),
+            depends_on: Some(vec!["plan-00".to_string()]),
+            acceptance: Some("history shows restored plan".to_string()),
+        }],
+    })]);
+
+    let cells = drain_insert_history(&mut rx);
+    assert!(
+        !cells.is_empty(),
+        "expected replayed active plan history cell"
+    );
+    let rendered = lines_to_single_string(cells.last().expect("plan history cell"));
+    assert!(rendered.contains("Updated Plan"));
+    assert!(rendered.contains("Resume implementation"));
+    assert!(rendered.contains("history shows restored plan"));
+
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(
+        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
+        "expected no plan popup for replayed active plan, got {popup:?}"
+    );
+}
+
+#[tokio::test]
 async fn replayed_thread_rollback_emits_ordered_app_event() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
 
@@ -3284,8 +3325,15 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
     chat.on_plan_update(UpdatePlanArgs {
         explanation: None,
         plan: vec![PlanItemArg {
+            id: None,
             step: "First".to_string(),
             status: StepStatus::Pending,
+            path: None,
+            details: None,
+            inputs: None,
+            outputs: None,
+            depends_on: None,
+            acceptance: None,
         }],
     });
     chat.on_task_complete(None, false);
@@ -3422,8 +3470,15 @@ async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
     chat.on_plan_update(UpdatePlanArgs {
         explanation: None,
         plan: vec![PlanItemArg {
+            id: None,
             step: "First".to_string(),
             status: StepStatus::Pending,
+            path: None,
+            details: None,
+            inputs: None,
+            outputs: None,
+            depends_on: None,
+            acceptance: None,
         }],
     });
     chat.on_rate_limit_snapshot(Some(snapshot(92.0)));
@@ -11220,16 +11275,37 @@ async fn plan_update_renders_history_cell() {
         explanation: Some("Adapting plan".to_string()),
         plan: vec![
             PlanItemArg {
+                id: None,
                 step: "Explore codebase".into(),
                 status: StepStatus::Completed,
+                path: None,
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
             PlanItemArg {
+                id: None,
                 step: "Implement feature".into(),
                 status: StepStatus::InProgress,
+                path: None,
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
             PlanItemArg {
+                id: None,
                 step: "Write tests".into(),
                 status: StepStatus::Pending,
+                path: None,
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
             },
         ],
     };

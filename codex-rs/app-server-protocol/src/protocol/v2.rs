@@ -3641,6 +3641,33 @@ pub struct Thread {
     /// For all other responses and notifications returning a Thread,
     /// the turns field will be an empty list.
     pub turns: Vec<Turn>,
+    pub active_plan: Option<ThreadActivePlan>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadActivePlan {
+    pub snapshot_id: String,
+    pub source_turn_id: String,
+    pub source_item_id: String,
+    pub raw_markdown: String,
+    pub rows: Vec<ThreadActivePlanRow>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadActivePlanRow {
+    pub id: Option<String>,
+    pub step: String,
+    pub status: TurnPlanStepStatus,
+    pub path: Option<String>,
+    pub details: Option<String>,
+    pub inputs: Option<Vec<String>>,
+    pub outputs: Option<Vec<String>>,
+    pub depends_on: Option<Vec<String>>,
+    pub acceptance: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -4932,8 +4959,15 @@ pub struct TurnPlanUpdatedNotification {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct TurnPlanStep {
+    pub id: Option<String>,
     pub step: String,
     pub status: TurnPlanStepStatus,
+    pub path: Option<String>,
+    pub details: Option<String>,
+    pub inputs: Option<Vec<String>>,
+    pub outputs: Option<Vec<String>>,
+    pub depends_on: Option<Vec<String>>,
+    pub acceptance: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -4948,8 +4982,15 @@ pub enum TurnPlanStepStatus {
 impl From<CorePlanItemArg> for TurnPlanStep {
     fn from(value: CorePlanItemArg) -> Self {
         Self {
+            id: value.id,
             step: value.step,
             status: value.status.into(),
+            path: value.path,
+            details: value.details,
+            inputs: value.inputs,
+            outputs: value.outputs,
+            depends_on: value.depends_on,
+            acceptance: value.acceptance,
         }
     }
 }

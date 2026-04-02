@@ -63,6 +63,7 @@ pub mod models_manager;
 mod network_policy_decision;
 pub mod network_proxy_loader;
 mod original_image_detail;
+mod plan_csv;
 mod provider_credentials;
 mod provider_id;
 mod provider_login_capabilities;

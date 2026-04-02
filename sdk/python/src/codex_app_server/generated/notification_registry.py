@@ -33,6 +33,7 @@ from .v2_all import ReasoningSummaryPartAddedNotification
 from .v2_all import ReasoningSummaryTextDeltaNotification
 from .v2_all import ReasoningTextDeltaNotification
 from .v2_all import ServerRequestResolvedNotification
+from .v2_all import SkillUsedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import TerminalInteractionNotification
 from .v2_all import ThreadArchivedNotification
@@ -83,6 +84,7 @@ NOTIFICATION_MODELS: dict[str, type[BaseModel]] = {
     "mcpServer/oauthLogin/completed": McpServerOauthLoginCompletedNotification,
     "model/rerouted": ModelReroutedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
+    "skill/used": SkillUsedNotification,
     "skills/changed": SkillsChangedNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/closed": ThreadClosedNotification,

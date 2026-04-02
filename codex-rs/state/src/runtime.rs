@@ -55,6 +55,7 @@ mod logs;
 mod memories;
 #[cfg(test)]
 mod test_support;
+mod thread_plans;
 mod threads;
 
 // "Partition" is the retained-log-content bucket we cap at 10 MiB:
