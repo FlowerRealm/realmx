@@ -260,15 +260,6 @@ impl Session {
             *active = None;
         }
         drop(active);
-        if let Err(err) = self
-            .clear_active_thread_plan_for_turn(turn_context.sub_id.as_str())
-            .await
-        {
-            warn!(
-                turn_id = turn_context.sub_id,
-                "failed to clear active thread plan after turn completion: {err:#}"
-            );
-        }
         if !pending_input.is_empty() {
             let pending_response_items = pending_input
                 .into_iter()
@@ -441,16 +432,6 @@ impl Session {
         session_task
             .abort(session_ctx, Arc::clone(&task.turn_context))
             .await;
-
-        if let Err(err) = self
-            .clear_active_thread_plan_for_turn(task.turn_context.sub_id.as_str())
-            .await
-        {
-            warn!(
-                turn_id = task.turn_context.sub_id,
-                "failed to clear active thread plan after turn abort: {err:#}"
-            );
-        }
 
         if reason == TurnAbortReason::Interrupted {
             self.cleanup_after_interrupt(&task.turn_context).await;

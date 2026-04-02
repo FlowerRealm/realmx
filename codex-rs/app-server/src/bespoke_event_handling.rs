@@ -1,4 +1,5 @@
 use crate::codex_message_processor::ApiVersion;
+use crate::codex_message_processor::active_plan_from_state_db;
 use crate::codex_message_processor::read_rollout_items_from_rollout;
 use crate::codex_message_processor::read_summary_from_rollout;
 use crate::codex_message_processor::summary_to_thread;
@@ -1724,6 +1725,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await
                 {
                     Ok(summary) => {
+                        let state_db_ctx = conversation.state_db();
                         let mut thread = summary_to_thread(summary);
                         match read_rollout_items_from_rollout(rollout_path.as_path()).await {
                             Ok(items) => {
@@ -1731,6 +1733,11 @@ pub(crate) async fn apply_bespoke_event_handling(
                                 thread.status = thread_watch_manager
                                     .loaded_status_for_thread(&thread.id)
                                     .await;
+                                thread.active_plan = active_plan_from_state_db(
+                                    state_db_ctx.as_ref(),
+                                    conversation_id,
+                                )
+                                .await;
                                 match find_thread_name_by_id(codex_home, &conversation_id).await {
                                     Ok(name) => {
                                         thread.name = name;

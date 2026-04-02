@@ -15,6 +15,10 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput as V2UserInput;
+use codex_state::StateRuntime;
+use codex_state::ThreadPlanItemCreateParams;
+use codex_state::ThreadPlanItemStatus;
+use codex_state::ThreadPlanSnapshotCreateParams;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -170,6 +174,124 @@ async fn thread_rollback_drops_last_turns_and_persists_to_rollout() -> Result<()
         }
         other => panic!("expected user message item, got {other:?}"),
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_rollback_returns_active_plan_from_state_db() -> Result<()> {
+    let responses = vec![
+        create_final_assistant_message_sse_response("Done")?,
+        create_final_assistant_message_sse_response("Done")?,
+    ];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+
+    let turn_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![V2UserInput::Text {
+                text: "Create plan".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let _turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+    )
+    .await??;
+    let _completed = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let state_db =
+        StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
+    state_db.mark_backfill_complete(None).await?;
+    state_db
+        .replace_active_thread_plan(
+            &ThreadPlanSnapshotCreateParams {
+                id: "snapshot-rollback-1".to_string(),
+                thread_id: thread.id.clone(),
+                source_turn_id: "turn-plan".to_string(),
+                source_item_id: "item-plan".to_string(),
+                raw_markdown: "<proposed_plan>\n```csv\nid,status,step,path,details\nplan-01,in_progress,Restore active plan,codex-rs/app-server/src/bespoke_event_handling.rs,backfill rollback response\n```\n</proposed_plan>\n".to_string(),
+            },
+            &[ThreadPlanItemCreateParams {
+                row_id: "plan-01".to_string(),
+                row_index: 0,
+                status: ThreadPlanItemStatus::InProgress,
+                step: "Restore active plan".to_string(),
+                path: "codex-rs/app-server/src/bespoke_event_handling.rs".to_string(),
+                details: "backfill rollback response".to_string(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: Some("rollback returns active plan".to_string()),
+            }],
+        )
+        .await?;
+
+    let rollback_id = mcp
+        .send_thread_rollback_request(ThreadRollbackParams {
+            thread_id: thread.id.clone(),
+            num_turns: 1,
+        })
+        .await?;
+    let rollback_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(rollback_id)),
+    )
+    .await??;
+    let rollback_result = rollback_resp.result.clone();
+    let ThreadRollbackResponse {
+        thread: rolled_back_thread,
+    } = to_response::<ThreadRollbackResponse>(rollback_resp)?;
+
+    let active_plan = rolled_back_thread
+        .active_plan
+        .expect("thread/rollback should include active plan");
+    assert_eq!(active_plan.snapshot_id, "snapshot-rollback-1");
+    assert_eq!(active_plan.rows.len(), 1);
+    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
+    assert_eq!(
+        active_plan.rows[0].path.as_deref(),
+        Some("codex-rs/app-server/src/bespoke_event_handling.rs")
+    );
+
+    let thread_json = rollback_result
+        .get("thread")
+        .and_then(Value::as_object)
+        .expect("thread/rollback result.thread must be an object");
+    let active_plan_json = thread_json
+        .get("activePlan")
+        .and_then(Value::as_object)
+        .expect("thread/rollback must serialize thread.activePlan");
+    assert_eq!(
+        active_plan_json.get("snapshotId").and_then(Value::as_str),
+        Some("snapshot-rollback-1")
+    );
 
     Ok(())
 }

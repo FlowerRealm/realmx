@@ -4270,7 +4270,7 @@ async fn seed_active_plan(
 }
 
 #[tokio::test]
-async fn on_task_finished_clears_active_plan_for_matching_turn() {
+async fn on_task_finished_keeps_active_plan_for_matching_turn() {
     let codex_home = tempfile::tempdir().expect("create temp codex home");
     let state_db = codex_state::StateRuntime::init(
         codex_home.path().to_path_buf(),
@@ -4304,13 +4304,12 @@ async fn on_task_finished_clears_active_plan_for_matching_turn() {
         .on_task_finished(Arc::clone(&turn_context), None)
         .await;
 
-    assert_eq!(
-        state_db
-            .get_active_thread_plan(session.conversation_id.to_string().as_str())
-            .await
-            .expect("load active plan after turn completion"),
-        None
-    );
+    let active_plan = state_db
+        .get_active_thread_plan(session.conversation_id.to_string().as_str())
+        .await
+        .expect("load active plan after turn completion")
+        .expect("active plan should remain after turn completion");
+    assert_eq!(active_plan.snapshot.source_turn_id, turn_context.sub_id);
 }
 
 #[tokio::test]
@@ -4357,7 +4356,7 @@ async fn on_task_finished_does_not_clear_other_turns_active_plan() {
 }
 
 #[tokio::test]
-async fn abort_all_tasks_clears_active_plan_for_matching_turn() {
+async fn abort_all_tasks_keeps_active_plan_for_matching_turn() {
     let codex_home = tempfile::tempdir().expect("create temp codex home");
     let state_db = codex_state::StateRuntime::init(
         codex_home.path().to_path_buf(),
@@ -4389,13 +4388,12 @@ async fn abort_all_tasks_clears_active_plan_for_matching_turn() {
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
-    assert_eq!(
-        state_db
-            .get_active_thread_plan(session.conversation_id.to_string().as_str())
-            .await
-            .expect("load active plan after turn abort"),
-        None
-    );
+    let active_plan = state_db
+        .get_active_thread_plan(session.conversation_id.to_string().as_str())
+        .await
+        .expect("load active plan after turn abort")
+        .expect("active plan should remain after turn abort");
+    assert_eq!(active_plan.snapshot.source_turn_id, turn_context.sub_id);
 }
 
 #[tokio::test]

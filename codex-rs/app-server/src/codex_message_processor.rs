@@ -8112,7 +8112,7 @@ async fn read_summary_from_state_db_context_by_thread_id(
     ))
 }
 
-async fn active_plan_from_state_db(
+pub(crate) async fn active_plan_from_state_db(
     state_db_ctx: Option<&StateDbHandle>,
     thread_id: ThreadId,
 ) -> Option<ThreadActivePlan> {
