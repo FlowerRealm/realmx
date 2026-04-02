@@ -1094,7 +1094,9 @@ async fn thread_session_state_from_thread_response(
     })
 }
 
-fn thread_initial_messages(thread: &codex_app_server_protocol::Thread) -> Option<Vec<EventMsg>> {
+pub(crate) fn thread_initial_messages(
+    thread: &codex_app_server_protocol::Thread,
+) -> Option<Vec<EventMsg>> {
     let active_plan = thread.active_plan.as_ref()?;
     Some(vec![EventMsg::PlanUpdate(
         codex_protocol::plan_tool::UpdatePlanArgs {

@@ -10,6 +10,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::AppServerStartedThread;
 use crate::app_server_session::ThreadSessionState;
+use crate::app_server_session::thread_initial_messages;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::FeedbackAudience;
 use crate::bottom_pane::McpServerElicitationFormRequest;
@@ -494,6 +495,7 @@ struct SessionSummary {
 struct ThreadEventSnapshot {
     session: Option<ThreadSessionState>,
     turns: Vec<Turn>,
+    initial_messages: Option<Vec<EventMsg>>,
     events: Vec<ThreadBufferedEvent>,
     input_state: Option<ThreadInputState>,
 }
@@ -509,6 +511,7 @@ enum ThreadBufferedEvent {
 struct ThreadEventStore {
     session: Option<ThreadSessionState>,
     turns: Vec<Turn>,
+    initial_messages: Option<Vec<EventMsg>>,
     buffer: VecDeque<ThreadBufferedEvent>,
     pending_interactive_replay: PendingInteractiveReplayState,
     active_turn_id: Option<String>,
@@ -526,6 +529,7 @@ impl ThreadEventStore {
         Self {
             session: None,
             turns: Vec::new(),
+            initial_messages: None,
             buffer: VecDeque::new(),
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
@@ -546,6 +550,10 @@ impl ThreadEventStore {
     fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
         self.session = Some(session);
         self.set_turns(turns);
+    }
+
+    fn set_initial_messages(&mut self, initial_messages: Option<Vec<EventMsg>>) {
+        self.initial_messages = initial_messages;
     }
 
     fn rebase_buffer_after_session_refresh(&mut self) {
@@ -604,6 +612,7 @@ impl ThreadEventStore {
 
     fn apply_thread_rollback(&mut self, response: &ThreadRollbackResponse) {
         self.turns = response.thread.turns.clone();
+        self.initial_messages = thread_initial_messages(&response.thread);
         self.buffer.clear();
         self.pending_interactive_replay = PendingInteractiveReplayState::default();
         self.active_turn_id = None;
@@ -613,6 +622,7 @@ impl ThreadEventStore {
         ThreadEventSnapshot {
             session: self.session.clone(),
             turns: self.turns.clone(),
+            initial_messages: self.initial_messages.clone(),
             // Thread switches replay buffered events into a rebuilt ChatWidget. Only replay
             // interactive prompts that are still pending, or answered approvals/input will reappear.
             events: self
@@ -2514,16 +2524,17 @@ impl App {
         {
             let mut store = channel.store.lock().await;
             store.set_session(session.clone(), turns.clone());
+            store.set_initial_messages(initial_messages.clone());
         }
         self.activate_thread_channel(thread_id).await;
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         self.chat_widget.handle_thread_session(session);
+        self.chat_widget
+            .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
         if let Some(initial_messages) = initial_messages {
             self.chat_widget.handle_initial_messages(initial_messages);
         }
-        self.chat_widget
-            .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
         let pending = std::mem::take(&mut self.pending_primary_events);
         for pending_event in pending {
             match pending_event {
@@ -2611,15 +2622,17 @@ impl App {
         let AppServerStartedThread {
             session,
             turns,
-            initial_messages: _,
+            initial_messages,
         } = started;
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
             store.set_session(session.clone(), turns.clone());
+            store.set_initial_messages(initial_messages.clone());
             store.rebase_buffer_after_session_refresh();
         }
         snapshot.session = Some(session);
         snapshot.turns = turns;
+        snapshot.initial_messages = initial_messages;
         snapshot
             .events
             .retain(ThreadEventStore::event_survives_session_refresh);
@@ -3098,6 +3111,9 @@ impl App {
         if !snapshot.turns.is_empty() {
             self.chat_widget
                 .replay_thread_turns(snapshot.turns, ReplayKind::ThreadSnapshot);
+        }
+        if let Some(initial_messages) = snapshot.initial_messages {
+            self.chat_widget.handle_initial_messages(initial_messages);
         }
         for event in snapshot.events {
             self.handle_thread_event_replay(event);
@@ -5779,6 +5795,9 @@ mod tests {
     use codex_protocol::models::NetworkPermissions;
     use codex_protocol::models::PermissionProfile;
     use codex_protocol::openai_models::ModelAvailabilityNux;
+    use codex_protocol::plan_tool::PlanItemArg;
+    use codex_protocol::plan_tool::StepStatus;
+    use codex_protocol::plan_tool::UpdatePlanArgs;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::Event;
     use codex_protocol::protocol::EventMsg;
@@ -6330,6 +6349,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![ThreadBufferedEvent::Notification(
                     turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
                 )],
@@ -6381,6 +6401,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![ThreadBufferedEvent::Notification(
                     turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
                 )],
@@ -6430,6 +6451,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![],
                 input_state: Some(input_state),
             },
@@ -6477,6 +6499,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+                initial_messages: None,
                 events: Vec::new(),
                 input_state: Some(input_state),
             },
@@ -6507,6 +6530,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+                initial_messages: None,
                 events: Vec::new(),
                 input_state: None,
             },
@@ -6547,6 +6571,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![
                     ThreadBufferedEvent::Notification(turn_completed_notification(
                         thread_id,
@@ -6688,6 +6713,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![],
                 input_state: Some(input_state),
             },
@@ -6769,6 +6795,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![],
                 input_state: Some(input_state),
             },
@@ -6817,6 +6844,7 @@ mod tests {
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![ThreadBufferedEvent::Notification(
                     turn_completed_notification(thread_id, "turn-1", TurnStatus::Interrupted),
                 )],
@@ -8440,6 +8468,35 @@ guardian_approval = true
     }
 
     #[test]
+    fn thread_event_store_snapshot_preserves_initial_messages() {
+        let mut store = ThreadEventStore::new(8);
+        store.set_initial_messages(Some(vec![EventMsg::PlanUpdate(UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Resume implementation".to_string(),
+                status: StepStatus::InProgress,
+                path: Some("src/lib.rs".to_string()),
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        })]));
+
+        let snapshot = store.snapshot();
+
+        match snapshot.initial_messages.as_deref() {
+            Some([EventMsg::PlanUpdate(update)]) => {
+                assert_eq!(update.explanation.as_deref(), Some("Restored active plan"));
+                assert_eq!(update.plan[0].step, "Resume implementation");
+            }
+            other => panic!("expected restored active plan snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn thread_event_store_clear_active_turn_id_resets_cached_turn() {
         let mut store = ThreadEventStore::new(8);
         let thread_id = ThreadId::new();
@@ -9286,6 +9343,20 @@ guardian_approval = true
     async fn replay_thread_snapshot_replays_turn_history_in_order() {
         let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let thread_id = ThreadId::new();
+        let restored_active_plan = vec![EventMsg::PlanUpdate(UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Resume implementation".to_string(),
+                status: StepStatus::InProgress,
+                path: Some("src/lib.rs".to_string()),
+                details: Some("replay after history".to_string()),
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        })];
         app.replay_thread_snapshot(
             ThreadEventSnapshot {
                 session: Some(test_thread_session(
@@ -9326,6 +9397,7 @@ guardian_approval = true
                         error: None,
                     },
                 ],
+                initial_messages: Some(restored_active_plan),
                 events: Vec::new(),
                 input_state: None,
             },
@@ -9352,6 +9424,86 @@ guardian_approval = true
             user_messages,
             vec!["first prompt".to_string(), "third prompt".to_string()]
         );
+        let last_transcript = app
+            .transcript_cells
+            .last()
+            .map(|cell| lines_to_single_string(&cell.transcript_lines(80)))
+            .expect("expected replayed transcript");
+        assert!(last_transcript.contains("Updated Plan"));
+        assert!(last_transcript.contains("Resume implementation"));
+    }
+
+    #[tokio::test]
+    async fn enqueue_primary_thread_session_replays_active_plan_after_history_and_caches_it() {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let thread_id = ThreadId::new();
+        let session = test_thread_session(thread_id, PathBuf::from("/home/user/project"));
+        let turns = vec![Turn {
+            id: "turn-1".to_string(),
+            items: vec![ThreadItem::UserMessage {
+                id: "user-1".to_string(),
+                content: vec![AppServerUserInput::Text {
+                    text: "first prompt".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            }],
+            status: TurnStatus::Completed,
+            error: None,
+        }];
+        let initial_messages = Some(vec![EventMsg::PlanUpdate(UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Resume implementation".to_string(),
+                status: StepStatus::InProgress,
+                path: Some("src/lib.rs".to_string()),
+                details: Some("replay after history".to_string()),
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        })]);
+
+        app.enqueue_primary_thread_session(session, turns, initial_messages.clone())
+            .await
+            .expect("enqueue should succeed");
+
+        while let Ok(event) = app_event_rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                let cell: Arc<dyn HistoryCell> = cell.into();
+                app.transcript_cells.push(cell);
+            }
+        }
+
+        let user_messages: Vec<String> = app
+            .transcript_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<UserHistoryCell>()
+                    .map(|cell| cell.message.clone())
+            })
+            .collect();
+        assert_eq!(user_messages, vec!["first prompt".to_string()]);
+
+        let last_transcript = app
+            .transcript_cells
+            .last()
+            .map(|cell| lines_to_single_string(&cell.transcript_lines(80)))
+            .expect("expected replayed transcript");
+        assert!(last_transcript.contains("Updated Plan"));
+        assert!(last_transcript.contains("Resume implementation"));
+
+        let snapshot = app
+            .thread_event_channels
+            .get(&thread_id)
+            .expect("thread channel")
+            .store
+            .lock()
+            .await
+            .snapshot();
+        assert_eq!(snapshot.initial_messages, initial_messages);
     }
 
     #[tokio::test]
@@ -9391,6 +9543,7 @@ guardian_approval = true
             ThreadEventSnapshot {
                 session: None,
                 turns: Vec::new(),
+                initial_messages: None,
                 events: vec![ThreadBufferedEvent::Notification(
                     ServerNotification::ItemStarted(codex_app_server_protocol::ItemStartedNotification {
                         thread_id: "thread-1".to_string(),
@@ -9455,6 +9608,7 @@ guardian_approval = true
         let mut snapshot = ThreadEventSnapshot {
             session: Some(initial_session),
             turns: Vec::new(),
+            initial_messages: None,
             events: Vec::new(),
             input_state: None,
         };
@@ -9464,7 +9618,20 @@ guardian_approval = true
             AppServerStartedThread {
                 session: resumed_session.clone(),
                 turns: resumed_turns.clone(),
-                initial_messages: None,
+                initial_messages: Some(vec![EventMsg::PlanUpdate(UpdatePlanArgs {
+                    explanation: Some("Restored active plan".to_string()),
+                    plan: vec![PlanItemArg {
+                        id: Some("plan-01".to_string()),
+                        step: "Resume implementation".to_string(),
+                        status: StepStatus::InProgress,
+                        path: Some("src/lib.rs".to_string()),
+                        details: None,
+                        inputs: None,
+                        outputs: None,
+                        depends_on: None,
+                        acceptance: None,
+                    }],
+                })]),
             },
             &mut snapshot,
         )
@@ -9472,6 +9639,12 @@ guardian_approval = true
 
         assert_eq!(snapshot.session, Some(resumed_session.clone()));
         assert_eq!(snapshot.turns, resumed_turns);
+        match snapshot.initial_messages.as_deref() {
+            Some([EventMsg::PlanUpdate(update)]) => {
+                assert_eq!(update.plan[0].step, "Resume implementation");
+            }
+            other => panic!("expected refreshed active plan, got {other:?}"),
+        }
 
         let store = app
             .thread_event_channels
@@ -9483,6 +9656,7 @@ guardian_approval = true
         let store_snapshot = store.snapshot();
         assert_eq!(store_snapshot.session, Some(resumed_session));
         assert_eq!(store_snapshot.turns, snapshot.turns);
+        assert_eq!(store_snapshot.initial_messages, snapshot.initial_messages);
     }
 
     #[tokio::test]

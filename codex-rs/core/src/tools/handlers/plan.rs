@@ -298,17 +298,10 @@ fn should_persist_active_thread_plan_update(
     active_plan: &codex_state::ActiveThreadPlan,
 ) -> bool {
     if args.plan.is_empty() {
-        return false;
+        return true;
     }
 
-    if args.plan.iter().any(|item| {
-        item.path.is_some()
-            || item.details.is_some()
-            || item.inputs.is_some()
-            || item.outputs.is_some()
-            || item.depends_on.is_some()
-            || item.acceptance.is_some()
-    }) {
+    if args.plan.iter().any(plan_item_has_structured_metadata) {
         return true;
     }
 
@@ -321,11 +314,32 @@ fn should_persist_active_thread_plan_update(
         .iter()
         .map(|item| item.row_id.as_str())
         .collect::<std::collections::HashSet<_>>();
-    args.plan.iter().all(|item| {
+    if args.plan.iter().all(|item| {
         item.id
             .as_deref()
             .is_some_and(|row_id| existing_row_ids.contains(row_id))
-    })
+    }) {
+        return true;
+    }
+
+    args.plan
+        .iter()
+        .zip(active_plan.items.iter())
+        .all(|(item, existing)| {
+            item.id
+                .as_deref()
+                .is_none_or(|row_id| row_id == existing.row_id.as_str())
+                && item.step == existing.step
+        })
+}
+
+fn plan_item_has_structured_metadata(item: &codex_protocol::plan_tool::PlanItemArg) -> bool {
+    item.path.is_some()
+        || item.details.is_some()
+        || item.inputs.is_some()
+        || item.outputs.is_some()
+        || item.depends_on.is_some()
+        || item.acceptance.is_some()
 }
 
 #[derive(Debug)]
@@ -774,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_calls_without_structured_fields_do_not_trigger_active_plan_persistence() {
+    fn legacy_full_plan_updates_without_structured_fields_still_persist_status_changes() {
         let active_plan = active_plan();
         let args = UpdatePlanArgs {
             explanation: None,
@@ -804,7 +818,7 @@ mod tests {
             ],
         };
 
-        assert!(!should_persist_active_thread_plan_update(
+        assert!(should_persist_active_thread_plan_update(
             &args,
             &active_plan
         ));
@@ -972,6 +986,10 @@ mod tests {
             plan: Vec::new(),
         };
 
+        assert!(should_persist_active_thread_plan_update(
+            &args,
+            &active_plan
+        ));
         assert!(matches!(
             classify_active_plan_update(&args, &active_plan)
                 .expect("empty plan should clear the active plan"),
