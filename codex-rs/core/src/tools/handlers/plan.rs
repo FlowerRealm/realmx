@@ -201,6 +201,13 @@ pub(crate) async fn handle_update_plan(
     Ok("Plan updated".to_string())
 }
 
+fn replacement_snapshot_source(active_plan: &codex_state::ActiveThreadPlan) -> (String, String) {
+    (
+        active_plan.snapshot.source_turn_id.clone(),
+        active_plan.snapshot.source_item_id.clone(),
+    )
+}
+
 fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, FunctionCallError> {
     serde_json::from_str::<UpdatePlanArgs>(arguments).map_err(|e| {
         FunctionCallError::RespondToModel(format!("failed to parse function arguments: {e}"))
@@ -249,6 +256,7 @@ async fn try_update_active_thread_plan(
             )))
         }
         ActivePlanUpdate::Replace(items) => {
+            let (source_turn_id, source_item_id) = replacement_snapshot_source(&active_plan);
             let raw_markdown = render_plan_csv_markdown(items.as_slice()).map_err(|err| {
                 FunctionCallError::RespondToModel(format!(
                     "failed to render active thread plan csv: {err}"
@@ -259,8 +267,8 @@ async fn try_update_active_thread_plan(
                     &codex_state::ThreadPlanSnapshotCreateParams {
                         id: uuid::Uuid::new_v4().to_string(),
                         thread_id: thread_id.clone(),
-                        source_turn_id: turn_context.sub_id.clone(),
-                        source_item_id: active_plan.snapshot.source_item_id.clone(),
+                        source_turn_id,
+                        source_item_id,
                         raw_markdown,
                     },
                     items.as_slice(),
@@ -995,5 +1003,15 @@ mod tests {
                 .expect("empty plan should clear the active plan"),
             ActivePlanUpdate::Clear
         ));
+    }
+
+    #[test]
+    fn replacement_snapshot_source_reuses_existing_source_pair() {
+        let active_plan = active_plan();
+
+        assert_eq!(
+            replacement_snapshot_source(&active_plan),
+            ("turn-1".to_string(), "item-1".to_string())
+        );
     }
 }

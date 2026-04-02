@@ -111,6 +111,7 @@ use codex_core::ThreadManager;
 use codex_core::find_thread_name_by_id;
 use codex_core::review_format::format_review_findings_block;
 use codex_core::review_prompts;
+use codex_core::state_db_bridge::open_if_present;
 use codex_protocol::ThreadId;
 use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse;
@@ -1810,7 +1811,11 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await
                 {
                     Ok(summary) => {
-                        let state_db_ctx = conversation.state_db();
+                        let state_db_ctx = if let Some(state_db_ctx) = conversation.state_db() {
+                            Some(state_db_ctx)
+                        } else {
+                            open_if_present(codex_home, fallback_model_provider.as_str()).await
+                        };
                         let mut thread = summary_to_thread(summary);
                         match read_rollout_items_from_rollout(rollout_path.as_path()).await {
                             Ok(items) => {
