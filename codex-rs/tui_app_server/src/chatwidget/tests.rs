@@ -12162,6 +12162,44 @@ async fn plan_update_renders_history_cell() {
 }
 
 #[tokio::test]
+async fn turn_plan_updated_notification_preserves_structured_metadata() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.handle_server_notification(
+        ServerNotification::TurnPlanUpdated(
+            codex_app_server_protocol::TurnPlanUpdatedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                explanation: Some("Adapting live plan".to_string()),
+                plan: vec![codex_app_server_protocol::TurnPlanStep {
+                    id: Some("plan-01".to_string()),
+                    step: "Keep structured metadata".to_string(),
+                    status: codex_app_server_protocol::TurnPlanStepStatus::InProgress,
+                    path: Some("codex-rs/tui_app_server/src/chatwidget.rs".to_string()),
+                    details: Some("preserve live plan fields".to_string()),
+                    inputs: Some(vec!["turn notification".to_string()]),
+                    outputs: Some(vec!["history cell".to_string()]),
+                    depends_on: Some(vec!["plan-00".to_string()]),
+                    acceptance: Some("live plan update keeps metadata".to_string()),
+                }],
+            },
+        ),
+        None,
+    );
+
+    let cells = drain_insert_history(&mut rx);
+    assert!(!cells.is_empty(), "expected plan update cell to be sent");
+
+    let blob = lines_to_single_string(cells.last().expect("plan update cell"));
+    assert!(blob.contains("Keep structured metadata"));
+    assert!(blob.contains("path: codex-rs/tui_app_server/src/chatwidget.rs"));
+    assert!(blob.contains("details: preserve live plan fields"));
+    assert!(blob.contains("inputs: turn notification"));
+    assert!(blob.contains("outputs: history cell"));
+    assert!(blob.contains("dependsOn: plan-00"));
+    assert!(blob.contains("acceptance: live plan update keeps metadata"));
+}
+
+#[tokio::test]
 async fn stream_error_updates_status_indicator() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.bottom_pane.set_task_running(true);

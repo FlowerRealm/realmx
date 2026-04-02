@@ -6220,12 +6220,19 @@ impl ChatWidget {
                         .plan
                         .into_iter()
                         .map(|step| UpdatePlanItemArg {
+                            id: step.id,
                             step: step.step,
                             status: match step.status {
                                 TurnPlanStepStatus::Pending => UpdatePlanItemStatus::Pending,
                                 TurnPlanStepStatus::InProgress => UpdatePlanItemStatus::InProgress,
                                 TurnPlanStepStatus::Completed => UpdatePlanItemStatus::Completed,
                             },
+                            path: step.path,
+                            details: step.details,
+                            inputs: step.inputs,
+                            outputs: step.outputs,
+                            depends_on: step.depends_on,
+                            acceptance: step.acceptance,
                         })
                         .collect(),
                 })
