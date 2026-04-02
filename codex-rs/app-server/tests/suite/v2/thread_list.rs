@@ -23,6 +23,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_core::ARCHIVED_SESSIONS_SUBDIR;
+use codex_git_utils::GitSha;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::GitInfo as CoreGitInfo;
 use codex_protocol::protocol::RolloutItem;
@@ -180,6 +181,46 @@ async fn thread_list_basic_empty() -> Result<()> {
     .await?;
     assert!(data.is_empty());
     assert_eq!(next_cursor, None);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_list_without_provider_filter_includes_all_providers() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_minimal_config(codex_home.path())?;
+
+    let older_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-02T10-00-00",
+        "2025-01-02T10:00:00Z",
+        "older",
+        Some("mock_provider"),
+        None,
+    )?;
+    let newer_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-02T11-00-00",
+        "2025-01-02T11:00:00Z",
+        "newer",
+        Some("other_provider"),
+        None,
+    )?;
+
+    let mut mcp = init_mcp(codex_home.path()).await?;
+
+    let ThreadListResponse {
+        data, next_cursor, ..
+    } = list_threads(&mut mcp, None, Some(10), None, None, None).await?;
+
+    assert_eq!(next_cursor, None);
+    let ids: Vec<_> = data.iter().map(|thread| thread.id.as_str()).collect();
+    assert_eq!(ids, vec![newer_id, older_id]);
+    let providers: Vec<_> = data
+        .iter()
+        .map(|thread| thread.model_provider.as_str())
+        .collect();
+    assert_eq!(providers, vec!["other_provider", "mock_provider"]);
 
     Ok(())
 }
@@ -661,6 +702,7 @@ async fn thread_list_filters_by_source_kind_subagent_thread_spawn() -> Result<()
         CoreSessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id,
             depth: 1,
+            agent_path: None,
             agent_nickname: None,
             agent_role: None,
         }),
@@ -724,6 +766,7 @@ async fn thread_list_filters_by_subagent_variant() -> Result<()> {
         CoreSessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id,
             depth: 1,
+            agent_path: None,
             agent_nickname: None,
             agent_role: None,
         }),
@@ -957,7 +1000,7 @@ async fn thread_list_includes_git_info() -> Result<()> {
     create_minimal_config(codex_home.path())?;
 
     let git_info = CoreGitInfo {
-        commit_hash: Some("abc123".to_string()),
+        commit_hash: Some(GitSha::new("abc123")),
         branch: Some("main".to_string()),
         repository_url: Some("https://example.com/repo.git".to_string()),
     };

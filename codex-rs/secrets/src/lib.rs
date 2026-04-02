@@ -1,9 +1,14 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::sync::PoisonError;
 
 use anyhow::Result;
+use codex_git_utils::get_git_repo_root;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
 use schemars::JsonSchema;
@@ -101,7 +106,10 @@ impl SecretsManager {
     pub fn new(codex_home: PathBuf, backend_kind: SecretsBackendKind) -> Self {
         let backend: Arc<dyn SecretsBackend> = match backend_kind {
             SecretsBackendKind::Local => {
-                let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+                let keyring_store: Arc<dyn KeyringStore> =
+                    test_support::current_test_keyring_store(&codex_home)
+                        .or_else(test_support::current_env_test_keyring_store)
+                        .unwrap_or_else(|| Arc::new(DefaultKeyringStore));
                 Arc::new(LocalSecretsBackend::new(codex_home, keyring_store))
             }
         };
@@ -161,22 +169,6 @@ pub fn environment_id_from_cwd(cwd: &Path) -> String {
     format!("cwd-{short}")
 }
 
-fn get_git_repo_root(base_dir: &Path) -> Option<PathBuf> {
-    let mut dir = base_dir.to_path_buf();
-
-    loop {
-        if dir.join(".git").exists() {
-            return Some(dir);
-        }
-
-        if !dir.pop() {
-            break;
-        }
-    }
-
-    None
-}
-
 pub(crate) fn compute_keyring_account(codex_home: &Path) -> String {
     let canonical = codex_home
         .canonicalize()
@@ -193,6 +185,133 @@ pub(crate) fn compute_keyring_account(codex_home: &Path) -> String {
 
 pub(crate) fn keyring_service() -> &'static str {
     KEYRING_SERVICE
+}
+
+pub mod test_support {
+    use super::*;
+
+    const TEST_KEYRING_ENV_VAR: &str = "CODEX_TEST_SECRETS_KEYRING";
+
+    static TEST_KEYRING_STORES: OnceLock<Mutex<HashMap<PathBuf, Arc<dyn KeyringStore>>>> =
+        OnceLock::new();
+
+    pub struct TestKeyringStoreGuard {
+        codex_home: PathBuf,
+        previous: Option<Arc<dyn KeyringStore>>,
+    }
+
+    impl Drop for TestKeyringStoreGuard {
+        fn drop(&mut self) {
+            let mut guard = TEST_KEYRING_STORES
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(previous) = self.previous.take() {
+                guard.insert(self.codex_home.clone(), previous);
+            } else {
+                guard.remove(&self.codex_home);
+            }
+        }
+    }
+
+    pub fn set_test_keyring_store(
+        codex_home: PathBuf,
+        keyring_store: Arc<dyn KeyringStore>,
+    ) -> TestKeyringStoreGuard {
+        let codex_home = codex_home
+            .canonicalize()
+            .unwrap_or_else(|_| codex_home.clone());
+        let mut guard = TEST_KEYRING_STORES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let previous = guard.insert(codex_home.clone(), keyring_store);
+        TestKeyringStoreGuard {
+            codex_home,
+            previous,
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct EnvMockKeyringStore;
+
+    impl KeyringStore for EnvMockKeyringStore {
+        fn load(
+            &self,
+            _service: &str,
+            account: &str,
+        ) -> Result<Option<String>, codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            match std::fs::read_to_string(&path) {
+                Ok(value) => Ok(Some(value)),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Ok(None),
+            }
+        }
+
+        fn save(
+            &self,
+            _service: &str,
+            account: &str,
+            value: &str,
+        ) -> Result<(), codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, value);
+            Ok(())
+        }
+
+        fn delete(
+            &self,
+            _service: &str,
+            account: &str,
+        ) -> Result<bool, codex_keyring_store::CredentialStoreError> {
+            let path = env_keyring_entry_path(account);
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(true),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(_) => Ok(false),
+            }
+        }
+    }
+
+    fn env_keyring_root() -> Option<PathBuf> {
+        std::env::var_os(TEST_KEYRING_ENV_VAR).map(PathBuf::from)
+    }
+
+    fn env_keyring_entry_path(account: &str) -> PathBuf {
+        let sanitized_account: String = account
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        env_keyring_root()
+            .unwrap_or_default()
+            .join(format!("{sanitized_account}.secret"))
+    }
+
+    pub(crate) fn current_env_test_keyring_store() -> Option<Arc<dyn KeyringStore>> {
+        env_keyring_root().map(|_| Arc::new(EnvMockKeyringStore) as Arc<dyn KeyringStore>)
+    }
+
+    pub(crate) fn current_test_keyring_store(codex_home: &Path) -> Option<Arc<dyn KeyringStore>> {
+        let codex_home = codex_home
+            .canonicalize()
+            .unwrap_or_else(|_| codex_home.to_path_buf());
+        TEST_KEYRING_STORES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&codex_home)
+            .cloned()
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +359,21 @@ mod tests {
 
         assert!(manager.delete(&scope, &name)?);
         assert_eq!(manager.get(&scope, &name)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn manager_uses_registered_test_keyring_for_matching_home() -> Result<()> {
+        let codex_home = tempfile::tempdir().expect("tempdir");
+        let keyring = Arc::new(MockKeyringStore::default());
+        let _guard = test_support::set_test_keyring_store(codex_home.path().to_path_buf(), keyring);
+        let manager =
+            SecretsManager::new(codex_home.path().to_path_buf(), SecretsBackendKind::Local);
+        let scope = SecretScope::Global;
+        let name = SecretName::new("GITHUB_TOKEN")?;
+
+        manager.set(&scope, &name, "token-1")?;
+        assert_eq!(manager.get(&scope, &name)?, Some("token-1".to_string()));
         Ok(())
     }
 }

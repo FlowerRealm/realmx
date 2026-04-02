@@ -9,7 +9,31 @@ use codex_protocol::openai_models::ModelsResponse;
 use http::HeaderMap;
 use http::Method;
 use http::header::ETAG;
+use serde::Deserialize;
 use std::sync::Arc;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteModelsPayload {
+    Enhanced(Vec<ModelInfo>),
+    OpenAiIds(Vec<String>),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ModelsResponseEnvelope {
+    Enhanced(ModelsResponse),
+    OpenAi(OpenAiModelsResponse),
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModelSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelSummary {
+    id: String,
+}
 
 pub struct ModelsClient<T: HttpTransport, A: AuthProvider> {
     session: EndpointSession<T, A>,
@@ -41,7 +65,7 @@ impl<T: HttpTransport, A: AuthProvider> ModelsClient<T, A> {
         &self,
         client_version: &str,
         extra_headers: HeaderMap,
-    ) -> Result<(Vec<ModelInfo>, Option<String>), ApiError> {
+    ) -> Result<(RemoteModelsPayload, Option<String>), ApiError> {
         let resp = self
             .session
             .execute_with(
@@ -61,7 +85,15 @@ impl<T: HttpTransport, A: AuthProvider> ModelsClient<T, A> {
             .and_then(|value| value.to_str().ok())
             .map(ToString::to_string);
 
-        let ModelsResponse { models } = serde_json::from_slice::<ModelsResponse>(&resp.body)
+        let models = serde_json::from_slice::<ModelsResponseEnvelope>(&resp.body)
+            .map(|response| match response {
+                ModelsResponseEnvelope::Enhanced(ModelsResponse { models }) => {
+                    RemoteModelsPayload::Enhanced(models)
+                }
+                ModelsResponseEnvelope::OpenAi(OpenAiModelsResponse { data }) => {
+                    RemoteModelsPayload::OpenAiIds(data.into_iter().map(|model| model.id).collect())
+                }
+            })
             .map_err(|e| {
                 ApiError::Stream(format!(
                     "failed to decode models response: {e}; body: {}",
@@ -93,7 +125,7 @@ mod tests {
     #[derive(Clone)]
     struct CapturingTransport {
         last_request: Arc<Mutex<Option<Request>>>,
-        body: Arc<ModelsResponse>,
+        body: Arc<Vec<u8>>,
         etag: Option<String>,
     }
 
@@ -101,7 +133,10 @@ mod tests {
         fn default() -> Self {
             Self {
                 last_request: Arc::new(Mutex::new(None)),
-                body: Arc::new(ModelsResponse { models: Vec::new() }),
+                body: Arc::new(
+                    serde_json::to_vec(&ModelsResponse { models: Vec::new() })
+                        .expect("serialize default models response"),
+                ),
                 etag: None,
             }
         }
@@ -111,7 +146,6 @@ mod tests {
     impl HttpTransport for CapturingTransport {
         async fn execute(&self, req: Request) -> Result<Response, TransportError> {
             *self.last_request.lock().unwrap() = Some(req);
-            let body = serde_json::to_vec(&*self.body).unwrap();
             let mut headers = HeaderMap::new();
             if let Some(etag) = &self.etag {
                 headers.insert(ETAG, etag.parse().unwrap());
@@ -119,7 +153,7 @@ mod tests {
             Ok(Response {
                 status: StatusCode::OK,
                 headers,
-                body: body.into(),
+                body: self.body.as_ref().clone().into(),
             })
         }
 
@@ -160,7 +194,7 @@ mod tests {
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_vec(&response).expect("serialize models response")),
             etag: None,
         };
 
@@ -175,7 +209,7 @@ mod tests {
             .await
             .expect("request should succeed");
 
-        assert_eq!(models.len(), 0);
+        assert_eq!(models, RemoteModelsPayload::Enhanced(Vec::new()));
 
         let url = transport
             .last_request
@@ -224,7 +258,7 @@ mod tests {
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_vec(&response).expect("serialize models response")),
             etag: None,
         };
 
@@ -239,10 +273,58 @@ mod tests {
             .await
             .expect("request should succeed");
 
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].slug, "gpt-test");
-        assert_eq!(models[0].supported_in_api, true);
-        assert_eq!(models[0].priority, 1);
+        assert_eq!(
+            models,
+            RemoteModelsPayload::Enhanced(response.models.clone())
+        );
+    }
+
+    #[tokio::test]
+    async fn parses_openai_models_response() {
+        let response = json!({
+            "object": "list",
+            "data": [
+                {
+                    "id": "gpt-5.4",
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "openai"
+                },
+                {
+                    "id": "gpt-5.3-codex",
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "openai"
+                }
+            ]
+        });
+
+        let transport = CapturingTransport {
+            last_request: Arc::new(Mutex::new(None)),
+            body: Arc::new(
+                serde_json::to_vec(&response).expect("serialize OpenAI models response"),
+            ),
+            etag: None,
+        };
+
+        let client = ModelsClient::new(
+            transport,
+            provider("https://example.com/api/codex"),
+            DummyAuth,
+        );
+
+        let (models, _) = client
+            .list_models("0.99.0", HeaderMap::new())
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(
+            models,
+            RemoteModelsPayload::OpenAiIds(vec![
+                "gpt-5.4".to_string(),
+                "gpt-5.3-codex".to_string(),
+            ])
+        );
     }
 
     #[tokio::test]
@@ -251,7 +333,7 @@ mod tests {
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_vec(&response).expect("serialize models response")),
             etag: Some("\"abc\"".to_string()),
         };
 
@@ -266,7 +348,7 @@ mod tests {
             .await
             .expect("request should succeed");
 
-        assert_eq!(models.len(), 0);
+        assert_eq!(models, RemoteModelsPayload::Enhanced(Vec::new()));
         assert_eq!(etag, Some("\"abc\"".to_string()));
     }
 }

@@ -5,20 +5,52 @@ use crate::codex::TurnContext;
 use crate::function_tool::FunctionCallError;
 use crate::plan_csv::render_plan_csv_markdown;
 use crate::plan_csv::update_plan_from_thread_plan_items;
-use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::spec::JsonSchema;
 use async_trait::async_trait;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::ResponseInputItem;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
+use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 pub struct PlanHandler;
+
+pub struct PlanToolOutput;
+
+const PLAN_UPDATED_MESSAGE: &str = "Plan updated";
+
+impl ToolOutput for PlanToolOutput {
+    fn log_preview(&self) -> String {
+        PLAN_UPDATED_MESSAGE.to_string()
+    }
+
+    fn success_for_logging(&self) -> bool {
+        true
+    }
+
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+        let mut output = FunctionCallOutputPayload::from_text(PLAN_UPDATED_MESSAGE.to_string());
+        output.success = Some(true);
+
+        ResponseInputItem::FunctionCallOutput {
+            call_id: call_id.to_string(),
+            output,
+        }
+    }
+
+    fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
+        JsonValue::Object(serde_json::Map::new())
+    }
+}
 
 pub static PLAN_TOOL: LazyLock<ToolSpec> = LazyLock::new(|| {
     let mut plan_item_props = BTreeMap::new();
@@ -112,7 +144,7 @@ At most one step can be in_progress at a time.
 
 #[async_trait]
 impl ToolHandler for PlanHandler {
-    type Output = FunctionToolOutput;
+    type Output = PlanToolOutput;
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
@@ -136,10 +168,9 @@ impl ToolHandler for PlanHandler {
             }
         };
 
-        let content =
-            handle_update_plan(session.as_ref(), turn.as_ref(), arguments, call_id).await?;
+        handle_update_plan(session.as_ref(), turn.as_ref(), arguments, call_id).await?;
 
-        Ok(FunctionToolOutput::from_text(content, Some(true)))
+        Ok(PlanToolOutput)
     }
 }
 
@@ -152,14 +183,13 @@ pub(crate) async fn handle_update_plan(
     arguments: String,
     _call_id: String,
 ) -> Result<String, FunctionCallError> {
-    if turn_context.collaboration_mode.mode.is_plan_output_mode() {
+    if turn_context.collaboration_mode.mode == ModeKind::Plan {
         return Err(FunctionCallError::RespondToModel(
-            "update_plan is a TODO/checklist tool and is not allowed in Plan output modes"
-                .to_string(),
+            "update_plan is a TODO/checklist tool and is not allowed in Plan mode".to_string(),
         ));
     }
     let args = parse_update_plan_arguments(&arguments)?;
-    if let Some(active_plan) = try_update_active_thread_plan(session, &args).await? {
+    if let Some(active_plan) = try_update_active_thread_plan(session, turn_context, &args).await? {
         session
             .send_event(turn_context, EventMsg::PlanUpdate(active_plan))
             .await;
@@ -179,6 +209,7 @@ fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, Functi
 
 async fn try_update_active_thread_plan(
     session: &Session,
+    turn_context: &TurnContext,
     args: &UpdatePlanArgs,
 ) -> Result<Option<UpdatePlanArgs>, FunctionCallError> {
     let Some(state_db) = session.state_db() else {
@@ -194,6 +225,9 @@ async fn try_update_active_thread_plan(
     else {
         return Ok(None);
     };
+    if !should_persist_active_thread_plan_update(args, &active_plan) {
+        return Ok(None);
+    }
 
     match classify_active_plan_update(args, &active_plan)? {
         ActivePlanUpdate::StatusOnly(status_updates) => {
@@ -225,7 +259,7 @@ async fn try_update_active_thread_plan(
                     &codex_state::ThreadPlanSnapshotCreateParams {
                         id: uuid::Uuid::new_v4().to_string(),
                         thread_id: thread_id.clone(),
-                        source_turn_id: active_plan.snapshot.source_turn_id.clone(),
+                        source_turn_id: turn_context.sub_id.clone(),
                         source_item_id: active_plan.snapshot.source_item_id.clone(),
                         raw_markdown,
                     },
@@ -257,6 +291,41 @@ async fn try_update_active_thread_plan(
             }))
         }
     }
+}
+
+fn should_persist_active_thread_plan_update(
+    args: &UpdatePlanArgs,
+    active_plan: &codex_state::ActiveThreadPlan,
+) -> bool {
+    if args.plan.is_empty() {
+        return false;
+    }
+
+    if args.plan.iter().any(|item| {
+        item.path.is_some()
+            || item.details.is_some()
+            || item.inputs.is_some()
+            || item.outputs.is_some()
+            || item.depends_on.is_some()
+            || item.acceptance.is_some()
+    }) {
+        return true;
+    }
+
+    if args.plan.len() != active_plan.items.len() {
+        return false;
+    }
+
+    let existing_row_ids = active_plan
+        .items
+        .iter()
+        .map(|item| item.row_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    args.plan.iter().all(|item| {
+        item.id
+            .as_deref()
+            .is_some_and(|row_id| existing_row_ids.contains(row_id))
+    })
 }
 
 #[derive(Debug)]
@@ -471,6 +540,7 @@ fn step_status_to_thread_plan_status(status: StepStatus) -> codex_state::ThreadP
 mod tests {
     use super::ActivePlanUpdate;
     use super::classify_active_plan_update;
+    use super::should_persist_active_thread_plan_update;
     use crate::function_tool::FunctionCallError;
     use codex_protocol::plan_tool::PlanItemArg;
     use codex_protocol::plan_tool::StepStatus;
@@ -704,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn status_only_updates_allow_omitted_ids_for_legacy_calls() {
+    fn legacy_calls_without_structured_fields_do_not_trigger_active_plan_persistence() {
         let active_plan = active_plan();
         let args = UpdatePlanArgs {
             explanation: None,
@@ -734,19 +804,78 @@ mod tests {
             ],
         };
 
+        assert!(!should_persist_active_thread_plan_update(
+            &args,
+            &active_plan
+        ));
         let ActivePlanUpdate::StatusOnly(updated) =
             classify_active_plan_update(&args, &active_plan)
-                .expect("legacy status-only update should validate without ids")
+                .expect("legacy status-only update should still be classifiable")
         else {
             panic!("legacy status-only update should stay on the status-only path");
         };
-        assert_eq!(
-            updated,
-            vec![
-                ("plan-01".to_string(), ThreadPlanItemStatus::Completed),
-                ("plan-02".to_string(), ThreadPlanItemStatus::InProgress),
-            ]
-        );
+        assert_eq!(updated.len(), 2);
+    }
+
+    #[test]
+    fn id_only_full_plan_updates_still_persist_active_plan_status_changes() {
+        let active_plan = active_plan();
+        let args = UpdatePlanArgs {
+            explanation: None,
+            plan: vec![
+                PlanItemArg {
+                    id: Some("plan-01".to_string()),
+                    step: "First".to_string(),
+                    status: StepStatus::Completed,
+                    path: None,
+                    details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
+                },
+                PlanItemArg {
+                    id: Some("plan-02".to_string()),
+                    step: "Second".to_string(),
+                    status: StepStatus::InProgress,
+                    path: None,
+                    details: None,
+                    inputs: None,
+                    outputs: None,
+                    depends_on: None,
+                    acceptance: None,
+                },
+            ],
+        };
+
+        assert!(should_persist_active_thread_plan_update(
+            &args,
+            &active_plan
+        ));
+    }
+
+    #[test]
+    fn id_only_partial_plan_updates_fall_back_to_legacy_plan_events() {
+        let active_plan = active_plan();
+        let args = UpdatePlanArgs {
+            explanation: None,
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "First".to_string(),
+                status: StepStatus::Completed,
+                path: None,
+                details: None,
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        };
+
+        assert!(!should_persist_active_thread_plan_update(
+            &args,
+            &active_plan
+        ));
     }
 
     #[test]

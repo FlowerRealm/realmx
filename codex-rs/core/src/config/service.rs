@@ -333,7 +333,7 @@ impl ConfigService {
             parsed_segments.push(segments);
         }
 
-        validate_config(&user_config).map_err(|err| {
+        validate_config(&user_config, &self.codex_home).map_err(|err| {
             ConfigServiceError::write(
                 ConfigWriteErrorCode::ConfigValidationError,
                 format!("Invalid configuration: {err}"),
@@ -371,7 +371,7 @@ impl ConfigService {
 
         let updated_layers = layers.with_user_config(&provided_path, user_config.clone());
         let effective = updated_layers.effective_config();
-        validate_config(&effective).map_err(|err| {
+        validate_config(&effective, &self.codex_home).map_err(|err| {
             ConfigServiceError::write(
                 ConfigWriteErrorCode::ConfigValidationError,
                 format!("Invalid configuration: {err}"),
@@ -576,8 +576,10 @@ fn clear_path(root: &mut TomlValue, segments: &[String]) -> Result<bool, MergeEr
     Ok(parent.remove(last).is_some())
 }
 
-fn validate_config(value: &TomlValue) -> Result<(), toml::de::Error> {
-    let _: ConfigToml = value.clone().try_into()?;
+fn validate_config(value: &TomlValue, base_dir: &Path) -> Result<(), toml::de::Error> {
+    let cfg = deserialize_config_toml_with_base(value.clone(), base_dir)
+        .map_err(serde::de::Error::custom)?;
+    crate::config::validate_model_provider_configuration(&cfg).map_err(serde::de::Error::custom)?;
     Ok(())
 }
 

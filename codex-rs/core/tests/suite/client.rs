@@ -11,8 +11,8 @@ use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::built_in_model_providers;
 use codex_core::default_client::originator;
 use codex_core::error::CodexErr;
-use codex_core::features::Feature;
 use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
+use codex_features::Feature;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
@@ -43,6 +43,7 @@ use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
+use core_test_support::PathBufExt;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::load_default_config_for_test;
 use core_test_support::responses::ev_completed;
@@ -390,6 +391,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
             timestamp: "2024-01-01T00:00:02.000Z".to_string(),
             item: RolloutItem::ResponseItem(ResponseItem::CustomToolCallOutput {
                 call_id: "legacy-js-call".to_string(),
+                name: None,
                 output: FunctionCallOutputPayload::from_text("legacy js_repl stdout".to_string()),
             }),
         },
@@ -547,6 +549,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:02.500Z".to_string(),
             item: RolloutItem::ResponseItem(ResponseItem::CustomToolCallOutput {
                 call_id: custom_call_id.to_string(),
+                name: None,
                 output: FunctionCallOutputPayload::from_content_items(vec![
                     FunctionCallOutputContentItem::InputImage {
                         image_url: image_url.to_string(),
@@ -718,6 +721,7 @@ async fn chatgpt_auth_sends_correct_request() {
 
     let mut model_provider = built_in_model_providers(/* openai_base_url */ None)["openai"].clone();
     model_provider.base_url = Some(format!("{}/api/codex", server.uri()));
+    model_provider.supports_websockets = false;
     let mut builder = test_codex()
         .with_auth(create_dummy_codex_auth())
         .with_config(move |config| {
@@ -792,6 +796,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
 
     let model_provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
+        supports_websockets: false,
         ..built_in_model_providers(/* openai_base_url */ None)["openai"].clone()
     };
 
@@ -825,6 +830,9 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
                 .features
                 .enabled(Feature::DefaultModeRequestUserInput),
         },
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
     let NewThread { thread: codex, .. } = thread_manager
         .start_thread(config)
@@ -1102,7 +1110,7 @@ async fn skills_append_to_developer_message() {
         .with_home(codex_home.clone())
         .with_auth(CodexAuth::from_api_key("Test API Key"))
         .with_config(move |config| {
-            config.cwd = codex_home_path;
+            config.cwd = codex_home_path.abs();
         });
     let codex = builder
         .build(&server)
@@ -1305,8 +1313,9 @@ async fn user_turn_collaboration_mode_overrides_model_and_effort() -> anyhow::Re
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: config.cwd.clone(),
+            cwd: config.cwd.to_path_buf(),
             approval_policy: config.permissions.approval_policy.value(),
+            approvals_reviewer: None,
             sandbox_policy: config.permissions.sandbox_policy.get().clone(),
             model: session_configured.model.clone(),
             effort: Some(ReasoningEffort::Low),
@@ -1422,8 +1431,9 @@ async fn user_turn_explicit_reasoning_summary_overrides_model_catalog_default() 
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            cwd: config.cwd.clone(),
+            cwd: config.cwd.to_path_buf(),
             approval_policy: config.permissions.approval_policy.value(),
+            approvals_reviewer: None,
             sandbox_policy: config.permissions.sandbox_policy.get().clone(),
             model: session_configured.model,
             effort: None,
@@ -1796,6 +1806,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         request_max_retries: Some(0),
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -1836,7 +1847,6 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         config.mcp_oauth_credentials_store_mode,
         SessionSource::Exec,
         config.model_verbosity,
-        false,
         false,
         false,
         None,
@@ -1903,6 +1913,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     });
     prompt.input.push(ResponseItem::CustomToolCallOutput {
         call_id: "custom-tool-call-id".into(),
+        name: None,
         output: FunctionCallOutputPayload::from_text("ok".into()),
     });
 
@@ -1974,6 +1985,7 @@ async fn token_count_includes_rate_limits_snapshot() {
 
     let mut provider = built_in_model_providers(/* openai_base_url */ None)["openai"].clone();
     provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
 
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("test"))
@@ -2403,6 +2415,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -2490,6 +2503,7 @@ async fn env_var_overrides_loaded_auth() {
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };

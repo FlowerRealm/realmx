@@ -100,6 +100,7 @@ base_url = "{base_url}"
 wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
+supports_websockets = false
 {auth_strategy_line}{requires_line}{oauth_line}"#
         )
     };
@@ -229,7 +230,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
     let ServerNotification::AccountUpdated(payload) = parsed else {
         bail!("unexpected notification: {parsed:?}");
     };
-    assert_eq!(payload.auth_mode, Some(AuthMode::ChatgptAuthTokens));
+    assert_eq!(payload.auth_mode, Some(AuthMode::Chatgpt));
     assert_eq!(payload.plan_type, Some(AccountPlanType::Pro));
 
     let get_id = mcp
@@ -373,6 +374,8 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -493,6 +496,8 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -609,6 +614,8 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
         codex_home.path(),
         CreateConfigTomlParams {
             forced_workspace_id: Some("org-expected".to_string()),
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -730,6 +737,8 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
+            provider_id: Some("mock_provider".to_string()),
+            auth_strategy: Some("openai".to_string()),
             requires_openai_auth: Some(true),
             base_url: Some(format!("{}/v1", mock_server.uri())),
             ..Default::default()
@@ -1229,7 +1238,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
 }
 
 #[tokio::test]
-async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
+async fn custom_openai_auth_provider_allows_api_key_login() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -1272,7 +1281,7 @@ async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
         received,
         GetAccountResponse {
             account: Some(Account::ApiKey {}),
-            requires_openai_auth: false,
+            requires_openai_auth: true,
             requires_auth: Some(true),
             provider_id: Some("mock_provider".to_string()),
             provider_name: Some("Mock provider for test".to_string()),
@@ -1282,7 +1291,9 @@ async fn legacy_custom_provider_uses_api_key_login_only() -> Result<()> {
 }
 
 #[tokio::test]
-async fn legacy_custom_provider_chatgpt_login_is_rejected() -> Result<()> {
+// Serialize tests that launch the login server since it binds to a fixed port.
+#[serial(login_port)]
+async fn custom_openai_auth_provider_allows_chatgpt_login() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -1299,16 +1310,18 @@ async fn legacy_custom_provider_chatgpt_login_is_rejected() -> Result<()> {
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let request_id = mcp.send_login_account_chatgpt_request().await?;
-    let err: JSONRPCError = timeout(
+    let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
-    assert_eq!(
-        err.error.message,
-        "provider `mock_provider` does not support ChatGPT login"
-    );
+    let login: LoginAccountResponse = to_response(resp)?;
+    let LoginAccountResponse::Chatgpt { login_id, auth_url } = login else {
+        bail!("unexpected login response: {login:?}");
+    };
+    assert!(!login_id.is_empty());
+    assert!(!auth_url.is_empty());
     Ok(())
 }
 

@@ -24,21 +24,21 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
+use wiremock::matchers::query_param;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 const PROJECT_CONFIG_DIR_NAME: &str = ".realmx";
 
 #[tokio::test]
-async fn plugin_list_returns_invalid_request_for_invalid_marketplace_file() -> Result<()> {
+async fn plugin_list_skips_invalid_marketplace_file_and_reports_error() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
     std::fs::create_dir_all(repo_root.path().join(".git"))?;
     std::fs::create_dir_all(repo_root.path().join(".agents/plugins"))?;
-    std::fs::write(
-        repo_root.path().join(".agents/plugins/marketplace.json"),
-        "{not json",
-    )?;
+    let marketplace_path =
+        AbsolutePathBuf::try_from(repo_root.path().join(".agents/plugins/marketplace.json"))?;
+    std::fs::write(marketplace_path.as_path(), "{not json")?;
 
     let home = codex_home.path().to_string_lossy().into_owned();
     let mut mcp = McpProcess::new_with_env(
@@ -58,14 +58,32 @@ async fn plugin_list_returns_invalid_request_for_invalid_marketplace_file() -> R
         })
         .await?;
 
-    let err = timeout(
+    let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
+    let response: PluginListResponse = to_response(response)?;
 
-    assert_eq!(err.error.code, -32600);
-    assert!(err.error.message.contains("invalid marketplace file"));
+    assert!(
+        response
+            .marketplaces
+            .iter()
+            .all(|marketplace| { marketplace.path != marketplace_path }),
+        "invalid marketplace should be skipped"
+    );
+    assert_eq!(response.marketplace_load_errors.len(), 1);
+    assert_eq!(
+        response.marketplace_load_errors[0].marketplace_path,
+        marketplace_path
+    );
+    assert!(
+        response.marketplace_load_errors[0]
+            .message
+            .contains("invalid marketplace file"),
+        "unexpected error: {:?}",
+        response.marketplace_load_errors
+    );
     Ok(())
 }
 
@@ -153,7 +171,9 @@ async fn plugin_list_includes_install_and_enabled_state_from_config() -> Result<
         repo_root.path().join(".agents/plugins/marketplace.json"),
         r#"{
   "name": "codex-curated",
-  "display_name": "ChatGPT Official",
+  "interface": {
+    "displayName": "ChatGPT Official"
+  },
   "plugins": [
     {
       "name": "enabled-plugin",
@@ -223,7 +243,10 @@ enabled = false
 
     assert_eq!(marketplace.name, "codex-curated");
     assert_eq!(
-        marketplace.display_name.as_deref(),
+        marketplace
+            .interface
+            .as_ref()
+            .and_then(|interface| interface.display_name.as_deref()),
         Some("ChatGPT Official")
     );
     assert_eq!(marketplace.plugins.len(), 3);
@@ -634,6 +657,7 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
     )?;
     write_openai_curated_marketplace(codex_home.path(), &["linear", "gmail", "calendar"])?;
     write_installed_plugin(&codex_home, "openai-curated", "linear")?;
+    write_installed_plugin(&codex_home, "openai-curated", "gmail")?;
     write_installed_plugin(&codex_home, "openai-curated", "calendar")?;
 
     Mock::given(method("GET"))
@@ -646,6 +670,17 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
   {"id":"2","name":"gmail","marketplace_name":"openai-curated","version":"1.0.0","enabled":false}
 ]"#,
         ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/backend-api/plugins/featured"))
+        .and(query_param("platform", "codex"))
+        .and(header("authorization", "Bearer chatgpt-token"))
+        .and(header("chatgpt-account-id", "account-123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(r#"["linear@openai-curated","calendar@openai-curated"]"#),
+        )
         .mount(&server)
         .await;
 
@@ -666,6 +701,13 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
     .await??;
     let response: PluginListResponse = to_response(response)?;
     assert_eq!(response.remote_sync_error, None);
+    assert_eq!(
+        response.featured_plugin_ids,
+        vec![
+            "linear@openai-curated".to_string(),
+            "calendar@openai-curated".to_string(),
+        ]
+    );
 
     let curated_marketplace = response
         .marketplaces
@@ -680,14 +722,14 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
             .collect::<Vec<_>>(),
         vec![
             ("linear@openai-curated".to_string(), true, true),
-            ("gmail@openai-curated".to_string(), true, false),
+            ("gmail@openai-curated".to_string(), false, false),
             ("calendar@openai-curated".to_string(), false, false),
         ]
     );
 
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(config.contains(r#"[plugins."linear@openai-curated"]"#));
-    assert!(config.contains(r#"[plugins."gmail@openai-curated"]"#));
+    assert!(!config.contains(r#"[plugins."gmail@openai-curated"]"#));
     assert!(!config.contains(r#"[plugins."calendar@openai-curated"]"#));
 
     assert!(
@@ -697,12 +739,10 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
             .is_dir()
     );
     assert!(
-        codex_home
+        !codex_home
             .path()
-            .join(format!(
-                "plugins/cache/openai-curated/gmail/{TEST_CURATED_PLUGIN_SHA}"
-            ))
-            .is_dir()
+            .join("plugins/cache/openai-curated/gmail")
+            .exists()
     );
     assert!(
         !codex_home

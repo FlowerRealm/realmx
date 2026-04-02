@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -34,6 +35,22 @@ use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
 use crate::test_codex::ApplyPatchModelOutput;
+
+static DEFAULT_MODELS_RESPONSE: LazyLock<ModelsResponse> = LazyLock::new(|| {
+    let bundled_models_path = codex_utils_cargo_bin::find_resource!("../../models.json")
+        .unwrap_or_else(|err| {
+            panic!("failed to locate bundled models.json: {err}");
+        });
+    let bundled_models_contents =
+        std::fs::read_to_string(&bundled_models_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read bundled models.json from {}: {err}",
+                bundled_models_path.display()
+            );
+        });
+    serde_json::from_str(&bundled_models_contents)
+        .unwrap_or_else(|err| panic!("failed to parse bundled models.json: {err}"))
+});
 
 #[derive(Debug, Clone)]
 pub struct ResponseMock {
@@ -203,6 +220,12 @@ impl ResponsesRequest {
         self.call_output(call_id, "function_call_output")
     }
 
+    pub fn any_tool_call_output(&self, call_id: &str) -> Value {
+        self.call_output_optional(call_id, "function_call_output")
+            .or_else(|| self.call_output_optional(call_id, "custom_tool_call_output"))
+            .unwrap_or_else(|| panic!("tool call output {call_id} item not found in request"))
+    }
+
     pub fn custom_tool_call_output(&self, call_id: &str) -> Value {
         self.call_output(call_id, "custom_tool_call_output")
     }
@@ -212,13 +235,23 @@ impl ResponsesRequest {
     }
 
     pub fn call_output(&self, call_id: &str, call_type: &str) -> Value {
+        self.call_output_optional(call_id, call_type)
+            .unwrap_or_else(|| panic!("{call_type} {call_id} item not found in request"))
+    }
+
+    fn call_output_optional(&self, call_id: &str, call_type: &str) -> Option<Value> {
         self.input()
             .iter()
             .find(|item| {
-                item.get("type").unwrap() == call_type && item.get("call_id").unwrap() == call_id
+                item.get("type").and_then(Value::as_str) == Some(call_type)
+                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
             })
             .cloned()
-            .unwrap_or_else(|| panic!("function call output {call_id} item not found in request"))
+    }
+
+    pub fn any_tool_call_output_text(&self, call_id: &str) -> Option<String> {
+        self.function_call_output_text(call_id)
+            .or_else(|| self.custom_tool_call_output_text(call_id))
     }
 
     /// Returns true if this request's `input` contains a `function_call` with
@@ -233,14 +266,25 @@ impl ResponsesRequest {
     /// If present, returns the `output` string of the `function_call_output`
     /// entry matching `call_id` in this request's `input`.
     pub fn function_call_output_text(&self, call_id: &str) -> Option<String> {
-        let binding = self.input();
-        let item = binding.iter().find(|item| {
-            item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
-        })?;
+        let item = self.call_output_optional(call_id, "function_call_output")?;
         item.get("output")
             .and_then(Value::as_str)
             .map(str::to_string)
+    }
+
+    pub fn custom_tool_call_output_text(&self, call_id: &str) -> Option<String> {
+        let item = self.call_output_optional(call_id, "custom_tool_call_output")?;
+        item.get("output")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+
+    pub fn any_tool_call_output_content_and_success(
+        &self,
+        call_id: &str,
+    ) -> Option<(Option<String>, Option<bool>)> {
+        self.function_call_output_content_and_success(call_id)
+            .or_else(|| self.custom_tool_call_output_content_and_success(call_id))
     }
 
     pub fn function_call_output_content_and_success(
@@ -263,7 +307,7 @@ impl ResponsesRequest {
         call_type: &str,
     ) -> Option<(Option<String>, Option<bool>)> {
         let output = self
-            .call_output(call_id, call_type)
+            .call_output_optional(call_id, call_type)?
             .get("output")
             .cloned()
             .unwrap_or(Value::Null);
@@ -377,6 +421,59 @@ mod tests {
         assert_eq!(
             mixed_content.custom_tool_call_output_content_and_success("call-4"),
             Some((None, None))
+        );
+    }
+
+    #[test]
+    fn any_tool_call_output_prefers_function_then_custom() {
+        let custom_only = request_with_input(serde_json::json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "hello" }]
+            },
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call-1",
+                "output": "hello"
+            }
+        ]));
+        assert_eq!(
+            custom_only.any_tool_call_output("call-1")["type"].as_str(),
+            Some("custom_tool_call_output")
+        );
+        assert_eq!(
+            custom_only.any_tool_call_output_text("call-1"),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            custom_only.any_tool_call_output_content_and_success("call-1"),
+            Some((Some("hello".to_string()), None))
+        );
+
+        let both = request_with_input(serde_json::json!([
+            {
+                "type": "function_call_output",
+                "call_id": "call-2",
+                "output": "function"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call-2",
+                "output": "custom"
+            }
+        ]));
+        assert_eq!(
+            both.any_tool_call_output("call-2")["type"].as_str(),
+            Some("function_call_output")
+        );
+        assert_eq!(
+            both.any_tool_call_output_text("call-2"),
+            Some("function".to_string())
+        );
+        assert_eq!(
+            both.any_tool_call_output_content_and_success("call-2"),
+            Some((Some("function".to_string()), None))
         );
     }
 }
@@ -1172,7 +1269,7 @@ pub async fn start_mock_server() -> MockServer {
         .await;
 
     // Provide a default `/models` response so tests remain hermetic when the client queries it.
-    let _ = mount_models_once(&server, ModelsResponse { models: Vec::new() }).await;
+    let _ = mount_models_once(&server, DEFAULT_MODELS_RESPONSE.clone()).await;
 
     server
 }

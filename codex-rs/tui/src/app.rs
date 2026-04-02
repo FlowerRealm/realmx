@@ -1,7 +1,6 @@
 use crate::app_backtrack::BacktrackState;
 use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
-use crate::app_event::ProviderApiKeyInput;
 use crate::app_event::RealtimeAudioDeviceKind;
 #[cfg(target_os = "windows")]
 use crate::app_event::WindowsSandboxEnableMode;
@@ -35,33 +34,51 @@ use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
-use crate::settings::data::SettingsScope;
+#[cfg(test)]
+use crate::test_support::PathBufExt;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
 use crate::version::CODEX_CLI_VERSION;
 use codex_ansi_escape::ansi_escape_line;
+use codex_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
 use codex_app_server_client::InProcessAppServerClient;
+use codex_app_server_client::InProcessClientStartArgs;
+use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigLayerSource;
+use codex_app_server_protocol::ConfigWarningNotification;
+use codex_app_server_protocol::PluginInstallParams;
+use codex_app_server_protocol::PluginInstallResponse;
+use codex_app_server_protocol::PluginListParams;
+use codex_app_server_protocol::PluginListResponse;
+use codex_app_server_protocol::PluginReadParams;
+use codex_app_server_protocol::PluginReadResponse;
+use codex_app_server_protocol::PluginUninstallParams;
+use codex_app_server_protocol::PluginUninstallResponse;
+use codex_app_server_protocol::RequestId;
+use codex_arg0::Arg0DispatchPaths;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
+use codex_core::ForkSnapshot;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::edit::toml_value_to_item;
 use codex_core::config::types::ApprovalsReviewer;
 use codex_core::config::types::ModelAvailabilityNuxConfig;
+use codex_core::config_loader::CloudRequirementsLoader;
 use codex_core::config_loader::ConfigLayerStackOrdering;
-use codex_core::features::FEATURES;
-use codex_core::features::Feature;
+use codex_core::config_loader::LoaderOverrides;
+use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use codex_core::models_manager::manager::RefreshStrategy;
 use codex_core::models_manager::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
 use codex_core::models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
 #[cfg(target_os = "windows")]
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
+use codex_exec_server::EnvironmentManager;
+use codex_features::Feature;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
@@ -84,6 +101,7 @@ use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SkillErrorInfo;
 use codex_protocol::protocol::TokenUsage;
+use codex_terminal_detection::user_agent;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
@@ -115,9 +133,9 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
+use uuid::Uuid;
 
 mod agent_navigation;
-mod app_server_adapter;
 mod pending_interactive_replay;
 
 use self::agent_navigation::AgentNavigationDirection;
@@ -151,15 +169,6 @@ fn guardian_approvals_mode() -> GuardianApprovalsMode {
         sandbox_policy: SandboxPolicy::new_workspace_write_policy(),
     }
 }
-
-fn feature_for_settings_key_path(key_path: &str) -> Option<Feature> {
-    let feature_key = key_path.strip_prefix("features.")?;
-    FEATURES
-        .iter()
-        .find(|spec| spec.key == feature_key)
-        .map(|spec| spec.id)
-}
-
 /// Baseline cadence for periodic stream commit animation ticks.
 ///
 /// Smooth-mode streaming drains one line per tick, so this interval controls
@@ -246,6 +255,180 @@ fn emit_skill_load_warnings(app_event_tx: &AppEventSender, errors: &[SkillErrorI
     }
 }
 
+fn config_warning_notifications(config: &Config) -> Vec<ConfigWarningNotification> {
+    config
+        .startup_warnings
+        .iter()
+        .map(|warning| ConfigWarningNotification {
+            summary: warning.clone(),
+            details: None,
+            path: None,
+            range: None,
+        })
+        .collect()
+}
+
+async fn start_plugin_request_client(
+    arg0_paths: Arg0DispatchPaths,
+    config: Config,
+    cli_kv_overrides: Vec<(String, TomlValue)>,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
+    feedback: codex_feedback::CodexFeedback,
+) -> Result<InProcessAppServerClient> {
+    InProcessAppServerClient::start(InProcessClientStartArgs {
+        arg0_paths,
+        config_warnings: config_warning_notifications(&config),
+        config: Arc::new(config),
+        cli_overrides: cli_kv_overrides,
+        loader_overrides,
+        cloud_requirements,
+        feedback,
+        session_source: SessionSource::Cli,
+        enable_codex_api_key_env: false,
+        client_name: "codex-tui".to_string(),
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        experimental_api: true,
+        opt_out_notification_methods: Vec::new(),
+        channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+    })
+    .await
+    .wrap_err("failed to start embedded app server for plugin request")
+}
+
+async fn request_plugins_list(
+    arg0_paths: Arg0DispatchPaths,
+    config: Config,
+    cli_kv_overrides: Vec<(String, TomlValue)>,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
+    feedback: codex_feedback::CodexFeedback,
+    cwd: PathBuf,
+) -> Result<PluginListResponse> {
+    let client = start_plugin_request_client(
+        arg0_paths,
+        config,
+        cli_kv_overrides,
+        loader_overrides,
+        cloud_requirements,
+        feedback,
+    )
+    .await?;
+    let request_handle = client.request_handle();
+    let cwd = AbsolutePathBuf::try_from(cwd).wrap_err("plugin list cwd must be absolute")?;
+    let request_id = RequestId::String(format!("plugin-list-{}", Uuid::new_v4()));
+    let response = request_handle
+        .request_typed(ClientRequest::PluginList {
+            request_id,
+            params: PluginListParams {
+                cwds: Some(vec![cwd]),
+                force_remote_sync: false,
+            },
+        })
+        .await
+        .wrap_err("plugin/list failed in legacy TUI");
+    if let Err(err) = client.shutdown().await {
+        tracing::warn!(%err, "failed to shut down embedded app server after plugin/list");
+    }
+    response
+}
+
+async fn request_plugin_detail(
+    arg0_paths: Arg0DispatchPaths,
+    config: Config,
+    cli_kv_overrides: Vec<(String, TomlValue)>,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
+    feedback: codex_feedback::CodexFeedback,
+    params: PluginReadParams,
+) -> Result<PluginReadResponse> {
+    let client = start_plugin_request_client(
+        arg0_paths,
+        config,
+        cli_kv_overrides,
+        loader_overrides,
+        cloud_requirements,
+        feedback,
+    )
+    .await?;
+    let request_handle = client.request_handle();
+    let request_id = RequestId::String(format!("plugin-read-{}", Uuid::new_v4()));
+    let response = request_handle
+        .request_typed(ClientRequest::PluginRead { request_id, params })
+        .await
+        .wrap_err("plugin/read failed in legacy TUI");
+    if let Err(err) = client.shutdown().await {
+        tracing::warn!(%err, "failed to shut down embedded app server after plugin/read");
+    }
+    response
+}
+
+async fn request_plugin_install(
+    arg0_paths: Arg0DispatchPaths,
+    config: Config,
+    cli_kv_overrides: Vec<(String, TomlValue)>,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
+    feedback: codex_feedback::CodexFeedback,
+    params: PluginInstallParams,
+) -> Result<PluginInstallResponse> {
+    let client = start_plugin_request_client(
+        arg0_paths,
+        config,
+        cli_kv_overrides,
+        loader_overrides,
+        cloud_requirements,
+        feedback,
+    )
+    .await?;
+    let request_handle = client.request_handle();
+    let request_id = RequestId::String(format!("plugin-install-{}", Uuid::new_v4()));
+    let response = request_handle
+        .request_typed(ClientRequest::PluginInstall { request_id, params })
+        .await
+        .wrap_err("plugin/install failed in legacy TUI");
+    if let Err(err) = client.shutdown().await {
+        tracing::warn!(%err, "failed to shut down embedded app server after plugin/install");
+    }
+    response
+}
+
+async fn request_plugin_uninstall(
+    arg0_paths: Arg0DispatchPaths,
+    config: Config,
+    cli_kv_overrides: Vec<(String, TomlValue)>,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
+    feedback: codex_feedback::CodexFeedback,
+    plugin_id: String,
+) -> Result<PluginUninstallResponse> {
+    let client = start_plugin_request_client(
+        arg0_paths,
+        config,
+        cli_kv_overrides,
+        loader_overrides,
+        cloud_requirements,
+        feedback,
+    )
+    .await?;
+    let request_handle = client.request_handle();
+    let request_id = RequestId::String(format!("plugin-uninstall-{}", Uuid::new_v4()));
+    let response = request_handle
+        .request_typed(ClientRequest::PluginUninstall {
+            request_id,
+            params: PluginUninstallParams {
+                plugin_id,
+                force_remote_sync: false,
+            },
+        })
+        .await
+        .wrap_err("plugin/uninstall failed in legacy TUI");
+    if let Err(err) = client.shutdown().await {
+        tracing::warn!(%err, "failed to shut down embedded app server after plugin/uninstall");
+    }
+    response
+}
+
 fn emit_project_config_warnings(app_event_tx: &AppEventSender, config: &Config) {
     let mut disabled_folders = Vec::new();
 
@@ -286,6 +469,42 @@ fn emit_project_config_warnings(app_event_tx: &AppEventSender, config: &Config) 
 
     app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
         history_cell::new_warning_event(message),
+    )));
+}
+
+fn emit_system_bwrap_warning(app_event_tx: &AppEventSender) {
+    let Some(message) = codex_core::config::system_bwrap_warning() else {
+        return;
+    };
+
+    app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+        history_cell::new_warning_event(message),
+    )));
+}
+
+async fn emit_custom_prompt_deprecation_notice(app_event_tx: &AppEventSender, codex_home: &Path) {
+    let prompts_dir = codex_home.join("prompts");
+    let prompt_count = codex_core::custom_prompts::discover_prompts_in(&prompts_dir)
+        .await
+        .len();
+    if prompt_count == 0 {
+        return;
+    }
+
+    let prompt_label = if prompt_count == 1 {
+        "prompt"
+    } else {
+        "prompts"
+    };
+    let details = format!(
+        "Detected {prompt_count} custom {prompt_label} in `$CODEX_HOME/prompts`. Use the `$skill-creator` skill to convert each custom prompt into a skill."
+    );
+
+    app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+        history_cell::new_deprecation_notice(
+            "Custom prompts are deprecated and will soon be removed.".to_string(),
+            Some(details),
+        ),
     )));
 }
 
@@ -683,6 +902,9 @@ pub(crate) struct App {
     pub(crate) config: Config,
     pub(crate) active_profile: Option<String>,
     cli_kv_overrides: Vec<(String, TomlValue)>,
+    arg0_paths: Arg0DispatchPaths,
+    loader_overrides: LoaderOverrides,
+    cloud_requirements: CloudRequirementsLoader,
     harness_overrides: ConfigOverrides,
     runtime_approval_policy_override: Option<AskForApproval>,
     runtime_sandbox_policy_override: Option<SandboxPolicy>,
@@ -702,6 +924,8 @@ pub(crate) struct App {
     pub(crate) commit_anim_running: Arc<AtomicBool>,
     // Shared across ChatWidget instances so invalid status-line config warnings only emit once.
     status_line_invalid_items_warned: Arc<AtomicBool>,
+    // Shared across ChatWidget instances so invalid terminal-title config warnings only emit once.
+    terminal_title_invalid_items_warned: Arc<AtomicBool>,
 
     // Esc-backtracking state grouped
     pub(crate) backtrack: crate::app_backtrack::BacktrackState,
@@ -789,6 +1013,7 @@ impl App {
             startup_tooltip_override: None,
             status_line_invalid_items_warned: self.status_line_invalid_items_warned.clone(),
             session_telemetry: self.session_telemetry.clone(),
+            terminal_title_invalid_items_warned: self.terminal_title_invalid_items_warned.clone(),
         }
     }
 
@@ -807,63 +1032,14 @@ impl App {
 
     async fn refresh_in_memory_config_from_disk(&mut self) -> Result<()> {
         let mut config = self
-            .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.clone())
+            .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.to_path_buf())
             .await?;
         self.apply_runtime_policy_overrides(&mut config);
         self.config = config;
-        self.active_profile = self.config.active_profile.clone();
+        self.chat_widget.sync_plugin_mentions_config(&self.config);
         Ok(())
     }
 
-    async fn sync_running_session_provider(&self, config: &Config) -> Result<()> {
-        let Some(thread_id) = self.chat_widget.thread_id() else {
-            return Ok(());
-        };
-        let thread = self.server.get_thread(thread_id).await.map_err(|err| {
-            color_eyre::eyre::eyre!(format!(
-                "Failed to find live thread {thread_id} while syncing provider: {err}"
-            ))
-        })?;
-        thread
-            .set_model_provider(
-                config.model_provider_id.clone(),
-                config.model_provider.clone(),
-            )
-            .await
-            .map_err(|err| {
-                color_eyre::eyre::eyre!(format!(
-                    "Failed to sync provider {} into live thread {thread_id}: {err}",
-                    config.model_provider_id
-                ))
-            })?;
-        Ok(())
-    }
-
-    async fn refresh_config_after_provider_change(&mut self) -> Result<()> {
-        let mut config = self.rebuild_config_for_cwd(self.config.cwd.clone()).await?;
-        self.apply_runtime_policy_overrides(&mut config);
-        self.sync_running_session_provider(&config).await?;
-        self.chat_widget.set_config(config.clone());
-        self.config = config;
-        self.active_profile = self.config.active_profile.clone();
-        self.refresh_status_line();
-        Ok(())
-    }
-
-    fn settings_segments(&self, key_path: &str, scope: SettingsScope) -> Result<Vec<String>> {
-        let scope = scope.normalized(self.active_profile.as_deref());
-        let mut segments = Vec::new();
-        if matches!(scope, SettingsScope::ActiveProfile) {
-            let profile = self
-                .active_profile
-                .as_deref()
-                .ok_or_else(|| color_eyre::eyre::eyre!("No active profile is available"))?;
-            segments.push("profiles".to_string());
-            segments.push(profile.to_string());
-        }
-        segments.extend(key_path.split('.').map(ToOwned::to_owned));
-        Ok(segments)
-    }
     async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
         if let Err(err) = self.refresh_in_memory_config_from_disk().await {
             tracing::warn!(
@@ -956,28 +1132,15 @@ impl App {
     }
 
     async fn update_feature_flags(&mut self, updates: Vec<(Feature, bool)>) {
-        let scope = SettingsScope::default_for(self.active_profile.as_deref());
-        self.update_feature_flags_in_scope(updates, scope).await;
-    }
-
-    async fn update_feature_flags_in_scope(
-        &mut self,
-        updates: Vec<(Feature, bool)>,
-        scope: SettingsScope,
-    ) {
         if updates.is_empty() {
             return;
         }
 
-        let scope = scope.normalized(self.active_profile.as_deref());
         let guardian_approvals_preset = guardian_approvals_mode();
         let mut next_config = self.config.clone();
-        let scoped_profile = match scope {
-            SettingsScope::Global => None,
-            SettingsScope::ActiveProfile => self.active_profile.clone(),
-        };
+        let active_profile = self.active_profile.clone();
         let scoped_segments = |key: &str| {
-            if let Some(profile) = scoped_profile.as_deref() {
+            if let Some(profile) = active_profile.as_deref() {
                 vec!["profiles".to_string(), profile.to_string(), key.to_string()]
             } else {
                 vec![key.to_string()]
@@ -1002,7 +1165,7 @@ impl App {
                 .as_table()
                 .and_then(|table| table.get("approvals_reviewer"))
                 .is_some_and(|value| value != &TomlValue::String("user".to_string()));
-            let profile_configured = scoped_profile.as_deref().is_some_and(|profile| {
+            let profile_configured = active_profile.as_deref().is_some_and(|profile| {
                 effective_config
                     .as_table()
                     .and_then(|table| table.get("profiles"))
@@ -1015,22 +1178,21 @@ impl App {
         };
         let mut permissions_history_label: Option<&'static str> = None;
         let mut builder = ConfigEditsBuilder::new(&self.config.codex_home)
-            .with_profile(scoped_profile.as_deref());
+            .with_profile(self.active_profile.as_deref());
 
         for (feature, enabled) in updates {
             let feature_key = feature.key();
             let mut feature_edits = Vec::new();
             if feature == Feature::GuardianApproval
                 && !enabled
-                && matches!(scope, SettingsScope::ActiveProfile)
+                && self.active_profile.is_some()
                 && root_approvals_reviewer_blocks_profile_disable
             {
                 self.chat_widget.add_error_message(
-                    "Cannot disable Guardian Approvals in this profile because `approvals_reviewer` is configured outside the active profile.".to_string(),
-                );
+                        "Cannot disable Guardian Approvals in this profile because `approvals_reviewer` is configured outside the active profile.".to_string(),
+                    );
                 continue;
             }
-
             let mut feature_config = next_config.clone();
             if let Err(err) = feature_config.features.set_enabled(feature, enabled) {
                 tracing::error!(
@@ -1038,11 +1200,11 @@ impl App {
                     feature = feature_key,
                     "failed to update constrained feature flags"
                 );
-                self.chat_widget
-                    .add_error_message(format!("Failed to update feature `{feature_key}`: {err}"));
+                self.chat_widget.add_error_message(format!(
+                    "Failed to update experimental feature `{feature_key}`: {err}"
+                ));
                 continue;
             }
-
             let effective_enabled = feature_config.features.enabled(feature);
             if feature == Feature::GuardianApproval {
                 let previous_approvals_reviewer = feature_config.approvals_reviewer;
@@ -1062,10 +1224,8 @@ impl App {
                     if previous_approvals_reviewer != guardian_approvals_preset.approvals_reviewer {
                         permissions_history_label = Some("Guardian Approvals");
                     }
-                } else {
-                    if profile_approvals_reviewer_configured
-                        || matches!(scope, SettingsScope::Global)
-                    {
+                } else if !effective_enabled {
+                    if profile_approvals_reviewer_configured || self.active_profile.is_none() {
                         feature_edits.push(ConfigEdit::ClearPath {
                             segments: scoped_segments("approvals_reviewer"),
                         });
@@ -1077,7 +1237,6 @@ impl App {
                 }
                 approvals_reviewer_override = Some(feature_config.approvals_reviewer);
             }
-
             if feature == Feature::GuardianApproval && effective_enabled {
                 // The feature flag alone is not enough for the live session.
                 // We also align approval policy + sandbox to the Guardian
@@ -1112,7 +1271,6 @@ impl App {
                 approval_policy_override = Some(guardian_approvals_preset.approval_policy);
                 sandbox_policy_override = Some(guardian_approvals_preset.sandbox_policy.clone());
             }
-
             next_config = feature_config;
             feature_updates_to_apply.push((feature, effective_enabled));
             builder = builder
@@ -1120,34 +1278,17 @@ impl App {
                 .set_feature_enabled(feature_key, effective_enabled);
         }
 
+        // Persist first so the live session does not diverge from disk if the
+        // config edit fails. Runtime/UI state is patched below only after the
+        // durable config update succeeds.
         if let Err(err) = builder.apply().await {
             tracing::error!(error = %err, "failed to persist feature flags");
             self.chat_widget
-                .add_error_message(format!("Failed to update feature flags: {err}"));
+                .add_error_message(format!("Failed to update experimental features: {err}"));
             return;
         }
 
-        let current_cwd = self.config.cwd.clone();
-        match self.rebuild_config_for_cwd(current_cwd).await {
-            Ok(mut refreshed_config) => {
-                self.apply_runtime_policy_overrides(&mut refreshed_config);
-                next_config.config_layer_stack = refreshed_config.config_layer_stack;
-                next_config.active_profile = refreshed_config.active_profile;
-            }
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "persisted feature flags but failed to refresh config metadata from disk"
-                );
-                self.chat_widget.add_error_message(format!(
-                    "Updated feature flags, but failed to refresh config metadata: {err}"
-                ));
-            }
-        }
-
         self.config = next_config;
-        self.active_profile = self.config.active_profile.clone();
-        self.chat_widget.set_config(self.config.clone());
         for (feature, effective_enabled) in feature_updates_to_apply {
             self.chat_widget
                 .set_feature_enabled(feature, effective_enabled);
@@ -1176,16 +1317,52 @@ impl App {
             || approvals_reviewer_override.is_some()
             || sandbox_policy_override.is_some()
         {
-            self.apply_turn_context_override(
-                approval_policy_override,
-                approvals_reviewer_override,
-                sandbox_policy_override,
-            )
-            .await;
+            // This uses `OverrideTurnContext` intentionally: toggling the
+            // experiment should update the active thread's effective approval
+            // settings immediately, just like a `/approvals` selection. Without
+            // this runtime patch, the config edit would only affect future
+            // sessions or turns recreated from disk.
+            let op = Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: approval_policy_override,
+                approvals_reviewer: approvals_reviewer_override,
+                sandbox_policy: sandbox_policy_override,
+                windows_sandbox_level: None,
+                model: None,
+                effort: None,
+                summary: None,
+                service_tier: None,
+                collaboration_mode: None,
+                personality: None,
+            };
+            let replay_state_op =
+                ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
+            let submitted = self.chat_widget.submit_op(op);
+            if submitted && let Some(op) = replay_state_op.as_ref() {
+                self.note_active_thread_outbound_op(op).await;
+                self.refresh_pending_thread_approvals().await;
+            }
         }
 
         if windows_sandbox_changed {
-            self.sync_windows_sandbox_context();
+            #[cfg(target_os = "windows")]
+            {
+                let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
+                self.app_event_tx
+                    .send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                        cwd: None,
+                        approval_policy: None,
+                        approvals_reviewer: None,
+                        sandbox_policy: None,
+                        windows_sandbox_level: Some(windows_sandbox_level),
+                        model: None,
+                        effort: None,
+                        summary: None,
+                        service_tier: None,
+                        collaboration_mode: None,
+                        personality: None,
+                    }));
+            }
         }
 
         if let Some(label) = permissions_history_label {
@@ -1193,160 +1370,6 @@ impl App {
                 format!("Permissions updated to {label}"),
                 /*hint*/ None,
             );
-        }
-    }
-
-    async fn clear_feature_override_in_scope(
-        &mut self,
-        feature: Feature,
-        scope: SettingsScope,
-    ) -> Result<()> {
-        let scope = scope.normalized(self.active_profile.as_deref());
-        let scoped_profile = match scope {
-            SettingsScope::Global => None,
-            SettingsScope::ActiveProfile => Some(
-                self.active_profile
-                    .clone()
-                    .ok_or_else(|| color_eyre::eyre::eyre!("No active profile is available"))?,
-            ),
-        };
-        let previous_enabled = self.config.features.enabled(feature);
-        let previous_reviewer = self.config.approvals_reviewer;
-        let mut builder = ConfigEditsBuilder::new(&self.config.codex_home)
-            .with_profile(scoped_profile.as_deref())
-            .clear_feature_override(feature.key());
-        if feature == Feature::GuardianApproval {
-            let mut segments = Vec::new();
-            if let Some(profile) = scoped_profile.as_deref() {
-                segments.extend(["profiles".to_string(), profile.to_string()]);
-            }
-            segments.push("approvals_reviewer".to_string());
-            builder = builder.with_edits([ConfigEdit::ClearPath { segments }]);
-        }
-
-        builder
-            .apply()
-            .await
-            .map_err(|err| color_eyre::eyre::eyre!("{err}"))?;
-        self.refresh_in_memory_config_from_disk().await?;
-        self.chat_widget.set_config(self.config.clone());
-        self.refresh_status_line();
-        self.sync_feature_runtime_after_reload(feature, previous_enabled, previous_reviewer)
-            .await;
-        Ok(())
-    }
-
-    async fn sync_feature_runtime_after_reload(
-        &mut self,
-        feature: Feature,
-        previous_enabled: bool,
-        previous_reviewer: ApprovalsReviewer,
-    ) {
-        let effective_enabled = self.config.features.enabled(feature);
-        self.chat_widget
-            .set_feature_enabled(feature, effective_enabled);
-
-        if feature == Feature::GuardianApproval {
-            self.set_approvals_reviewer_in_app_and_widget(self.config.approvals_reviewer);
-            let mut sandbox_policy_override = None;
-            if effective_enabled {
-                self.chat_widget
-                    .set_approval_policy(self.config.permissions.approval_policy.value());
-                let sandbox_policy = self.config.permissions.sandbox_policy.get().clone();
-                if let Err(err) = self.chat_widget.set_sandbox_policy(sandbox_policy.clone()) {
-                    tracing::error!(
-                        error = %err,
-                        "failed to sync guardian approvals sandbox policy after clearing feature override"
-                    );
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to apply Guardian Approvals after clearing override: {err}"
-                    ));
-                } else {
-                    sandbox_policy_override = Some(sandbox_policy);
-                }
-            }
-
-            if previous_enabled != effective_enabled
-                || previous_reviewer != self.config.approvals_reviewer
-            {
-                self.apply_turn_context_override(
-                    effective_enabled.then_some(self.config.permissions.approval_policy.value()),
-                    Some(self.config.approvals_reviewer),
-                    sandbox_policy_override,
-                )
-                .await;
-            }
-
-            let permissions_history_label = if effective_enabled {
-                (previous_reviewer != self.config.approvals_reviewer || !previous_enabled)
-                    .then_some("Guardian Approvals")
-            } else if previous_reviewer != self.config.approvals_reviewer {
-                Some("Default")
-            } else {
-                None
-            };
-            if let Some(label) = permissions_history_label {
-                self.chat_widget.add_info_message(
-                    format!("Permissions updated to {label}"),
-                    /*hint*/ None,
-                );
-            }
-        }
-
-        if matches!(
-            feature,
-            Feature::WindowsSandbox | Feature::WindowsSandboxElevated
-        ) {
-            self.sync_windows_sandbox_context();
-        }
-    }
-
-    async fn apply_turn_context_override(
-        &mut self,
-        approval_policy: Option<AskForApproval>,
-        approvals_reviewer: Option<ApprovalsReviewer>,
-        sandbox_policy: Option<SandboxPolicy>,
-    ) {
-        let op = Op::OverrideTurnContext {
-            cwd: None,
-            approval_policy,
-            approvals_reviewer,
-            sandbox_policy,
-            windows_sandbox_level: None,
-            model: None,
-            effort: None,
-            summary: None,
-            service_tier: None,
-            collaboration_mode: None,
-            personality: None,
-        };
-        let replay_state_op =
-            ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
-        let submitted = self.chat_widget.submit_op(op);
-        if submitted && let Some(op) = replay_state_op.as_ref() {
-            self.note_active_thread_outbound_op(op).await;
-            self.refresh_pending_thread_approvals().await;
-        }
-    }
-
-    fn sync_windows_sandbox_context(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
-            self.app_event_tx
-                .send(AppEvent::CodexOp(Op::OverrideTurnContext {
-                    cwd: None,
-                    approval_policy: None,
-                    approvals_reviewer: None,
-                    sandbox_policy: None,
-                    windows_sandbox_level: Some(windows_sandbox_level),
-                    model: None,
-                    effort: None,
-                    summary: None,
-                    service_tier: None,
-                    collaboration_mode: None,
-                    personality: None,
-                }));
         }
     }
 
@@ -1361,6 +1384,141 @@ impl App {
             .add_info_message(format!("Opened {url} in your browser."), /*hint*/ None);
     }
 
+    fn fetch_plugins_list(&mut self, cwd: PathBuf) {
+        let config = self.config.clone();
+        let arg0_paths = self.arg0_paths.clone();
+        let cli_kv_overrides = self.cli_kv_overrides.clone();
+        let loader_overrides = self.loader_overrides.clone();
+        let cloud_requirements = self.cloud_requirements.clone();
+        let feedback = self.feedback.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let cwd_for_event = cwd.clone();
+            let result = request_plugins_list(
+                arg0_paths,
+                config,
+                cli_kv_overrides,
+                loader_overrides,
+                cloud_requirements,
+                feedback,
+                cwd,
+            )
+            .await
+            .map_err(|err| format!("Failed to load plugins: {err}"));
+            app_event_tx.send(AppEvent::PluginsLoaded {
+                cwd: cwd_for_event,
+                result,
+            });
+        });
+    }
+
+    fn fetch_plugin_detail(&mut self, cwd: PathBuf, params: PluginReadParams) {
+        let config = self.config.clone();
+        let arg0_paths = self.arg0_paths.clone();
+        let cli_kv_overrides = self.cli_kv_overrides.clone();
+        let loader_overrides = self.loader_overrides.clone();
+        let cloud_requirements = self.cloud_requirements.clone();
+        let feedback = self.feedback.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let cwd_for_event = cwd.clone();
+            let result = request_plugin_detail(
+                arg0_paths,
+                config,
+                cli_kv_overrides,
+                loader_overrides,
+                cloud_requirements,
+                feedback,
+                params,
+            )
+            .await
+            .map_err(|err| format!("Failed to load plugin details: {err}"));
+            app_event_tx.send(AppEvent::PluginDetailLoaded {
+                cwd: cwd_for_event,
+                result,
+            });
+        });
+    }
+
+    fn fetch_plugin_install(
+        &mut self,
+        cwd: PathBuf,
+        marketplace_path: AbsolutePathBuf,
+        plugin_name: String,
+        plugin_display_name: String,
+    ) {
+        let config = self.config.clone();
+        let arg0_paths = self.arg0_paths.clone();
+        let cli_kv_overrides = self.cli_kv_overrides.clone();
+        let loader_overrides = self.loader_overrides.clone();
+        let cloud_requirements = self.cloud_requirements.clone();
+        let feedback = self.feedback.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let cwd_for_event = cwd.clone();
+            let marketplace_path_for_event = marketplace_path.clone();
+            let plugin_name_for_event = plugin_name.clone();
+            let result = request_plugin_install(
+                arg0_paths,
+                config,
+                cli_kv_overrides,
+                loader_overrides,
+                cloud_requirements,
+                feedback,
+                PluginInstallParams {
+                    marketplace_path,
+                    plugin_name,
+                    force_remote_sync: false,
+                },
+            )
+            .await
+            .map_err(|err| format!("Failed to install plugin: {err}"));
+            app_event_tx.send(AppEvent::PluginInstallLoaded {
+                cwd: cwd_for_event,
+                marketplace_path: marketplace_path_for_event,
+                plugin_name: plugin_name_for_event,
+                plugin_display_name,
+                result,
+            });
+        });
+    }
+
+    fn fetch_plugin_uninstall(
+        &mut self,
+        cwd: PathBuf,
+        plugin_id: String,
+        plugin_display_name: String,
+    ) {
+        let config = self.config.clone();
+        let arg0_paths = self.arg0_paths.clone();
+        let cli_kv_overrides = self.cli_kv_overrides.clone();
+        let loader_overrides = self.loader_overrides.clone();
+        let cloud_requirements = self.cloud_requirements.clone();
+        let feedback = self.feedback.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let cwd_for_event = cwd.clone();
+            let plugin_id_for_event = plugin_id.clone();
+            let result = request_plugin_uninstall(
+                arg0_paths,
+                config,
+                cli_kv_overrides,
+                loader_overrides,
+                cloud_requirements,
+                feedback,
+                plugin_id,
+            )
+            .await
+            .map_err(|err| format!("Failed to uninstall plugin: {err}"));
+            app_event_tx.send(AppEvent::PluginUninstallLoaded {
+                cwd: cwd_for_event,
+                plugin_id: plugin_id_for_event,
+                plugin_display_name,
+                result,
+            });
+        });
+    }
+
     fn clear_ui_header_lines_with_version(
         &self,
         width: u16,
@@ -1373,7 +1531,7 @@ impl App {
                 self.chat_widget.current_model(),
                 self.chat_widget.current_service_tier(),
             ),
-            self.config.cwd.clone(),
+            self.config.cwd.to_path_buf(),
             version,
         )
         .display_lines(width)
@@ -1626,7 +1784,7 @@ impl App {
                     cwd: self
                         .thread_cwd(thread_id)
                         .await
-                        .unwrap_or_else(|| self.config.cwd.clone()),
+                        .unwrap_or_else(|| self.config.cwd.to_path_buf()),
                     changes: ev.changes.clone(),
                 },
             )),
@@ -1964,8 +2122,7 @@ impl App {
             let (tx, _rx) = unbounded_channel();
             tx
         };
-        self.chat_widget = ChatWidget::new_with_op_sender(init, codex_op_tx);
-        self.sync_active_agent_label();
+        self.replace_chat_widget(ChatWidget::new_with_op_sender(init, codex_op_tx));
 
         self.reset_for_thread_switch(tui)?;
         self.replay_thread_snapshot(snapshot, !is_replay_only);
@@ -2003,6 +2160,16 @@ impl App {
         self.pending_primary_events.clear();
         self.chat_widget.set_pending_thread_approvals(Vec::new());
         self.sync_active_agent_label();
+    }
+
+    fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        let previous_terminal_title = self.chat_widget.last_terminal_title.take();
+        if chat_widget.last_terminal_title.is_none() {
+            chat_widget.last_terminal_title = previous_terminal_title;
+        }
+        self.chat_widget = chat_widget;
+        self.sync_active_agent_label();
+        self.refresh_status_surfaces();
     }
 
     async fn start_fresh_session_with_summary_hint(&mut self, tui: &mut tui::Tui) {
@@ -2045,8 +2212,9 @@ impl App {
             startup_tooltip_override: None,
             status_line_invalid_items_warned: self.status_line_invalid_items_warned.clone(),
             session_telemetry: self.session_telemetry.clone(),
+            terminal_title_invalid_items_warned: self.terminal_title_invalid_items_warned.clone(),
         };
-        self.chat_widget = ChatWidget::new(init, self.server.clone());
+        self.replace_chat_widget(ChatWidget::new(init, self.server.clone()));
         self.reset_thread_event_state();
         if let Some(summary) = summary {
             let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
@@ -2137,7 +2305,7 @@ impl App {
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();
         }
-        self.refresh_status_line();
+        self.refresh_status_surfaces();
     }
 
     fn should_wait_for_initial_session(session_selection: &SessionSelection) -> bool {
@@ -2164,9 +2332,12 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         tui: &mut tui::Tui,
-        mut app_server: InProcessAppServerClient,
+        auth_manager: Arc<AuthManager>,
         mut config: Config,
         cli_kv_overrides: Vec<(String, TomlValue)>,
+        arg0_paths: Arg0DispatchPaths,
+        loader_overrides: LoaderOverrides,
+        cloud_requirements: CloudRequirementsLoader,
         harness_overrides: ConfigOverrides,
         active_profile: Option<String>,
         initial_prompt: Option<String>,
@@ -2180,12 +2351,24 @@ impl App {
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         emit_project_config_warnings(&app_event_tx, &config);
+        emit_system_bwrap_warning(&app_event_tx);
+        emit_custom_prompt_deprecation_notice(&app_event_tx, &config.codex_home).await;
         tui.set_notification_method(config.tui_notification_method);
 
         let harness_overrides =
             normalize_harness_overrides_for_cwd(harness_overrides, &config.cwd)?;
-        let auth_manager = app_server.auth_manager();
-        let thread_manager = app_server.thread_manager();
+        let environment_manager = Arc::new(EnvironmentManager::from_env());
+        let thread_manager = Arc::new(ThreadManager::new(
+            &config,
+            auth_manager.clone(),
+            SessionSource::Cli,
+            CollaborationModesConfig {
+                default_mode_request_user_input: config
+                    .features
+                    .enabled(Feature::DefaultModeRequestUserInput),
+            },
+            environment_manager,
+        ));
         let mut model = thread_manager
             .get_models_manager()
             .get_default_model(&config.model, RefreshStrategy::Offline)
@@ -2203,13 +2386,6 @@ impl App {
         )
         .await;
         if let Some(exit_info) = exit_info {
-            app_server
-                .shutdown()
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!("app-server shutdown failed: {err}");
-                })
-                .ok();
             return Ok(exit_info);
         }
         if let Some(updated_model) = config.model.clone() {
@@ -2240,7 +2416,7 @@ impl App {
             auth_mode,
             codex_core::default_client::originator().value,
             config.otel.log_user_prompt,
-            codex_core::terminal::user_agent(),
+            user_agent(),
             SessionSource::Cli,
         );
         if config
@@ -2252,6 +2428,7 @@ impl App {
         }
 
         let status_line_invalid_items_warned = Arc::new(AtomicBool::new(false));
+        let terminal_title_invalid_items_warned = Arc::new(AtomicBool::new(false));
 
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let wait_for_initial_session_configured =
@@ -2281,6 +2458,8 @@ impl App {
                     startup_tooltip_override,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     session_telemetry: session_telemetry.clone(),
+                    terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
+                        .clone(),
                 };
                 ChatWidget::new(init, thread_manager.clone())
             }
@@ -2317,6 +2496,8 @@ impl App {
                     startup_tooltip_override: None,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     session_telemetry: session_telemetry.clone(),
+                    terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
+                        .clone(),
                 };
                 ChatWidget::new_from_existing(init, resumed.thread, resumed.session_configured)
             }
@@ -2328,7 +2509,7 @@ impl App {
                 );
                 let forked = thread_manager
                     .fork_thread(
-                        usize::MAX,
+                        ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
                         config.clone(),
                         target_session.path.clone(),
                         /*persist_extended_history*/ false,
@@ -2359,6 +2540,8 @@ impl App {
                     startup_tooltip_override: None,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     session_telemetry: session_telemetry.clone(),
+                    terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
+                        .clone(),
                 };
                 ChatWidget::new_from_existing(init, forked.thread, forked.session_configured)
             }
@@ -2367,7 +2550,7 @@ impl App {
         chat_widget
             .maybe_prompt_windows_sandbox_enable(should_prompt_windows_sandbox_nux_at_startup);
 
-        let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
+        let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
@@ -2380,6 +2563,9 @@ impl App {
             config,
             active_profile,
             cli_kv_overrides,
+            arg0_paths,
+            loader_overrides,
+            cloud_requirements,
             harness_overrides,
             runtime_approval_policy_override: None,
             runtime_sandbox_policy_override: None,
@@ -2391,6 +2577,7 @@ impl App {
             has_emitted_history_lines: false,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
+            terminal_title_invalid_items_warned: terminal_title_invalid_items_warned.clone(),
             backtrack: BacktrackState::default(),
             backtrack_render_pending: false,
             feedback: feedback.clone(),
@@ -2430,7 +2617,13 @@ impl App {
                 let tx = app.app_event_tx.clone();
                 let logs_base_dir = app.config.codex_home.clone();
                 let sandbox_policy = app.config.permissions.sandbox_policy.get().clone();
-                Self::spawn_world_writable_scan(cwd, env_map, logs_base_dir, sandbox_policy, tx);
+                Self::spawn_world_writable_scan(
+                    cwd.to_path_buf(),
+                    env_map,
+                    logs_base_dir,
+                    sandbox_policy,
+                    tx,
+                );
             }
         }
 
@@ -2441,7 +2634,6 @@ impl App {
 
         let mut thread_created_rx = thread_manager.subscribe_thread_created();
         let mut listen_for_threads = true;
-        let mut listen_for_app_server_events = true;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
 
         #[cfg(not(debug_assertions))]
@@ -2501,16 +2693,6 @@ impl App {
                             Err(err) => break Err(err),
                         }
                     }
-                    app_server_event = app_server.next_event(), if listen_for_app_server_events => {
-                        match app_server_event {
-                            Some(event) => app.handle_app_server_event(&app_server, event).await,
-                            None => {
-                                listen_for_app_server_events = false;
-                                tracing::warn!("app-server event stream closed");
-                            }
-                        }
-                        AppRunControl::Continue
-                    }
                     // Listen on new thread creation due to collab tools.
                     created = thread_created_rx.recv(), if listen_for_threads => {
                         match created {
@@ -2541,9 +2723,6 @@ impl App {
                 }
             }
         };
-        if let Err(err) = app_server.shutdown().await {
-            tracing::warn!(error = %err, "failed to shut down embedded app server");
-        }
         let clear_result = tui.terminal.clear();
         let exit_reason = match exit_reason_result {
             Ok(exit_reason) => {
@@ -2574,7 +2753,7 @@ impl App {
         if matches!(event, TuiEvent::Draw) {
             let size = tui.terminal.size()?;
             if size != tui.terminal.last_known_screen_size {
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
         }
 
@@ -2643,11 +2822,12 @@ impl App {
                     tui,
                     &self.config,
                     /*show_all*/ false,
+                    crate::resume_picker::SessionSourceFilter::InteractiveOnly,
                 )
                 .await?
                 {
                     SessionSelection::Resume(target_session) => {
-                        let current_cwd = self.config.cwd.clone();
+                        let current_cwd = self.config.cwd.to_path_buf();
                         let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
                             tui,
                             &self.config,
@@ -2697,16 +2877,17 @@ impl App {
                                 self.shutdown_current_thread().await;
                                 self.config = resume_config;
                                 tui.set_notification_method(self.config.tui_notification_method);
-                                self.file_search.update_search_dir(self.config.cwd.clone());
+                                self.file_search
+                                    .update_search_dir(self.config.cwd.to_path_buf());
                                 let init = self.chatwidget_init_for_forked_or_resumed_thread(
                                     tui,
                                     self.config.clone(),
                                 );
-                                self.chat_widget = ChatWidget::new_from_existing(
+                                self.replace_chat_widget(ChatWidget::new_from_existing(
                                     init,
                                     resumed.thread,
                                     resumed.session_configured,
-                                );
+                                ));
                                 self.reset_thread_event_state();
                                 if let Some(summary) = summary {
                                     let mut lines: Vec<Line<'static>> =
@@ -2759,7 +2940,7 @@ impl App {
                         match self
                             .server
                             .fork_thread(
-                                usize::MAX,
+                                ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
                                 self.config.clone(),
                                 path.clone(),
                                 /*persist_extended_history*/ false,
@@ -2773,11 +2954,11 @@ impl App {
                                     tui,
                                     self.config.clone(),
                                 );
-                                self.chat_widget = ChatWidget::new_from_existing(
+                                self.replace_chat_widget(ChatWidget::new_from_existing(
                                     init,
                                     forked.thread,
                                     forked.session_configured,
-                                );
+                                ));
                                 self.reset_thread_event_state();
                                 if let Some(summary) = summary {
                                     let mut lines: Vec<Line<'static>> =
@@ -2936,6 +3117,36 @@ impl App {
             AppEvent::RefreshConnectors { force_refetch } => {
                 self.chat_widget.refresh_connectors(force_refetch);
             }
+            AppEvent::PluginInstallAuthAdvance { refresh_connectors } => {
+                if refresh_connectors {
+                    self.chat_widget.refresh_connectors(/*force_refetch*/ true);
+                }
+                self.chat_widget.advance_plugin_install_auth_flow();
+            }
+            AppEvent::PluginInstallAuthAbandon => {
+                self.chat_widget.abandon_plugin_install_auth_flow();
+            }
+            AppEvent::FetchPluginsList { cwd } => {
+                self.fetch_plugins_list(cwd);
+            }
+            AppEvent::OpenPluginDetailLoading {
+                plugin_display_name,
+            } => {
+                self.chat_widget
+                    .open_plugin_detail_loading_popup(&plugin_display_name);
+            }
+            AppEvent::OpenPluginInstallLoading {
+                plugin_display_name,
+            } => {
+                self.chat_widget
+                    .open_plugin_install_loading_popup(&plugin_display_name);
+            }
+            AppEvent::OpenPluginUninstallLoading {
+                plugin_display_name,
+            } => {
+                self.chat_widget
+                    .open_plugin_uninstall_loading_popup(&plugin_display_name);
+            }
             AppEvent::StartFileSearch(query) => {
                 self.file_search.on_user_query(query);
             }
@@ -2945,138 +3156,86 @@ impl App {
             AppEvent::RateLimitSnapshotFetched(snapshot) => {
                 self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
             }
-            AppEvent::ProviderUsageSnapshotFetched(snapshot) => {
-                self.chat_widget.on_provider_usage_snapshot(snapshot);
-            }
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }
+            AppEvent::PluginsLoaded { cwd, result } => {
+                self.chat_widget.on_plugins_loaded(cwd, result);
+            }
+            AppEvent::FetchPluginDetail { cwd, params } => {
+                self.fetch_plugin_detail(cwd, params);
+            }
+            AppEvent::PluginDetailLoaded { cwd, result } => {
+                self.chat_widget.on_plugin_detail_loaded(cwd, result);
+            }
+            AppEvent::FetchPluginInstall {
+                cwd,
+                marketplace_path,
+                plugin_name,
+                plugin_display_name,
+            } => {
+                self.fetch_plugin_install(cwd, marketplace_path, plugin_name, plugin_display_name);
+            }
+            AppEvent::FetchPluginUninstall {
+                cwd,
+                plugin_id,
+                plugin_display_name,
+            } => {
+                self.fetch_plugin_uninstall(cwd, plugin_id, plugin_display_name);
+            }
+            AppEvent::PluginInstallLoaded {
+                cwd,
+                marketplace_path,
+                plugin_name,
+                plugin_display_name,
+                result,
+            } => {
+                let install_succeeded = result.is_ok();
+                if install_succeeded {
+                    if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+                        tracing::warn!(error = %err, "failed to refresh config after plugin install");
+                    }
+                    self.chat_widget.refresh_plugin_mentions();
+                    self.chat_widget.submit_op(Op::ReloadUserConfig);
+                }
+                let should_refresh_plugin_detail = self.chat_widget.on_plugin_install_loaded(
+                    cwd.clone(),
+                    marketplace_path.clone(),
+                    plugin_name.clone(),
+                    plugin_display_name,
+                    result,
+                );
+                if install_succeeded && self.chat_widget.config_ref().cwd.as_path() == cwd.as_path()
+                {
+                    self.fetch_plugins_list(cwd.clone());
+                    if should_refresh_plugin_detail {
+                        self.fetch_plugin_detail(
+                            cwd,
+                            PluginReadParams {
+                                marketplace_path,
+                                plugin_name,
+                            },
+                        );
+                    }
+                }
+            }
             AppEvent::UpdateReasoningEffort(effort) => {
                 self.on_update_reasoning_effort(effort);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::UpdateModel(model) => {
                 self.chat_widget.set_model(&model);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::UpdateCollaborationMode(mask) => {
                 self.chat_widget.set_collaboration_mask(mask);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::UpdatePersonality(personality) => {
                 self.on_update_personality(personality);
             }
-            AppEvent::OpenSettings {
-                scope,
-                screen,
-                selected_item_key,
-            } => {
-                self.chat_widget
-                    .open_settings(scope, screen, selected_item_key);
-            }
-            AppEvent::OpenSettingsScopePicker {
-                current_scope,
-                current_screen,
-            } => {
-                self.chat_widget
-                    .open_settings_scope_picker(current_scope, current_screen);
-            }
-            AppEvent::OpenSettingEditor {
-                key_path,
-                scope,
-                screen,
-            } => {
-                self.chat_widget
-                    .open_setting_editor(key_path, scope, screen);
-            }
-            AppEvent::SaveSettingValue {
-                key_path,
-                scope,
-                screen,
-                value,
-            } => {
-                if let Some(feature) = feature_for_settings_key_path(&key_path) {
-                    let result = match value {
-                        Some(TomlValue::Boolean(enabled)) => {
-                            self.update_feature_flags_in_scope(vec![(feature, enabled)], scope)
-                                .await;
-                            Ok(())
-                        }
-                        Some(_) => Err(color_eyre::eyre::eyre!(
-                            "Feature flags only accept `true` or `false`"
-                        )),
-                        None => self.clear_feature_override_in_scope(feature, scope).await,
-                    };
-                    match result {
-                        Ok(()) => {
-                            self.chat_widget.open_settings(
-                                scope.normalized(self.active_profile.as_deref()),
-                                screen,
-                                Some(key_path),
-                            );
-                        }
-                        Err(err) => {
-                            tracing::error!(error = %err, "failed to persist feature settings edit");
-                            self.chat_widget
-                                .add_error_message(format!("Failed to save `{key_path}`: {err}"));
-                        }
-                    }
-                    return Ok(AppRunControl::Continue);
-                }
-
-                let segments = match self.settings_segments(&key_path, scope) {
-                    Ok(segments) => segments,
-                    Err(err) => {
-                        self.chat_widget
-                            .add_error_message(format!("Failed to resolve `{key_path}`: {err}"));
-                        return Ok(AppRunControl::Continue);
-                    }
-                };
-                let edit = match value {
-                    Some(value) => match toml_value_to_item(&value) {
-                        Ok(item) => ConfigEdit::SetPath {
-                            segments,
-                            value: item,
-                        },
-                        Err(err) => {
-                            self.chat_widget
-                                .add_error_message(format!("Failed to encode `{key_path}`: {err}"));
-                            return Ok(AppRunControl::Continue);
-                        }
-                    },
-                    None => ConfigEdit::ClearPath { segments },
-                };
-
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_edits([edit])
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
-                            tracing::error!(
-                                error = %err,
-                                "saved setting but failed to refresh config from disk"
-                            );
-                            self.chat_widget.add_error_message(format!(
-                                "Saved `{key_path}`, but failed to refresh config: {err}"
-                            ));
-                            return Ok(AppRunControl::Continue);
-                        }
-                        self.chat_widget.set_config(self.config.clone());
-                        self.refresh_status_line();
-                        self.chat_widget.open_settings(
-                            scope.normalized(self.active_profile.as_deref()),
-                            screen,
-                            Some(key_path),
-                        );
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist settings edit");
-                        self.chat_widget
-                            .add_error_message(format!("Failed to save `{key_path}`: {err}"));
-                    }
-                }
+            AppEvent::OpenRealtimeAudioDeviceSelection { kind } => {
+                self.chat_widget.open_realtime_audio_device_selection(kind);
             }
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
@@ -3087,9 +3246,6 @@ impl App {
             }
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
-            }
-            AppEvent::OpenProviderUsageScriptEditor { id } => {
-                self.chat_widget.open_provider_usage_script_editor(id);
             }
             AppEvent::OpenFullAccessConfirmation {
                 preset,
@@ -3182,7 +3338,7 @@ impl App {
                             Ok(()) => {
                                 session_telemetry.counter(
                                     "codex.windows_sandbox.elevated_setup_success",
-                                    1,
+                                    /*inc*/ 1,
                                     &[],
                                 );
                                 AppEvent::EnableWindowsSandboxForAgentMode {
@@ -3212,7 +3368,7 @@ impl App {
                                     codex_core::windows_sandbox::elevated_setup_failure_metric_name(
                                         &err,
                                     ),
-                                    1,
+                                    /*inc*/ 1,
                                     &tags,
                                 );
                                 tracing::error!(
@@ -3253,7 +3409,7 @@ impl App {
                         ) {
                             session_telemetry.counter(
                                 "codex.windows_sandbox.legacy_setup_preflight_failed",
-                                1,
+                                /*inc*/ 1,
                                 &[],
                             );
                             tracing::warn!(
@@ -3278,7 +3434,7 @@ impl App {
                     self.chat_widget
                         .add_to_history(history_cell::new_info_event(
                             format!("Granting sandbox read access to {path} ..."),
-                            None,
+                            /*hint*/ None,
                         ));
 
                     let policy = self.config.permissions.sandbox_policy.get().clone();
@@ -3353,11 +3509,13 @@ impl App {
                     match builder.apply().await {
                         Ok(()) => {
                             if elevated_enabled {
-                                self.config.set_windows_sandbox_enabled(false);
-                                self.config.set_windows_elevated_sandbox_enabled(true);
+                                self.config.set_windows_sandbox_enabled(/*value*/ false);
+                                self.config
+                                    .set_windows_elevated_sandbox_enabled(/*value*/ true);
                             } else {
-                                self.config.set_windows_sandbox_enabled(true);
-                                self.config.set_windows_elevated_sandbox_enabled(false);
+                                self.config.set_windows_sandbox_enabled(/*value*/ true);
+                                self.config
+                                    .set_windows_elevated_sandbox_enabled(/*value*/ false);
                             }
                             self.chat_widget.set_windows_sandbox_mode(
                                 self.config.permissions.windows_sandbox_mode,
@@ -3437,208 +3595,6 @@ impl App {
                     let _ = (preset, mode);
                 }
             }
-            AppEvent::PersistModelProvider {
-                original_id,
-                id,
-                provider,
-                api_key_input,
-            } => {
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .set_model_provider(&id, &provider)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        let credential_result = match api_key_input {
-                            ProviderApiKeyInput::KeepExisting => {
-                                if let Some(original_id) = original_id
-                                    .as_deref()
-                                    .filter(|original_id| *original_id != id)
-                                {
-                                    match codex_core::read_provider_api_key(
-                                        &self.config.codex_home,
-                                        original_id,
-                                    ) {
-                                        Ok(Some(existing_key)) => {
-                                            codex_core::store_provider_api_key(
-                                                &self.config.codex_home,
-                                                &id,
-                                                &existing_key,
-                                            )
-                                            .and_then(
-                                                |()| {
-                                                    codex_core::clear_provider_api_key(
-                                                        &self.config.codex_home,
-                                                        original_id,
-                                                    )
-                                                    .map(|_| ())
-                                                },
-                                            )
-                                        }
-                                        Ok(None) => Ok(()),
-                                        Err(err) => Err(err),
-                                    }
-                                } else {
-                                    Ok(())
-                                }
-                            }
-                            ProviderApiKeyInput::Set(api_key) => {
-                                codex_core::activate_provider_api_key(
-                                    &self.config.codex_home,
-                                    &id,
-                                    &provider,
-                                    self.config.mcp_oauth_credentials_store_mode,
-                                    &api_key,
-                                )
-                            }
-                            ProviderApiKeyInput::Clear => codex_core::clear_provider_credentials(
-                                &self.config.codex_home,
-                                &id,
-                                &provider,
-                                self.config.mcp_oauth_credentials_store_mode,
-                            )
-                            .map(|_| ()),
-                        };
-                        if let Err(err) = credential_result {
-                            self.chat_widget.add_error_message(format!(
-                                "Provider saved but failed to store credentials: {err}"
-                            ));
-                        } else if let Err(err) = self.refresh_config_after_provider_change().await {
-                            self.chat_widget.add_error_message(format!(
-                                "Provider saved but failed to reload config: {err}"
-                            ));
-                        } else {
-                            self.chat_widget.add_info_message(
-                                format!("Saved provider {id}"),
-                                Some(
-                                    "Use Enter in /provider to switch the default provider."
-                                        .to_string(),
-                                ),
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist model provider");
-                        self.chat_widget
-                            .add_error_message(format!("Failed to save provider `{id}`: {err}"));
-                    }
-                }
-            }
-            AppEvent::RemoveModelProvider { id } => {
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .remove_model_provider(&id)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
-                            self.chat_widget.add_error_message(format!(
-                                "Provider removed but failed to reload config: {err}"
-                            ));
-                        } else {
-                            self.chat_widget.add_info_message(
-                                format!("Removed provider {id}"),
-                                /*hint*/ None,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to remove model provider");
-                        self.chat_widget
-                            .add_error_message(format!("Failed to remove provider `{id}`: {err}"));
-                    }
-                }
-            }
-            AppEvent::PersistProviderUsageScript {
-                provider_id,
-                script,
-            } => match crate::provider_usage::save_provider_usage_script(
-                &self.config,
-                &provider_id,
-                script,
-            )
-            .await
-            {
-                Ok(path) => {
-                    if let Err(err) = self.refresh_config_after_provider_change().await {
-                        self.chat_widget.add_error_message(format!(
-                            "Usage script saved but failed to reload config: {err}"
-                        ));
-                    } else {
-                        self.chat_widget.add_info_message(
-                            format!(
-                                "Saved usage script for provider {provider_id} to {}",
-                                path.display()
-                            ),
-                            /*hint*/ None,
-                        );
-                    }
-                }
-                Err(err) => {
-                    tracing::error!(error = %err, "failed to persist provider usage script");
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to save usage script for provider `{provider_id}`: {err}"
-                    ));
-                }
-            },
-            AppEvent::DeleteProviderUsageScript { provider_id } => {
-                match crate::provider_usage::delete_provider_usage_script(
-                    &self.config,
-                    &provider_id,
-                )
-                .await
-                {
-                    Ok(path) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
-                            self.chat_widget.add_error_message(format!(
-                                "Usage script deleted but failed to reload config: {err}"
-                            ));
-                        } else {
-                            self.chat_widget.add_info_message(
-                                format!(
-                                    "Removed usage script override for provider {provider_id} from {}",
-                                    path.display()
-                                ),
-                                /*hint*/ None,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to delete provider usage script");
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to delete usage script for provider `{provider_id}`: {err}"
-                        ));
-                    }
-                }
-            }
-            AppEvent::PersistDefaultModelProvider { id } => {
-                let profile = self.active_profile.as_deref();
-                match ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_profile(profile)
-                    .set_default_model_provider(&id)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        if let Err(err) = self.refresh_config_after_provider_change().await {
-                            self.chat_widget.add_error_message(format!(
-                                "Provider switched but failed to reload config: {err}"
-                            ));
-                        } else {
-                            self.chat_widget.add_info_message(
-                                format!("Provider changed to {id}"),
-                                /*hint*/ None,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist default model provider");
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to switch default provider to `{id}`: {err}"
-                        ));
-                    }
-                }
-            }
             AppEvent::PersistModelSelection { model, effort } => {
                 let profile = self.active_profile.as_deref();
                 match ConfigEditsBuilder::new(&self.config.codex_home)
@@ -3680,6 +3636,34 @@ impl App {
                     }
                 }
             }
+            AppEvent::PluginUninstallLoaded {
+                cwd,
+                plugin_id: _plugin_id,
+                plugin_display_name,
+                result,
+            } => {
+                let uninstall_succeeded = result.is_ok();
+                if uninstall_succeeded {
+                    if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+                        tracing::warn!(
+                            error = %err,
+                            "failed to refresh config after plugin uninstall"
+                        );
+                    }
+                    self.chat_widget.refresh_plugin_mentions();
+                    self.chat_widget.submit_op(Op::ReloadUserConfig);
+                }
+                self.chat_widget.on_plugin_uninstall_loaded(
+                    cwd.clone(),
+                    plugin_display_name,
+                    result,
+                );
+                if uninstall_succeeded
+                    && self.chat_widget.config_ref().cwd.as_path() == cwd.as_path()
+                {
+                    self.fetch_plugins_list(cwd);
+                }
+            }
             AppEvent::PersistPersonalitySelection { personality } => {
                 let profile = self.active_profile.as_deref();
                 match ConfigEditsBuilder::new(&self.config.codex_home)
@@ -3716,7 +3700,7 @@ impl App {
                 }
             }
             AppEvent::PersistServiceTierSelection { service_tier } => {
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
                 let profile = self.active_profile.as_deref();
                 match ConfigEditsBuilder::new(&self.config.codex_home)
                     .with_profile(profile)
@@ -3863,7 +3847,7 @@ impl App {
                         let logs_base_dir = self.config.codex_home.clone();
                         let sandbox_policy = self.config.permissions.sandbox_policy.get().clone();
                         Self::spawn_world_writable_scan(
-                            cwd,
+                            cwd.to_path_buf(),
                             env_map,
                             logs_base_dir,
                             sandbox_policy,
@@ -3921,7 +3905,7 @@ impl App {
             AppEvent::UpdatePlanModeReasoningEffort(effort) => {
                 self.config.plan_mode_reasoning_effort = effort;
                 self.chat_widget.set_plan_mode_reasoning_effort(effort);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::PersistFullAccessWarningAcknowledged => {
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
@@ -4210,7 +4194,11 @@ impl App {
             AppEvent::UpdateRecordingMeter { id, text } => {
                 // Update in place to preserve the element id for subsequent frames.
                 let updated = self.chat_widget.update_transcription_in_place(&id, &text);
-                if updated {
+                if updated
+                    || self
+                        .chat_widget
+                        .stop_realtime_conversation_for_deleted_meter(&id)
+                {
                     tui.frame_requester().schedule_frame();
                 }
             }
@@ -4235,10 +4223,37 @@ impl App {
             }
             AppEvent::StatusLineBranchUpdated { cwd, branch } => {
                 self.chat_widget.set_status_line_branch(cwd, branch);
-                self.refresh_status_line();
+                self.refresh_status_surfaces();
             }
             AppEvent::StatusLineSetupCancelled => {
                 self.chat_widget.cancel_status_line_setup();
+            }
+            AppEvent::TerminalTitleSetup { items } => {
+                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
+                let edit = codex_core::config::edit::terminal_title_items_edit(&ids);
+                let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
+                    .with_edits([edit])
+                    .apply()
+                    .await;
+                match apply_result {
+                    Ok(()) => {
+                        self.config.tui_terminal_title = Some(ids.clone());
+                        self.chat_widget.setup_terminal_title(items);
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to persist terminal title items; keeping previous selection");
+                        self.chat_widget.revert_terminal_title_setup_preview();
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save terminal title items: {err}"
+                        ));
+                    }
+                }
+            }
+            AppEvent::TerminalTitleSetupPreview { items } => {
+                self.chat_widget.preview_terminal_title(items);
+            }
+            AppEvent::TerminalTitleSetupCancelled => {
+                self.chat_widget.cancel_terminal_title_setup();
             }
             AppEvent::SyntaxThemeSelected { name } => {
                 let edit = codex_core::config::edit::syntax_theme_edit(&name);
@@ -4314,7 +4329,7 @@ impl App {
         self.chat_widget.handle_codex_event(event);
 
         if needs_refresh {
-            self.refresh_status_line();
+            self.refresh_status_surfaces();
         }
     }
 
@@ -4695,8 +4710,8 @@ impl App {
         };
     }
 
-    fn refresh_status_line(&mut self) {
-        self.chat_widget.refresh_status_line();
+    fn refresh_status_surfaces(&mut self) {
+        self.chat_widget.refresh_status_surfaces();
     }
 
     #[cfg(target_os = "windows")]
@@ -4728,12 +4743,21 @@ impl App {
     }
 }
 
+impl Drop for App {
+    fn drop(&mut self) {
+        if let Err(err) = self.chat_widget.clear_managed_terminal_title() {
+            tracing::debug!(error = %err, "failed to clear terminal title on app drop");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_backtrack::BacktrackSelection;
     use crate::app_backtrack::BacktrackState;
     use crate::app_backtrack::user_count;
+    use crate::bottom_pane::TerminalTitleItem;
     use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
     use crate::chatwidget::tests::set_chatgpt_auth;
     use crate::file_search::FileSearchManager;
@@ -4856,6 +4880,62 @@ mod tests {
         );
     }
 
+    fn render_history_cell(cell: &dyn HistoryCell, width: u16) -> String {
+        cell.display_lines(width)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test]
+    async fn startup_custom_prompt_deprecation_notice_emits_when_prompts_exist() -> Result<()> {
+        let codex_home = tempdir()?;
+        let prompts_dir = codex_home.path().join("prompts");
+        std::fs::create_dir_all(&prompts_dir)?;
+        std::fs::write(prompts_dir.join("review.md"), "# Review\n")?;
+
+        let (tx_raw, mut rx) = unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx_raw);
+
+        emit_custom_prompt_deprecation_notice(&app_event_tx, codex_home.path()).await;
+
+        let cell = match rx.try_recv() {
+            Ok(AppEvent::InsertHistoryCell(cell)) => cell,
+            other => panic!("expected InsertHistoryCell event, got {other:?}"),
+        };
+        let rendered = render_history_cell(cell.as_ref(), 120);
+
+        assert_snapshot!("startup_custom_prompt_deprecation_notice", rendered);
+        assert!(rx.try_recv().is_err(), "expected only one startup notice");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_custom_prompt_deprecation_notice_skips_missing_prompts_dir() -> Result<()> {
+        let codex_home = tempdir()?;
+        let (tx_raw, mut rx) = unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx_raw);
+
+        emit_custom_prompt_deprecation_notice(&app_event_tx, codex_home.path()).await;
+
+        assert!(rx.try_recv().is_err(), "expected no startup notice");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_custom_prompt_deprecation_notice_skips_empty_prompts_dir() -> Result<()> {
+        let codex_home = tempdir()?;
+        std::fs::create_dir_all(codex_home.path().join("prompts"))?;
+        let (tx_raw, mut rx) = unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx_raw);
+
+        emit_custom_prompt_deprecation_notice(&app_event_tx, codex_home.path()).await;
+
+        assert!(rx.try_recv().is_err(), "expected no startup notice");
+        Ok(())
+    }
+
     #[test]
     fn startup_waiting_gate_not_applied_for_resume_or_fork_session_selection() {
         let wait_for_resume = App::should_wait_for_initial_session(&SessionSelection::Resume(
@@ -4917,7 +4997,7 @@ mod tests {
                 approval_policy: AskForApproval::Never,
                 approvals_reviewer: ApprovalsReviewer::User,
                 sandbox_policy: SandboxPolicy::new_read_only_policy(),
-                cwd: PathBuf::from("/tmp/project"),
+                cwd: PathBuf::from("/tmp/project").abs().to_path_buf(),
                 reasoning_effort: None,
                 history_log_id: 0,
                 history_entry_count: 0,
@@ -5196,7 +5276,7 @@ mod tests {
         app.chat_widget
             .apply_external_edit("queued follow-up".to_string());
         app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let input_state = app
             .chat_widget
             .capture_thread_input_state()
@@ -5278,7 +5358,7 @@ mod tests {
         app.chat_widget
             .apply_external_edit("queued follow-up".to_string());
         app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let input_state = app
             .chat_widget
             .capture_thread_input_state()
@@ -5359,7 +5439,7 @@ mod tests {
         app.chat_widget
             .apply_external_edit("queued follow-up".to_string());
         app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let input_state = app
             .chat_widget
             .capture_thread_input_state()
@@ -5434,7 +5514,7 @@ mod tests {
         app.chat_widget
             .apply_external_edit("queued follow-up".to_string());
         app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let input_state = app
             .chat_widget
             .capture_thread_input_state()
@@ -5498,6 +5578,38 @@ mod tests {
             ),
             other => panic!("expected queued follow-up submission, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn replace_chat_widget_preserves_terminal_title_cache_for_empty_replacement_title() {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        app.chat_widget.last_terminal_title = Some("my-project | Ready".to_string());
+
+        let (mut replacement, _app_event_tx, _rx, _new_op_rx) =
+            make_chatwidget_manual_with_sender().await;
+        replacement.setup_terminal_title(Vec::new());
+
+        app.replace_chat_widget(replacement);
+
+        assert_eq!(app.chat_widget.last_terminal_title, None);
+    }
+
+    #[tokio::test]
+    async fn replace_chat_widget_keeps_replacement_terminal_title_cache_when_present() {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        app.chat_widget.last_terminal_title = Some("old-project | Ready".to_string());
+
+        let (mut replacement, _app_event_tx, _rx, _new_op_rx) =
+            make_chatwidget_manual_with_sender().await;
+        replacement.setup_terminal_title(vec![TerminalTitleItem::AppName]);
+        replacement.last_terminal_title = Some("codex".to_string());
+
+        app.replace_chat_widget(replacement);
+
+        assert_eq!(
+            app.chat_widget.last_terminal_title,
+            Some("codex".to_string())
+        );
     }
 
     #[tokio::test]
@@ -6025,7 +6137,7 @@ mod tests {
         let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = "approvals_reviewer = \"guardian_subagent\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6117,7 +6229,7 @@ mod tests {
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         let guardian_approvals = guardian_approvals_mode();
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = "approvals_reviewer = \"user\"\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6184,7 +6296,7 @@ mod tests {
         let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = "approvals_reviewer = \"user\"\napproval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6245,7 +6357,7 @@ mod tests {
         app.config.codex_home = codex_home.path().to_path_buf();
         let guardian_approvals = guardian_approvals_mode();
         app.active_profile = Some("guardian".to_string());
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = "profile = \"guardian\"\napprovals_reviewer = \"user\"\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6315,7 +6427,7 @@ mod tests {
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         app.active_profile = Some("guardian".to_string());
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = r#"
 profile = "guardian"
 approvals_reviewer = "user"
@@ -6403,7 +6515,7 @@ guardian_approval = true
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf();
         app.active_profile = Some("guardian".to_string());
-        let config_toml_path = AbsolutePathBuf::try_from(codex_home.path().join("config.toml"))?;
+        let config_toml_path = codex_home.path().join("config.toml").abs();
         let config_toml = "profile = \"guardian\"\napprovals_reviewer = \"guardian_subagent\"\n\n[features]\nguardian_approval = true\n";
         std::fs::write(config_toml_path.as_path(), config_toml)?;
         let user_config = toml::from_str::<TomlValue>(config_toml)?;
@@ -6737,7 +6849,7 @@ guardian_approval = true
 
     async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
         let mut app = make_test_app().await;
-        app.config.cwd = PathBuf::from("/tmp/project");
+        app.config.cwd = PathBuf::from("/tmp/project").abs();
         app.chat_widget.set_model("gpt-test");
         app.chat_widget
             .set_reasoning_effort(Some(ReasoningEffortConfig::High));
@@ -6813,7 +6925,7 @@ guardian_approval = true
             make_header(true),
             Arc::new(crate::history_cell::new_info_event(
                 "startup tip that used to replay".to_string(),
-                None,
+                /*hint*/ None,
             )) as Arc<dyn HistoryCell>,
             user_cell("Tell me a long story about a town with a dark lighthouse."),
             agent_cell(story_part_one),
@@ -6848,21 +6960,33 @@ guardian_approval = true
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "snapshot path rendering differs on Windows"
+    )]
     async fn clear_ui_after_long_transcript_snapshots_fresh_header_only() {
         let rendered = render_clear_ui_header_after_long_transcript_for_snapshot().await;
         assert_snapshot!("clear_ui_after_long_transcript_fresh_header_only", rendered);
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "snapshot path rendering differs on Windows"
+    )]
     async fn ctrl_l_clear_ui_after_long_transcript_reuses_clear_header_snapshot() {
         let rendered = render_clear_ui_header_after_long_transcript_for_snapshot().await;
         assert_snapshot!("clear_ui_after_long_transcript_fresh_header_only", rendered);
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "snapshot path rendering differs on Windows"
+    )]
     async fn clear_ui_header_shows_fast_status_only_for_gpt54() {
         let mut app = make_test_app().await;
-        app.config.cwd = PathBuf::from("/tmp/project");
+        app.config.cwd = PathBuf::from("/tmp/project").abs();
         app.chat_widget.set_model("gpt-5.4");
         app.chat_widget
             .set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
@@ -6897,7 +7021,7 @@ guardian_approval = true
         let auth_manager = codex_core::test_support::auth_manager_from_auth(
             CodexAuth::from_api_key("Test API Key"),
         );
-        let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
+        let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
         let model = codex_core::test_support::get_model_offline(config.model.as_deref());
         let session_telemetry = test_session_telemetry(&config, model.as_str());
 
@@ -6910,6 +7034,9 @@ guardian_approval = true
             config,
             active_profile: None,
             cli_kv_overrides: Vec::new(),
+            arg0_paths: Arg0DispatchPaths::default(),
+            loader_overrides: LoaderOverrides::default(),
+            cloud_requirements: CloudRequirementsLoader::default(),
             harness_overrides: ConfigOverrides::default(),
             runtime_approval_policy_override: None,
             runtime_sandbox_policy_override: None,
@@ -6921,6 +7048,7 @@ guardian_approval = true
             enhanced_keys_supported: false,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
+            terminal_title_invalid_items_warned: Arc::new(AtomicBool::new(false)),
             backtrack: BacktrackState::default(),
             backtrack_render_pending: false,
             feedback: codex_feedback::CodexFeedback::new(),
@@ -6956,7 +7084,7 @@ guardian_approval = true
         let auth_manager = codex_core::test_support::auth_manager_from_auth(
             CodexAuth::from_api_key("Test API Key"),
         );
-        let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
+        let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
         let model = codex_core::test_support::get_model_offline(config.model.as_deref());
         let session_telemetry = test_session_telemetry(&config, model.as_str());
 
@@ -6970,6 +7098,9 @@ guardian_approval = true
                 config,
                 active_profile: None,
                 cli_kv_overrides: Vec::new(),
+                arg0_paths: Arg0DispatchPaths::default(),
+                loader_overrides: LoaderOverrides::default(),
+                cloud_requirements: CloudRequirementsLoader::default(),
                 harness_overrides: ConfigOverrides::default(),
                 runtime_approval_policy_override: None,
                 runtime_sandbox_policy_override: None,
@@ -6981,6 +7112,7 @@ guardian_approval = true
                 enhanced_keys_supported: false,
                 commit_anim_running: Arc::new(AtomicBool::new(false)),
                 status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
+                terminal_title_invalid_items_warned: Arc::new(AtomicBool::new(false)),
                 backtrack: BacktrackState::default(),
                 backtrack_render_pending: false,
                 feedback: codex_feedback::CodexFeedback::new(),
@@ -7407,59 +7539,6 @@ guardian_approval = true
     }
 
     #[tokio::test]
-    async fn refresh_config_after_provider_change_syncs_live_thread_provider() -> Result<()> {
-        let mut app = make_test_app().await;
-        let codex_home = tempdir()?;
-        app.config.codex_home = codex_home.path().to_path_buf();
-        app.chat_widget.set_config(app.config.clone());
-
-        let new_thread = app
-            .server
-            .start_thread(app.config.clone())
-            .await
-            .expect("start live thread");
-        let thread_id = new_thread.thread_id;
-        app.chat_widget.handle_codex_event(Event {
-            id: String::new(),
-            msg: EventMsg::SessionConfigured(new_thread.session_configured),
-        });
-
-        let thread = app
-            .server
-            .get_thread(thread_id)
-            .await
-            .expect("get live thread");
-        assert_eq!(
-            thread.config_snapshot().await.model_provider_id,
-            app.config.model_provider_id
-        );
-
-        let mut custom_provider = app.config.model_provider.clone();
-        custom_provider.name = "Custom Provider".to_string();
-        custom_provider.base_url = Some("https://provider.example/v1".to_string());
-
-        ConfigEditsBuilder::new(&app.config.codex_home)
-            .set_model_provider("custom-provider", &custom_provider)
-            .set_default_model_provider("custom-provider")
-            .apply()
-            .await
-            .expect("persist provider edits");
-
-        app.refresh_config_after_provider_change().await?;
-
-        assert_eq!(app.config.model_provider_id, "custom-provider");
-        assert_eq!(
-            app.chat_widget.config_ref().model_provider_id,
-            "custom-provider"
-        );
-        assert_eq!(
-            thread.config_snapshot().await.model_provider_id,
-            "custom-provider"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn refresh_in_memory_config_from_disk_best_effort_keeps_current_config_on_error()
     -> Result<()> {
         let mut app = make_test_app().await;
@@ -7504,7 +7583,7 @@ guardian_approval = true
             }),
         });
 
-        assert_eq!(app.chat_widget.config_ref().cwd, next_cwd);
+        assert_eq!(app.chat_widget.config_ref().cwd.to_path_buf(), next_cwd);
         assert_eq!(app.config.cwd, original_cwd);
 
         app.refresh_in_memory_config_from_disk().await?;
@@ -7524,7 +7603,7 @@ guardian_approval = true
         let current_cwd = current_config.cwd.clone();
 
         let resume_config = app
-            .rebuild_config_for_resume_or_fallback(&current_cwd, current_cwd.clone())
+            .rebuild_config_for_resume_or_fallback(&current_cwd, current_cwd.to_path_buf())
             .await?;
 
         assert_eq!(resume_config, current_config);

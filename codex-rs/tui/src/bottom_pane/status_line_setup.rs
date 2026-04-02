@@ -75,9 +75,6 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the weekly rate limit.
     WeeklyLimit,
 
-    /// Remote usage summary reported by the active provider usage script.
-    RemoteUsage,
-
     /// Codex application version.
     CodexVersion,
 
@@ -120,9 +117,6 @@ impl StatusLineItem {
             }
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on weekly usage limit (omitted when unavailable)"
-            }
-            StatusLineItem::RemoteUsage => {
-                "Remote usage summary from the active provider usage script (omitted when unavailable)"
             }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {

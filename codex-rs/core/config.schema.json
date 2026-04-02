@@ -338,9 +338,6 @@
             "apps": {
               "type": "boolean"
             },
-            "artifact": {
-              "type": "boolean"
-            },
             "child_agents_md": {
               "type": "boolean"
             },
@@ -422,13 +419,13 @@
             "multi_agent": {
               "type": "boolean"
             },
+            "multi_agent_v2": {
+              "type": "boolean"
+            },
             "personality": {
               "type": "boolean"
             },
             "plugins": {
-              "type": "boolean"
-            },
-            "powershell_utf8": {
               "type": "boolean"
             },
             "prevent_idle_sleep": {
@@ -483,6 +480,9 @@
               "type": "boolean"
             },
             "tool_call_mcp_elicitation": {
+              "type": "boolean"
+            },
+            "tool_search": {
               "type": "boolean"
             },
             "tool_suggest": {
@@ -742,6 +742,21 @@
         }
       ]
     },
+    "McpServerToolConfig": {
+      "additionalProperties": false,
+      "description": "Per-tool approval settings for a single MCP server tool.",
+      "properties": {
+        "approval_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppToolApproval"
+            }
+          ],
+          "description": "Approval mode for this tool."
+        }
+      },
+      "type": "object"
+    },
     "MemoriesToml": {
       "additionalProperties": false,
       "description": "Memories settings loaded from config.toml.",
@@ -807,10 +822,10 @@
     "ModelProviderAuthStrategy": {
       "enum": [
         "none",
-        "open_ai",
+        "openai",
         "api_key",
-        "o_auth",
-        "o_auth_or_api_key"
+        "oauth",
+        "oauth_or_api_key"
       ],
       "type": "string"
     },
@@ -819,7 +834,7 @@
       "description": "Serializable representation of a provider definition.",
       "properties": {
         "api_key": {
-          "description": "API key stored directly in config.toml for this provider.\n\nDeprecated: legacy compatibility only. Runtime credentials should be stored outside config and are automatically migrated on load.",
+          "description": "API key stored directly in config.toml for this provider.",
           "type": "string"
         },
         "auth_strategy": {
@@ -907,6 +922,12 @@
           "default": false,
           "description": "Whether this provider supports the Responses API WebSocket transport.",
           "type": "boolean"
+        },
+        "websocket_connect_timeout_ms": {
+          "description": "Maximum time (in milliseconds) to wait for a websocket connection attempt before treating it as failed.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "wire_api": {
           "allOf": [
@@ -1356,6 +1377,11 @@
           },
           "type": "object"
         },
+        "name": {
+          "default": null,
+          "description": "Legacy display-name field accepted for backward compatibility.",
+          "type": "string"
+        },
         "oauth_resource": {
           "default": null,
           "type": "string"
@@ -1387,6 +1413,13 @@
           "format": "double",
           "type": "number"
         },
+        "tools": {
+          "additionalProperties": {
+            "$ref": "#/definitions/McpServerToolConfig"
+          },
+          "default": null,
+          "type": "object"
+        },
         "url": {
           "type": "string"
         }
@@ -1405,6 +1438,13 @@
       },
       "type": "object"
     },
+    "RealtimeConversationVersion": {
+      "enum": [
+        "v1",
+        "v2"
+      ],
+      "type": "string"
+    },
     "RealtimeToml": {
       "additionalProperties": false,
       "properties": {
@@ -1412,7 +1452,7 @@
           "$ref": "#/definitions/RealtimeWsMode"
         },
         "version": {
-          "$ref": "#/definitions/RealtimeWsVersion"
+          "$ref": "#/definitions/RealtimeConversationVersion"
         }
       },
       "type": "object"
@@ -1421,13 +1461,6 @@
       "enum": [
         "conversational",
         "transcription"
-      ],
-      "type": "string"
-    },
-    "RealtimeWsVersion": {
-      "enum": [
-        "v1",
-        "v2"
       ],
       "type": "string"
     },
@@ -1570,13 +1603,21 @@
         "enabled": {
           "type": "boolean"
         },
+        "name": {
+          "description": "Name-based selector.",
+          "type": "string"
+        },
         "path": {
-          "$ref": "#/definitions/AbsolutePathBuf"
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Path-based selector."
         }
       },
       "required": [
-        "enabled",
-        "path"
+        "enabled"
       ],
       "type": "object"
     },
@@ -1594,6 +1635,42 @@
         }
       },
       "type": "object"
+    },
+    "ToolSuggestConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "discoverables": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ToolSuggestDiscoverable"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ToolSuggestDiscoverable": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/ToolSuggestDiscoverableType"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ToolSuggestDiscoverableType": {
+      "enum": [
+        "connector",
+        "plugin"
+      ],
+      "type": "string"
     },
     "ToolsToml": {
       "additionalProperties": false,
@@ -1675,6 +1752,14 @@
         "status_line": {
           "default": null,
           "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `context-remaining`, and `current-dir`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "terminal_title": {
+          "default": null,
+          "description": "Ordered list of terminal title item identifiers.\n\nWhen set, the TUI renders the selected items into the terminal window/tab title. When unset, the TUI defaults to: `spinner` and `project`.",
           "items": {
             "type": "string"
           },
@@ -1942,9 +2027,6 @@
         "apps": {
           "type": "boolean"
         },
-        "artifact": {
-          "type": "boolean"
-        },
         "child_agents_md": {
           "type": "boolean"
         },
@@ -2026,13 +2108,13 @@
         "multi_agent": {
           "type": "boolean"
         },
+        "multi_agent_v2": {
+          "type": "boolean"
+        },
         "personality": {
           "type": "boolean"
         },
         "plugins": {
-          "type": "boolean"
-        },
-        "powershell_utf8": {
           "type": "boolean"
         },
         "prevent_idle_sleep": {
@@ -2087,6 +2169,9 @@
           "type": "boolean"
         },
         "tool_call_mcp_elicitation": {
+          "type": "boolean"
+        },
+        "tool_search": {
           "type": "boolean"
         },
         "tool_suggest": {
@@ -2476,6 +2561,14 @@
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
+    },
+    "tool_suggest": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ToolSuggestConfig"
+        }
+      ],
+      "description": "Additional discoverable tools that can be suggested for installation."
     },
     "tools": {
       "allOf": [
