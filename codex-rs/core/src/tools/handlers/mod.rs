@@ -120,9 +120,8 @@ pub(crate) fn reject_plan_mode_target_repo_mutation(
         ));
     }
 
-    let Some(target_repo_root) = resolve_root_git_project_for_trust(target_repo_cwd) else {
-        return Ok(());
-    };
+    let target_repo_root = resolve_root_git_project_for_trust(target_repo_cwd)
+        .unwrap_or_else(|| target_repo_cwd.to_path_buf());
     let target_repo_root = normalize_path_for_comparison(target_repo_root.as_path());
 
     let canonical_workdir = normalize_path_for_comparison(workdir);
@@ -547,6 +546,30 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "Plan mode preparatory mutations must run outside the current target repo. Use a temporary directory or scratch clone/worktree outside the repo before running mutating commands."
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_mode_rejects_mutations_inside_target_dir_without_git_root() {
+        let (mut session, _turn_context) = make_session_and_context().await;
+        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        let target_dir = tempdir().expect("tempdir");
+        let nested = target_dir.path().join("nested");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+
+        let err = reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::Plan,
+            target_dir.path(),
+            &nested,
+            true,
+            None,
+        )
+        .expect_err("mutating in target dir should be rejected even without git metadata");
+
+        assert!(
+            err.to_string()
+                .contains("must run outside the current target repo")
         );
     }
 

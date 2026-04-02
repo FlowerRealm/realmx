@@ -863,6 +863,26 @@ fn request_user_input_description_reflects_default_mode_feature_flag() {
             plan_mode_preparatory_mutations: false,
         })
     );
+
+    features.enable(Feature::PlanModePreparatoryMutations);
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+    let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
+    let request_user_input_tool = find_tool(&tools, "request_user_input");
+    assert_eq!(
+        request_user_input_tool.spec,
+        create_request_user_input_tool(CollaborationModesConfig {
+            default_mode_request_user_input: true,
+            plan_mode_preparatory_mutations: true,
+        })
+    );
 }
 
 #[test]

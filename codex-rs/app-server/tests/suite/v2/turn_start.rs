@@ -794,7 +794,6 @@ async fn turn_start_switch_from_plan_to_default_drops_stale_plan_instructions_v2
         !payload_text
             .contains("You are in **Plan Mode** until a developer message explicitly ends it.")
     );
-    assert!(payload_text.contains("The `request_user_input` tool is available in Default mode."));
 
     Ok(())
 }

@@ -349,6 +349,7 @@ pub(crate) struct ToolsConfig {
     pub multi_agent_v2: bool,
     pub request_user_input: bool,
     pub default_mode_request_user_input: bool,
+    pub plan_mode_preparatory_mutations: bool,
     pub experimental_supported_tools: Vec<String>,
     pub agent_jobs_tools: bool,
     pub agent_jobs_worker_tools: bool,
@@ -400,6 +401,8 @@ impl ToolsConfig {
         let include_request_user_input = !matches!(session_source, SessionSource::SubAgent(_));
         let include_default_mode_request_user_input =
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
+        let include_plan_mode_preparatory_mutations =
+            features.enabled(Feature::PlanModePreparatoryMutations);
         let include_search_tool =
             model_info.supports_search_tool && features.enabled(Feature::ToolSearch);
         let include_tool_suggest = features.enabled(Feature::ToolSuggest)
@@ -483,6 +486,7 @@ impl ToolsConfig {
             multi_agent_v2: include_multi_agent_v2,
             request_user_input: include_request_user_input,
             default_mode_request_user_input: include_default_mode_request_user_input,
+            plan_mode_preparatory_mutations: include_plan_mode_preparatory_mutations,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
             agent_jobs_tools: include_agent_jobs,
             agent_jobs_worker_tools,
@@ -2864,7 +2868,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
             &mut builder,
             create_request_user_input_tool(CollaborationModesConfig {
                 default_mode_request_user_input: config.default_mode_request_user_input,
-                plan_mode_preparatory_mutations: false,
+                plan_mode_preparatory_mutations: config.plan_mode_preparatory_mutations,
             }),
             /*supports_parallel_tool_calls*/ false,
             config.code_mode_enabled,
