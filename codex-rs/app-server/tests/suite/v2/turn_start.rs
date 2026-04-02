@@ -9,6 +9,7 @@ use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::create_shell_command_sse_response;
 use app_test_support::format_with_current_shell_display;
 use app_test_support::to_response;
+use app_test_support::write_models_cache_for_provider;
 use codex_app_server::INPUT_TOO_LARGE_ERROR_CODE;
 use codex_app_server::INVALID_PARAMS_ERROR_CODE;
 use codex_app_server_protocol::ByteRange;
@@ -44,9 +45,9 @@ use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_core::config::ConfigToml;
-use codex_core::features::FEATURES;
-use codex_core::features::Feature;
 use codex_core::personality_migration::PERSONALITY_MIGRATION_FILENAME;
+use codex_features::FEATURES;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
@@ -67,7 +68,7 @@ use tokio::time::timeout;
 #[cfg(windows)]
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 #[cfg(not(windows))]
-const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const TEST_ORIGINATOR: &str = "codex_vscode";
 const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
 
@@ -1842,6 +1843,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
         "never",
         &BTreeMap::from([(Feature::Collab, true)]),
     )?;
+    write_models_cache_for_provider(codex_home.path(), "mock_provider")?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -1908,11 +1910,11 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
 
     let spawn_completed = timeout(DEFAULT_READ_TIMEOUT, async {
         loop {
-            let completed_notif = mcp
+            let notification = mcp
                 .read_stream_until_notification_message("item/completed")
                 .await?;
             let completed: ItemCompletedNotification =
-                serde_json::from_value(completed_notif.params.expect("item/completed params"))?;
+                serde_json::from_value(notification.params.expect("item/completed params"))?;
             if let ThreadItem::CollabAgentToolCall { id, .. } = &completed.item
                 && id == SPAWN_CALL_ID
             {

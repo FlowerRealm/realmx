@@ -34,7 +34,7 @@ use serde::Serialize;
 use wiremock::MockServer;
 
 const ETAG: &str = "\"models-etag-ttl\"";
-const CACHE_FILE: &str = "models_cache.json";
+const CACHE_FILE: &str = "models_cache-test-provider.json";
 const REMOTE_MODEL: &str = "codex-test-ttl";
 const VERSIONED_MODEL: &str = "codex-test-versioned";
 const MISSING_VERSION_MODEL: &str = "codex-test-missing-version";
@@ -96,6 +96,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
             final_output_json_schema: None,
             cwd: test.cwd_path().to_path_buf(),
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: test.session_configured.model.clone(),
             effort: None,
@@ -352,7 +353,6 @@ fn test_remote_model(slug: &str, priority: i32) -> ModelInfo {
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
         input_modalities: default_input_modalities(),
-        prefer_websockets: false,
         used_fallback_model_metadata: false,
         supports_search_tool: false,
     }

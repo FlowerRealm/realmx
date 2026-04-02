@@ -1,5 +1,50 @@
 use super::*;
 use pretty_assertions::assert_eq;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct AuthStrategyConfig {
+    auth_strategy: ModelProviderAuthStrategy,
+}
+
+fn parse_auth_strategy(value: &str) -> ModelProviderAuthStrategy {
+    let config = format!("auth_strategy = \"{value}\"");
+    toml::from_str::<AuthStrategyConfig>(&config)
+        .expect("parse auth strategy")
+        .auth_strategy
+}
+
+#[test]
+fn auth_strategy_deserializes_openai_aliases() {
+    assert_eq!(
+        parse_auth_strategy("openai"),
+        ModelProviderAuthStrategy::OpenAi
+    );
+    assert_eq!(
+        parse_auth_strategy("open_ai"),
+        ModelProviderAuthStrategy::OpenAi
+    );
+}
+
+#[test]
+fn auth_strategy_deserializes_oauth_aliases() {
+    assert_eq!(
+        parse_auth_strategy("oauth"),
+        ModelProviderAuthStrategy::OAuth
+    );
+    assert_eq!(
+        parse_auth_strategy("o_auth"),
+        ModelProviderAuthStrategy::OAuth
+    );
+    assert_eq!(
+        parse_auth_strategy("oauth_or_api_key"),
+        ModelProviderAuthStrategy::OAuthOrApiKey
+    );
+    assert_eq!(
+        parse_auth_strategy("o_auth_or_api_key"),
+        ModelProviderAuthStrategy::OAuthOrApiKey
+    );
+}
 
 #[test]
 fn test_deserialize_ollama_model_provider_toml() {
@@ -23,6 +68,7 @@ base_url = "http://localhost:11434/v1"
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -57,6 +103,7 @@ query_params = { api-version = "2025-04-01-preview" }
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -94,6 +141,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -140,6 +188,7 @@ env_key = "API_KEY"
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -166,6 +215,7 @@ fn api_key_prefers_inline_config_value() {
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };
@@ -195,6 +245,7 @@ fn resolved_auth_strategy_does_not_infer_oauth_from_oauth_config() {
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
     };

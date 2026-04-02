@@ -35,6 +35,32 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
+use std::path::Path;
+use std::path::PathBuf;
+
+fn image_generation_artifact_path(codex_home: &Path, session_id: &str, call_id: &str) -> PathBuf {
+    fn sanitize(value: &str) -> String {
+        let mut sanitized: String = value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if sanitized.is_empty() {
+            sanitized = "generated_image".to_string();
+        }
+        sanitized
+    }
+
+    codex_home
+        .join("generated_images")
+        .join(sanitize(session_id))
+        .join(format!("{}.png", sanitize(call_id)))
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_message_item_is_emitted() -> anyhow::Result<()> {
@@ -269,9 +295,18 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestCodex { codex, .. } = test_codex().build(&server).await?;
+    let TestCodex {
+        codex,
+        config,
+        session_configured,
+        ..
+    } = test_codex().build(&server).await?;
     let call_id = "ig_image_saved_to_temp_dir_default";
-    let expected_saved_path = std::env::temp_dir().join(format!("{call_id}.png"));
+    let expected_saved_path = image_generation_artifact_path(
+        config.codex_home.as_path(),
+        &session_configured.session_id.to_string(),
+        call_id,
+    );
     let _ = std::fs::remove_file(&expected_saved_path);
 
     let first_response = sse(vec![
@@ -323,8 +358,17 @@ async fn image_generation_call_event_is_emitted_when_image_save_fails() -> anyho
 
     let server = start_mock_server().await;
 
-    let TestCodex { codex, .. } = test_codex().build(&server).await?;
-    let expected_saved_path = std::env::temp_dir().join("ig_invalid.png");
+    let TestCodex {
+        codex,
+        config,
+        session_configured,
+        ..
+    } = test_codex().build(&server).await?;
+    let expected_saved_path = image_generation_artifact_path(
+        config.codex_home.as_path(),
+        &session_configured.session_id.to_string(),
+        "ig_invalid",
+    );
     let _ = std::fs::remove_file(&expected_saved_path);
 
     let first_response = sse(vec![
@@ -485,6 +529,7 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
             final_output_json_schema: None,
             cwd: std::env::current_dir()?,
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
             model: session_configured.model.clone(),
             effort: None,
@@ -578,6 +623,7 @@ plan-02,pending,Step 2,codex-rs/core/src/plan_csv.rs,second step,,,plan-01,
             final_output_json_schema: None,
             cwd: std::env::current_dir()?,
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
             model: session_configured.model.clone(),
             effort: None,
@@ -696,6 +742,7 @@ async fn plan_mode_streaming_citations_are_stripped_across_added_deltas_and_done
             final_output_json_schema: None,
             cwd: std::env::current_dir()?,
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
             model: session_configured.model.clone(),
             effort: None,
@@ -899,6 +946,7 @@ async fn plan_mode_streaming_proposed_plan_tag_split_across_added_and_delta_is_p
             final_output_json_schema: None,
             cwd: std::env::current_dir()?,
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
             model: session_configured.model.clone(),
             effort: None,
@@ -1027,6 +1075,7 @@ async fn plan_mode_handles_missing_plan_close_tag() -> anyhow::Result<()> {
             final_output_json_schema: None,
             cwd: std::env::current_dir()?,
             approval_policy: codex_protocol::protocol::AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
             model: session_configured.model.clone(),
             effort: None,

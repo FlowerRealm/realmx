@@ -2,13 +2,12 @@ use super::AuthRequestTelemetryContext;
 use super::ModelClient;
 use super::PendingUnauthorizedRetry;
 use super::UnauthorizedRecoveryExecution;
-use crate::client_common::Prompt;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
-use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_rmcp_client::OAuthCredentialsStoreMode;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -23,10 +22,9 @@ fn test_model_client(session_source: SessionSource) -> ModelClient {
         ThreadId::new(),
         "test-provider".to_string(),
         provider,
-        codex_rmcp_client::OAuthCredentialsStoreMode::File,
+        OAuthCredentialsStoreMode::default(),
         session_source,
         None,
-        false,
         false,
         false,
         None,
@@ -61,37 +59,6 @@ fn test_model_info() -> ModelInfo {
         "experimental_supported_tools": []
     }))
     .expect("deserialize test model info")
-}
-
-fn test_alias_model_info() -> ModelInfo {
-    serde_json::from_value(json!({
-        "slug": "gpt-5.4[1m]",
-        "api_model_slug": "gpt-5.4",
-        "display_name": "gpt-5.4[1m]",
-        "description": "desc",
-        "default_reasoning_level": "medium",
-        "supported_reasoning_levels": [
-            {"effort": "medium", "description": "medium"}
-        ],
-        "shell_type": "shell_command",
-        "visibility": "list",
-        "supported_in_api": true,
-        "priority": 1,
-        "upgrade": null,
-        "base_instructions": "base instructions",
-        "model_messages": null,
-        "supports_reasoning_summaries": false,
-        "support_verbosity": false,
-        "default_verbosity": null,
-        "apply_patch_tool_type": null,
-        "truncation_policy": {"mode": "bytes", "limit": 10000},
-        "supports_parallel_tool_calls": false,
-        "supports_image_detail_original": false,
-        "context_window": 1050000,
-        "auto_compact_token_limit": null,
-        "experimental_supported_tools": []
-    }))
-    .expect("deserialize alias model info")
 }
 
 fn test_session_telemetry() -> SessionTelemetry {
@@ -151,29 +118,4 @@ fn auth_request_telemetry_context_tracks_attached_auth_and_retry_phase() {
     assert!(auth_context.retry_after_unauthorized);
     assert_eq!(auth_context.recovery_mode, Some("managed"));
     assert_eq!(auth_context.recovery_phase, Some("refresh_token"));
-}
-
-#[test]
-fn build_responses_request_uses_canonical_api_model_slug() {
-    let client = test_model_client(SessionSource::Cli);
-    let session = client.new_session();
-    let model_info = test_alias_model_info();
-    let prompt = Prompt::default();
-    let provider = client
-        .provider()
-        .to_api_provider(None)
-        .expect("convert provider");
-
-    let request = session
-        .build_responses_request(
-            &provider,
-            &prompt,
-            &model_info,
-            None,
-            ReasoningSummaryConfig::Auto,
-            None,
-        )
-        .expect("build request");
-
-    assert_eq!(request.model, "gpt-5.4");
 }

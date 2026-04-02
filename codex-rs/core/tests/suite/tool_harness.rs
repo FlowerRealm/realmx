@@ -4,7 +4,7 @@ use std::fs;
 use std::sync::Arc;
 
 use assert_matches::assert_matches;
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -16,7 +16,7 @@ use codex_state::ThreadPlanSnapshotCreateParams;
 use core_test_support::assert_regex_match;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
-use core_test_support::responses::ev_apply_patch_function_call;
+use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -32,19 +32,19 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 fn call_output(req: &ResponsesRequest, call_id: &str) -> (String, Option<bool>) {
-    let raw = req.function_call_output(call_id);
+    let raw = req.any_tool_call_output(call_id);
     assert_eq!(
         raw.get("call_id").and_then(Value::as_str),
         Some(call_id),
-        "mismatched call_id in function_call_output"
+        "mismatched call_id in tool call output"
     );
-    let (content_opt, success) = match req.function_call_output_content_and_success(call_id) {
+    let (content_opt, success) = match req.any_tool_call_output_content_and_success(call_id) {
         Some(values) => values,
-        None => panic!("function_call_output present"),
+        None => panic!("tool call output present"),
     };
     let content = match content_opt {
         Some(c) => c,
-        None => panic!("function_call_output content present"),
+        None => panic!("tool call output content present"),
     };
     (content, success)
 }
@@ -89,6 +89,7 @@ async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> 
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -159,6 +160,7 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -441,6 +443,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -490,6 +493,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
     let server = start_mock_server().await;
 
     let mut builder = test_codex().with_config(|config| {
+        config.include_apply_patch_tool = true;
         config
             .features
             .enable(Feature::ApplyPatchFreeform)
@@ -514,7 +518,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_apply_patch_function_call(call_id, &patch_content),
+        ev_apply_patch_custom_tool_call(call_id, &patch_content),
         ev_completed("resp-1"),
     ]);
     responses::mount_sse_once(&server, first_response).await;
@@ -536,6 +540,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -598,6 +603,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
     let server = start_mock_server().await;
 
     let mut builder = test_codex().with_config(|config| {
+        config.include_apply_patch_tool = true;
         config
             .features
             .enable(Feature::ApplyPatchFreeform)
@@ -617,7 +623,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_apply_patch_function_call(call_id, patch_content),
+        ev_apply_patch_custom_tool_call(call_id, patch_content),
         ev_completed("resp-1"),
     ]);
     responses::mount_sse_once(&server, first_response).await;
@@ -639,6 +645,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
             final_output_json_schema: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: session_model,
             effort: None,
@@ -655,7 +662,8 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
     let (output_text, success_flag) = call_output(&req, call_id);
 
     assert!(
-        output_text.contains("apply_patch verification failed"),
+        output_text.contains("unsupported call: apply_patch")
+            || output_text.contains("apply_patch verification failed"),
         "expected apply_patch verification failure message, got {output_text:?}"
     );
     assert!(

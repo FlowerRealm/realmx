@@ -338,10 +338,9 @@ impl ThreadWatchState {
         F: FnOnce(&mut RuntimeFacts),
     {
         let previous_status = self.status_for(thread_id);
-        let runtime = self
-            .runtime_by_thread_id
-            .entry(thread_id.to_string())
-            .or_default();
+        let Some(runtime) = self.runtime_by_thread_id.get_mut(thread_id) else {
+            return None;
+        };
         runtime.is_loaded = true;
         mutate(runtime);
         self.status_changed_notification(thread_id.to_string(), previous_status)
@@ -746,6 +745,25 @@ mod tests {
                 },
             },
         );
+    }
+
+    #[tokio::test]
+    async fn releasing_guard_after_thread_removal_does_not_recreate_runtime() {
+        let manager = ThreadWatchManager::new();
+        manager
+            .upsert_thread(test_thread(
+                INTERACTIVE_THREAD_ID,
+                codex_app_server_protocol::SessionSource::Cli,
+            ))
+            .await;
+
+        let guard = manager
+            .note_permission_requested(INTERACTIVE_THREAD_ID)
+            .await;
+        manager.remove_thread(INTERACTIVE_THREAD_ID).await;
+        drop(guard);
+
+        wait_for_status(&manager, INTERACTIVE_THREAD_ID, ThreadStatus::NotLoaded).await;
     }
 
     async fn wait_for_status(

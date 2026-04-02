@@ -1,18 +1,45 @@
 use super::*;
 use crate::codex::make_session_and_context;
 use crate::config::test_config;
+use crate::model_provider_info::ModelProviderAuthStrategy;
+use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::WireApi;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::RefreshStrategy;
-use assert_matches::assert_matches;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelsResponse;
+use core_test_support::PathExt;
 use core_test_support::responses::mount_models_once;
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::MockServer;
+
+fn provider_for(base_url: String) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "mock".into(),
+        base_url: Some(base_url),
+        auth_strategy: ModelProviderAuthStrategy::None,
+        oauth: None,
+        api_key: None,
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: Some(0),
+        stream_idle_timeout_ms: Some(5_000),
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    }
+}
 
 fn user_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
@@ -68,7 +95,15 @@ fn drops_from_last_user_only() {
         .cloned()
         .map(RolloutItem::ResponseItem)
         .collect();
-    let truncated = truncate_before_nth_user_message(InitialHistory::Forked(initial), 1);
+    let truncated = truncate_before_nth_user_message(
+        InitialHistory::Forked(initial),
+        1,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
     let got_items = truncated.get_rollout_items();
     let expected_items = vec![
         RolloutItem::ResponseItem(items[0].clone()),
@@ -85,8 +120,19 @@ fn drops_from_last_user_only() {
         .cloned()
         .map(RolloutItem::ResponseItem)
         .collect();
-    let truncated2 = truncate_before_nth_user_message(InitialHistory::Forked(initial2), 2);
-    assert_matches!(truncated2, InitialHistory::New);
+    let truncated2 = truncate_before_nth_user_message(
+        InitialHistory::Forked(initial2.clone()),
+        2,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
+    assert_eq!(
+        serde_json::to_value(truncated2.get_rollout_items()).unwrap(),
+        serde_json::to_value(initial2).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -104,7 +150,15 @@ async fn ignores_session_prefix_messages_when_truncating() {
         .map(RolloutItem::ResponseItem)
         .collect();
 
-    let truncated = truncate_before_nth_user_message(InitialHistory::Forked(rollout_items), 1);
+    let truncated = truncate_before_nth_user_message(
+        InitialHistory::Forked(rollout_items),
+        1,
+        &SnapshotTurnState {
+            ends_mid_turn: false,
+            active_turn_id: None,
+            active_turn_start_index: None,
+        },
+    );
     let got_items = truncated.get_rollout_items();
 
     let expected: Vec<RolloutItem> = vec![
@@ -125,13 +179,16 @@ async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.codex_home = temp_dir.path().join("codex-home");
-    config.cwd = config.codex_home.clone();
+    config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.codex_home.clone(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
     let thread_1 = manager
         .start_thread(config.clone())
@@ -164,7 +221,7 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.codex_home = temp_dir.path().join("codex-home");
-    config.cwd = config.codex_home.clone();
+    config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
     config.model_catalog = None;
     config
@@ -172,6 +229,7 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
         .get_mut("openai")
         .expect("openai provider should exist")
         .base_url = Some(server.uri());
+    config.model_provider.base_url = Some(server.uri());
 
     let auth_manager =
         AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
@@ -180,8 +238,78 @@ async fn new_uses_configured_openai_provider_for_model_refresh() {
         auth_manager,
         SessionSource::Exec,
         CollaborationModesConfig::default(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
 
     let _ = manager.list_models(RefreshStrategy::Online).await;
     assert_eq!(models_mock.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn new_uses_current_model_provider_for_model_refresh() {
+    let server = MockServer::start().await;
+    let dynamic_slug = "provider-specific-remote-model";
+    let models_mock = mount_models_once(
+        &server,
+        ModelsResponse {
+            models: vec![serde_json::from_value(serde_json::json!({
+                "slug": dynamic_slug,
+                "display_name": "Provider Specific",
+                "description": "Provider Specific desc",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [{"effort": "low", "description": "low"}, {"effort": "medium", "description": "medium"}],
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "minimal_client_version": [0, 1, 0],
+                "supported_in_api": true,
+                "priority": 1,
+                "upgrade": null,
+                "base_instructions": "base instructions",
+                "supports_reasoning_summaries": false,
+                "support_verbosity": false,
+                "default_verbosity": null,
+                "apply_patch_tool_type": null,
+                "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                "supports_parallel_tool_calls": false,
+                "supports_image_detail_original": false,
+                "context_window": 272_000,
+                "experimental_supported_tools": [],
+            }))
+            .expect("valid model")],
+        },
+    )
+    .await;
+
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config();
+    config.codex_home = temp_dir.path().join("codex-home");
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    config.model_catalog = None;
+    config.model_provider_id = "custom-provider".to_string();
+    config.model_provider = provider_for(server.uri());
+    config.model_providers.insert(
+        config.model_provider_id.clone(),
+        config.model_provider.clone(),
+    );
+
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
+    let manager = ThreadManager::new(
+        &config,
+        auth_manager,
+        SessionSource::Exec,
+        CollaborationModesConfig::default(),
+        Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
+    );
+
+    let models = manager.list_models(RefreshStrategy::Online).await;
+    assert_eq!(models_mock.requests().len(), 1);
+    assert!(
+        models.iter().any(|preset| preset.model == dynamic_slug),
+        "thread manager should refresh models from the configured provider"
+    );
 }

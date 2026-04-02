@@ -9,6 +9,8 @@ use crate::canonicalize_thread_plan_csv;
 use crate::model::ThreadPlanSnapshotRow;
 use crate::render_thread_plan_csv;
 use crate::thread_plan_csv::parse_thread_plan_snapshot_csv;
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 impl StateRuntime {
     pub async fn replace_active_thread_plan(
@@ -116,29 +118,84 @@ LIMIT 1
         }))
     }
 
+    pub async fn clear_active_thread_plan(&self, thread_id: &str) -> anyhow::Result<bool> {
+        let now = Utc::now().timestamp();
+        let result = sqlx::query(
+            r#"
+UPDATE thread_plan_snapshots
+SET superseded_at = ?
+WHERE thread_id = ? AND superseded_at IS NULL
+            "#,
+        )
+        .bind(now)
+        .bind(thread_id)
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn update_active_thread_plan_item_status(
         &self,
         thread_id: &str,
         row_id: &str,
         status: ThreadPlanItemStatus,
     ) -> anyhow::Result<Option<ActiveThreadPlan>> {
+        self.update_active_thread_plan_item_statuses(thread_id, &[(row_id.to_string(), status)])
+            .await
+    }
+
+    pub async fn update_active_thread_plan_item_statuses(
+        &self,
+        thread_id: &str,
+        updates: &[(String, ThreadPlanItemStatus)],
+    ) -> anyhow::Result<Option<ActiveThreadPlan>> {
         let Some(active_plan) = self.get_active_thread_plan(thread_id).await? else {
             return Ok(None);
         };
+
+        let mut updates_by_row_id = HashMap::with_capacity(updates.len());
+        let mut seen_row_ids = HashSet::with_capacity(updates.len());
+        for (row_id, status) in updates {
+            if !seen_row_ids.insert(row_id.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "duplicate active thread plan row update: {row_id}"
+                ));
+            }
+            updates_by_row_id.insert(row_id.clone(), *status);
+        }
 
         let mut rows = active_plan
             .items
             .iter()
             .map(thread_plan_item_to_create_params)
             .collect::<Vec<_>>();
-        let Some(row) = rows.iter_mut().find(|item| item.row_id == row_id) else {
-            return Err(anyhow::anyhow!(
-                "active thread plan row not found: {row_id}"
-            ));
-        };
-        row.status = status;
-        let raw_csv = render_thread_plan_csv(rows.as_slice())?;
+        let mut found_row_ids = HashSet::with_capacity(updates.len());
+        for row in &mut rows {
+            if let Some(status) = updates_by_row_id.get(row.row_id.as_str()).copied() {
+                row.status = status;
+                found_row_ids.insert(row.row_id.clone());
+            }
+        }
 
+        for (row_id, _) in updates {
+            if !found_row_ids.contains(row_id.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "active thread plan row not found: {row_id}"
+                ));
+            }
+        }
+
+        let in_progress_count = rows
+            .iter()
+            .filter(|row| matches!(row.status, ThreadPlanItemStatus::InProgress))
+            .count();
+        if in_progress_count > 1 {
+            return Err(anyhow::anyhow!(
+                "active thread plan may include at most one in_progress row"
+            ));
+        }
+
+        let raw_csv = render_thread_plan_csv(rows.as_slice())?;
         sqlx::query(
             r#"
 UPDATE thread_plan_snapshots
@@ -301,5 +358,134 @@ INSERT INTO thread_plan_snapshots (
         assert_eq!(loaded.items[0].step, "Legacy");
         assert_eq!(loaded.items[0].inputs, Vec::<String>::new());
         assert_eq!(loaded.items[0].depends_on, Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn update_active_thread_plan_rejects_multiple_in_progress_rows() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-2";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-2".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-2".to_string(),
+            source_item_id: "item-2".to_string(),
+            raw_csv: RAW_CSV.to_string(),
+        };
+
+        runtime
+            .replace_active_thread_plan(&snapshot)
+            .await
+            .expect("create active plan");
+
+        let err = runtime
+            .update_active_thread_plan_item_status(
+                thread_id,
+                "plan-02",
+                ThreadPlanItemStatus::InProgress,
+            )
+            .await
+            .expect_err("should reject a second in_progress row");
+        assert_eq!(
+            err.to_string(),
+            "active thread plan may include at most one in_progress row"
+        );
+
+        let loaded = runtime
+            .get_active_thread_plan(thread_id)
+            .await
+            .expect("load active plan")
+            .expect("active plan should exist");
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(loaded.items[1].status, ThreadPlanItemStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn batch_status_updates_are_atomic() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-3";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-3".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-3".to_string(),
+            source_item_id: "item-3".to_string(),
+            raw_csv: RAW_CSV.to_string(),
+        };
+
+        runtime
+            .replace_active_thread_plan(&snapshot)
+            .await
+            .expect("create active plan");
+
+        let err = runtime
+            .update_active_thread_plan_item_statuses(
+                thread_id,
+                &[
+                    ("plan-01".to_string(), ThreadPlanItemStatus::Completed),
+                    ("plan-99".to_string(), ThreadPlanItemStatus::InProgress),
+                ],
+            )
+            .await
+            .expect_err("unknown row should fail the whole batch");
+        assert_eq!(err.to_string(), "active thread plan row not found: plan-99");
+
+        let loaded = runtime
+            .get_active_thread_plan(thread_id)
+            .await
+            .expect("load active plan")
+            .expect("active plan should exist");
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(loaded.items[1].status, ThreadPlanItemStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn clear_active_thread_plan_supersedes_current_snapshot() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let thread_id = "thread-4";
+        let snapshot = ThreadPlanSnapshotCreateParams {
+            id: "snapshot-4".to_string(),
+            thread_id: thread_id.to_string(),
+            source_turn_id: "turn-4".to_string(),
+            source_item_id: "item-4".to_string(),
+            raw_csv: RAW_CSV.to_string(),
+        };
+
+        runtime
+            .replace_active_thread_plan(&snapshot)
+            .await
+            .expect("create active plan");
+
+        assert!(
+            runtime
+                .clear_active_thread_plan(thread_id)
+                .await
+                .expect("clear active plan"),
+            "clearing an existing active plan should report a change"
+        );
+        assert_eq!(
+            runtime
+                .get_active_thread_plan(thread_id)
+                .await
+                .expect("load active plan after clear"),
+            None
+        );
+        assert!(
+            !runtime
+                .clear_active_thread_plan(thread_id)
+                .await
+                .expect("clearing a missing active plan should be a no-op"),
+            "clearing a missing active plan should report no change"
+        );
     }
 }

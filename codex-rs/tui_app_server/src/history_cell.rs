@@ -27,6 +27,8 @@ use crate::render::line_utils::push_owned_lines;
 use crate::render::renderable::Renderable;
 use crate::style::proposed_plan_style;
 use crate::style::user_message_style;
+#[cfg(test)]
+use crate::test_support::PathBufExt;
 use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::truncate_text;
 use crate::tooltips;
@@ -37,15 +39,20 @@ use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 use crate::wrapping::adaptive_wrap_lines;
 use base64::Engine;
+use codex_app_server_protocol::McpServerStatus;
 use codex_core::config::Config;
 use codex_core::config::types::McpServerTransportConfig;
+#[cfg(test)]
 use codex_core::mcp::McpManager;
+#[cfg(test)]
 use codex_core::plugins::PluginsManager;
 use codex_core::web_search::web_search_detail;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::account::PlanType;
 use codex_protocol::config_types::ServiceTier;
+#[cfg(test)]
 use codex_protocol::mcp::Resource;
+#[cfg(test)]
 use codex_protocol::mcp::ResourceTemplate;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::models::local_image_label_text;
@@ -76,6 +83,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -1137,7 +1145,7 @@ pub(crate) fn new_session_info(
         model.clone(),
         reasoning_effort,
         show_fast_status,
-        config.cwd.clone(),
+        config.cwd.to_path_buf(),
         CODEX_CLI_VERSION,
     );
     let mut parts: Vec<Box<dyn HistoryCell>> = vec![Box::new(header)];
@@ -1796,6 +1804,7 @@ pub(crate) fn empty_mcp_output() -> PlainHistoryCell {
     PlainHistoryCell { lines }
 }
 
+#[cfg(test)]
 /// Render MCP tools grouped by connection using the fully-qualified tool names.
 pub(crate) fn new_mcp_tools_output(
     config: &Config,
@@ -1963,6 +1972,179 @@ pub(crate) fn new_mcp_tools_output(
 
     PlainHistoryCell { lines }
 }
+
+/// Build the `/mcp` history cell from app-server `McpServerStatus` responses.
+///
+/// The server list comes directly from the app-server status response, sorted
+/// alphabetically. Local config is only used to enrich returned servers with
+/// transport details such as command, URL, cwd, and environment display.
+///
+/// This mirrors the layout of [`new_mcp_tools_output`] but sources data from
+/// the paginated RPC response rather than the in-process `McpManager`.
+pub(crate) fn new_mcp_tools_output_from_statuses(
+    config: &Config,
+    statuses: &[McpServerStatus],
+) -> PlainHistoryCell {
+    let mut lines: Vec<Line<'static>> = vec![
+        "/mcp".magenta().into(),
+        "".into(),
+        vec!["🔌  ".into(), "MCP Tools".bold()].into(),
+        "".into(),
+    ];
+
+    let mut statuses_by_name = HashMap::new();
+    for status in statuses {
+        statuses_by_name.insert(status.name.as_str(), status);
+    }
+
+    let mut server_names: Vec<String> = statuses.iter().map(|status| status.name.clone()).collect();
+    server_names.sort();
+
+    let has_any_tools = statuses.iter().any(|status| !status.tools.is_empty());
+    if !has_any_tools {
+        lines.push("  • No MCP tools available.".italic().into());
+        lines.push("".into());
+    }
+
+    for server in server_names {
+        let cfg = config.mcp_servers.get().get(server.as_str());
+        let status = statuses_by_name.get(server.as_str()).copied();
+        let header: Vec<Span<'static>> = vec!["  • ".into(), server.clone().into()];
+
+        lines.push(header.into());
+        let auth_status = status
+            .map(|status| match status.auth_status {
+                codex_app_server_protocol::McpAuthStatus::Unsupported => McpAuthStatus::Unsupported,
+                codex_app_server_protocol::McpAuthStatus::NotLoggedIn => McpAuthStatus::NotLoggedIn,
+                codex_app_server_protocol::McpAuthStatus::BearerToken => McpAuthStatus::BearerToken,
+                codex_app_server_protocol::McpAuthStatus::OAuth => McpAuthStatus::OAuth,
+            })
+            .unwrap_or(McpAuthStatus::Unsupported);
+        lines.push(vec!["    • Auth: ".into(), auth_status.to_string().into()].into());
+
+        if let Some(cfg) = cfg {
+            match &cfg.transport {
+                McpServerTransportConfig::Stdio {
+                    command,
+                    args,
+                    env,
+                    env_vars,
+                    cwd,
+                } => {
+                    let args_suffix = if args.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", args.join(" "))
+                    };
+                    let cmd_display = format!("{command}{args_suffix}");
+                    lines.push(vec!["    • Command: ".into(), cmd_display.into()].into());
+
+                    if let Some(cwd) = cwd.as_ref() {
+                        lines.push(
+                            vec!["    • Cwd: ".into(), cwd.display().to_string().into()].into(),
+                        );
+                    }
+
+                    let env_display = format_env_display(env.as_ref(), env_vars.as_slice());
+                    if env_display != "-" {
+                        lines.push(vec!["    • Env: ".into(), env_display.into()].into());
+                    }
+                }
+                McpServerTransportConfig::StreamableHttp {
+                    url,
+                    http_headers,
+                    env_http_headers,
+                    ..
+                } => {
+                    lines.push(vec!["    • URL: ".into(), url.clone().into()].into());
+                    if let Some(headers) = http_headers.as_ref()
+                        && !headers.is_empty()
+                    {
+                        let mut pairs: Vec<_> = headers.iter().collect();
+                        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        let display = pairs
+                            .into_iter()
+                            .map(|(name, _)| format!("{name}=*****"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        lines.push(vec!["    • HTTP headers: ".into(), display.into()].into());
+                    }
+                    if let Some(headers) = env_http_headers.as_ref()
+                        && !headers.is_empty()
+                    {
+                        let mut pairs: Vec<_> = headers.iter().collect();
+                        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        let display = pairs
+                            .into_iter()
+                            .map(|(name, var)| format!("{name}={var}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        lines.push(vec!["    • Env HTTP headers: ".into(), display.into()].into());
+                    }
+                }
+            }
+        }
+
+        let mut names = status
+            .map(|status| status.tools.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        names.sort();
+        if names.is_empty() {
+            lines.push("    • Tools: (none)".into());
+        } else {
+            lines.push(vec!["    • Tools: ".into(), names.join(", ").into()].into());
+        }
+
+        let server_resources = status
+            .map(|status| status.resources.clone())
+            .unwrap_or_default();
+        if server_resources.is_empty() {
+            lines.push("    • Resources: (none)".into());
+        } else {
+            let mut spans: Vec<Span<'static>> = vec!["    • Resources: ".into()];
+
+            for (idx, resource) in server_resources.iter().enumerate() {
+                if idx > 0 {
+                    spans.push(", ".into());
+                }
+
+                let label = resource.title.as_ref().unwrap_or(&resource.name);
+                spans.push(label.clone().into());
+                spans.push(" ".into());
+                spans.push(format!("({})", resource.uri).dim());
+            }
+
+            lines.push(spans.into());
+        }
+
+        let server_templates = status
+            .map(|status| status.resource_templates.clone())
+            .unwrap_or_default();
+        if server_templates.is_empty() {
+            lines.push("    • Resource templates: (none)".into());
+        } else {
+            let mut spans: Vec<Span<'static>> = vec!["    • Resource templates: ".into()];
+
+            for (idx, template) in server_templates.iter().enumerate() {
+                if idx > 0 {
+                    spans.push(", ".into());
+                }
+
+                let label = template.title.as_ref().unwrap_or(&template.name);
+                spans.push(label.clone().into());
+                spans.push(" ".into());
+                spans.push(format!("({})", template.uri_template).dim());
+            }
+
+            lines.push(spans.into());
+        }
+
+        lines.push(Line::from(""));
+    }
+
+    PlainHistoryCell { lines }
+}
+
 pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHistoryCell {
     let mut line = vec!["• ".dim(), message.into()];
     if let Some(hint) = hint {
@@ -1979,6 +2161,54 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     // in terminals like Ghostty.
     let lines: Vec<Line<'static>> = vec![vec![format!("■ {message}").red()].into()];
     PlainHistoryCell { lines }
+}
+
+/// A transient history cell that shows an animated spinner while the MCP
+/// inventory RPC is in flight.
+///
+/// Inserted as the `active_cell` by `ChatWidget::add_mcp_output()` and removed
+/// once the fetch completes. The app removes committed copies from transcript
+/// history, while `ChatWidget::clear_mcp_inventory_loading()` only clears the
+/// in-flight `active_cell`.
+#[derive(Debug)]
+pub(crate) struct McpInventoryLoadingCell {
+    start_time: Instant,
+    animations_enabled: bool,
+}
+
+impl McpInventoryLoadingCell {
+    pub(crate) fn new(animations_enabled: bool) -> Self {
+        Self {
+            start_time: Instant::now(),
+            animations_enabled,
+        }
+    }
+}
+
+impl HistoryCell for McpInventoryLoadingCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        vec![
+            vec![
+                spinner(Some(self.start_time), self.animations_enabled),
+                " ".into(),
+                "Loading MCP inventory".bold(),
+                "…".dim(),
+            ]
+            .into(),
+        ]
+    }
+
+    fn transcript_animation_tick(&self) -> Option<u64> {
+        if !self.animations_enabled {
+            return None;
+        }
+        Some((self.start_time.elapsed().as_millis() / 50) as u64)
+    }
+}
+
+/// Convenience constructor for [`McpInventoryLoadingCell`].
+pub(crate) fn new_mcp_inventory_loading(animations_enabled: bool) -> McpInventoryLoadingCell {
+    McpInventoryLoadingCell::new(animations_enabled)
 }
 
 /// Renders a completed (or interrupted) request_user_input exchange in history.
@@ -2220,6 +2450,10 @@ impl HistoryCell for PlanUpdateCell {
                 status,
                 path,
                 details,
+                inputs,
+                outputs,
+                depends_on,
+                acceptance,
                 ..
             } = item;
             let (box_str, step_style) = match status {
@@ -2228,26 +2462,69 @@ impl HistoryCell for PlanUpdateCell {
                 StepStatus::Pending => ("□ ", Style::default().dim()),
             };
 
-            let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
+            let wrap_width = width.saturating_sub(4).max(1) as usize;
+            let opts = RtOptions::new(wrap_width)
                 .initial_indent(box_str.into())
                 .subsequent_indent("  ".into());
-            let mut text = step.clone();
+            let mut out = Vec::new();
+            let step_line = Line::from(step.clone().set_style(step_style));
+            let wrapped = adaptive_wrap_line(&step_line, opts);
+            push_owned_lines(&wrapped, &mut out);
+
             if let Some(path) = path.as_ref().filter(|path| !path.trim().is_empty()) {
-                text.push_str(" (");
-                text.push_str(path);
-                text.push(')');
+                let path_line = Line::from(vec!["path: ".dim(), path.as_str().dim()]);
+                let wrapped = adaptive_wrap_line(
+                    &path_line,
+                    RtOptions::new(wrap_width)
+                        .initial_indent("  ".into())
+                        .subsequent_indent("  ".into()),
+                );
+                push_owned_lines(&wrapped, &mut out);
             }
             if let Some(details) = details
                 .as_ref()
                 .filter(|details| !details.trim().is_empty())
             {
-                text.push_str(": ");
-                text.push_str(details);
+                let detail_line = Line::from(vec!["details: ".dim(), details.as_str().dim()]);
+                let wrapped = adaptive_wrap_line(
+                    &detail_line,
+                    RtOptions::new(wrap_width)
+                        .initial_indent("  ".into())
+                        .subsequent_indent("  ".into()),
+                );
+                push_owned_lines(&wrapped, &mut out);
             }
-            let line = Line::from(text.set_style(step_style));
-            let wrapped = adaptive_wrap_line(&line, opts);
-            let mut out = Vec::new();
-            push_owned_lines(&wrapped, &mut out);
+            for (label, values) in [
+                ("inputs", inputs.as_ref()),
+                ("outputs", outputs.as_ref()),
+                ("dependsOn", depends_on.as_ref()),
+            ] {
+                let Some(values) = values.filter(|values| !values.is_empty()) else {
+                    continue;
+                };
+                let detail_line =
+                    Line::from(vec![format!("{label}: ").dim(), values.join(", ").dim()]);
+                let wrapped = adaptive_wrap_line(
+                    &detail_line,
+                    RtOptions::new(wrap_width)
+                        .initial_indent("  ".into())
+                        .subsequent_indent("  ".into()),
+                );
+                push_owned_lines(&wrapped, &mut out);
+            }
+            if let Some(acceptance) = acceptance
+                .as_ref()
+                .filter(|acceptance| !acceptance.trim().is_empty())
+            {
+                let detail_line = Line::from(vec!["acceptance: ".dim(), acceptance.as_str().dim()]);
+                let wrapped = adaptive_wrap_line(
+                    &detail_line,
+                    RtOptions::new(wrap_width)
+                        .initial_indent("  ".into())
+                        .subsequent_indent("  ".into()),
+                );
+                push_owned_lines(&wrapped, &mut out);
+            }
             out
         };
 
@@ -2330,7 +2607,7 @@ pub(crate) fn new_view_image_tool_call(path: PathBuf, cwd: &Path) -> PlainHistor
 pub(crate) fn new_image_generation_call(
     call_id: String,
     revised_prompt: Option<String>,
-    saved_to: Option<String>,
+    saved_path: Option<String>,
 ) -> PlainHistoryCell {
     let detail = revised_prompt.unwrap_or_else(|| call_id.clone());
 
@@ -2338,8 +2615,8 @@ pub(crate) fn new_image_generation_call(
         vec!["• ".dim(), "Generated Image:".bold()].into(),
         vec!["  └ ".dim(), detail.dim()].into(),
     ];
-    if let Some(saved_to) = saved_to {
-        lines.push(vec!["  └ ".dim(), format!("Saved to: {saved_to}").dim()].into());
+    if let Some(saved_path) = saved_path {
+        lines.push(vec!["  └ ".dim(), "Saved to: ".dim(), saved_path.into()].into());
     }
 
     PlainHistoryCell { lines }
@@ -2562,6 +2839,7 @@ mod tests {
     use codex_core::config::Config;
     use codex_core::config::ConfigBuilder;
     use codex_core::config::types::McpServerConfig;
+    use codex_core::config::types::McpServerDisabledReason;
     use codex_core::config::types::McpServerTransportConfig;
     use codex_otel::RuntimeMetricTotals;
     use codex_otel::RuntimeMetricsSummary;
@@ -2644,6 +2922,25 @@ mod tests {
         .expect("resource link content should serialize")
     }
 
+    #[test]
+    fn image_generation_call_renders_saved_path() {
+        let saved_path = "file:///tmp/generated-image.png".to_string();
+        let cell = new_image_generation_call(
+            "call-image-generation".to_string(),
+            Some("A tiny blue square".to_string()),
+            Some(saved_path.clone()),
+        );
+
+        assert_eq!(
+            render_lines(&cell.display_lines(80)),
+            vec![
+                "• Generated Image:".to_string(),
+                "  └ A tiny blue square".to_string(),
+                format!("  └ Saved to: {saved_path}"),
+            ],
+        );
+    }
+
     fn session_configured_event(model: &str) -> SessionConfiguredEvent {
         SessionConfiguredEvent {
             session_id: ThreadId::new(),
@@ -2655,7 +2952,7 @@ mod tests {
             approval_policy: AskForApproval::Never,
             approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            cwd: PathBuf::from("/tmp/project"),
+            cwd: PathBuf::from("/tmp/project").abs().to_path_buf(),
             reasoning_effort: None,
             history_log_id: 0,
             history_entry_count: 0,
@@ -2769,9 +3066,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "snapshot path rendering differs on Windows"
+    )]
     async fn session_info_availability_nux_tooltip_snapshot() {
         let mut config = test_config().await;
-        config.cwd = PathBuf::from("/tmp/project");
+        config.cwd = PathBuf::from("/tmp/project").abs();
         let cell = new_session_info(
             &config,
             "gpt-5",
@@ -2909,6 +3210,7 @@ mod tests {
             disabled_tools: None,
             scopes: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         };
         let mut servers = config.mcp_servers.get().clone();
         servers.insert("docs".to_string(), stdio_config);
@@ -2933,6 +3235,7 @@ mod tests {
             disabled_tools: None,
             scopes: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         };
         servers.insert("http".to_string(), http_config);
         config
@@ -2976,6 +3279,62 @@ mod tests {
             HashMap::new(),
             &auth_statuses,
         );
+        let rendered = render_lines(&cell.display_lines(120)).join("\n");
+
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_output_from_statuses_renders_status_only_servers() {
+        let mut config = test_config().await;
+        let servers = HashMap::from([(
+            "plugin_docs".to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "docs-server".to_string(),
+                    args: vec!["--stdio".to_string()],
+                    env: None,
+                    env_vars: vec![],
+                    cwd: None,
+                },
+                enabled: false,
+                required: false,
+                disabled_reason: Some(McpServerDisabledReason::Unknown),
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+                enabled_tools: None,
+                disabled_tools: None,
+                scopes: None,
+                oauth_resource: None,
+                tools: HashMap::new(),
+            },
+        )]);
+        config
+            .mcp_servers
+            .set(servers)
+            .expect("test mcp servers should accept any configuration");
+
+        let statuses = vec![McpServerStatus {
+            name: "plugin_docs".to_string(),
+            tools: HashMap::from([(
+                "lookup".to_string(),
+                Tool {
+                    description: None,
+                    name: "lookup".to_string(),
+                    title: None,
+                    input_schema: serde_json::json!({"type": "object", "properties": {}}),
+                    output_schema: None,
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                },
+            )]),
+            resources: Vec::new(),
+            resource_templates: Vec::new(),
+            auth_status: codex_app_server_protocol::McpAuthStatus::Unsupported,
+        }];
+
+        let cell = new_mcp_tools_output_from_statuses(&config, &statuses);
         let rendered = render_lines(&cell.display_lines(120)).join("\n");
 
         insta::assert_snapshot!(rendered);
@@ -3203,6 +3562,14 @@ mod tests {
         };
 
         let cell = new_active_mcp_tool_call("call-1".into(), invocation, true);
+        let rendered = render_lines(&cell.display_lines(80)).join("\n");
+
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn mcp_inventory_loading_snapshot() {
+        let cell = new_mcp_inventory_loading(/*animations_enabled*/ true);
         let rendered = render_lines(&cell.display_lines(80)).join("\n");
 
         insta::assert_snapshot!(rendered);
@@ -4167,6 +4534,71 @@ mod tests {
                 .count(),
             1,
             "expected full step URL-like token in one rendered line, got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn plan_update_renders_structured_metadata() {
+        let update = UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Implement active plan replay".to_string(),
+                status: StepStatus::InProgress,
+                path: Some("codex-rs/tui_app_server/src/history_cell.rs".to_string()),
+                details: Some("keep metadata visible during resume".to_string()),
+                inputs: Some(vec!["resume payload".to_string()]),
+                outputs: Some(vec!["history rows".to_string()]),
+                depends_on: Some(vec!["plan-00".to_string()]),
+                acceptance: Some("resume shows current plan".to_string()),
+            }],
+        };
+
+        let cell = new_plan_update(update);
+        let rendered = render_lines(&cell.display_lines(42)).join("\n");
+
+        assert!(rendered.contains("path: codex-rs/tui_app_server/src/history_cell.rs"));
+        assert!(rendered.contains("details: keep metadata visible"));
+        assert!(rendered.contains("inputs: resume payload"));
+        assert!(rendered.contains("outputs: history rows"));
+        assert!(rendered.contains("dependsOn: plan-00"));
+        assert!(rendered.contains("acceptance: resume shows"));
+    }
+
+    #[test]
+    fn plan_update_wraps_long_path_metadata_in_narrow_width() {
+        let long_path =
+            "codex-rs/tui_app_server/src/features/plans/replay/history/very_long_component_name.rs";
+        let update = UpdatePlanArgs {
+            explanation: Some("Restored active plan".to_string()),
+            plan: vec![PlanItemArg {
+                id: Some("plan-01".to_string()),
+                step: "Render replayed plan metadata".to_string(),
+                status: StepStatus::InProgress,
+                path: Some(long_path.to_string()),
+                details: Some("keep long paths readable".to_string()),
+                inputs: None,
+                outputs: None,
+                depends_on: None,
+                acceptance: None,
+            }],
+        };
+
+        let cell = new_plan_update(update);
+        let rendered = render_lines(&cell.display_lines(28));
+        let rendered_blob = rendered.join("\n");
+        let path_lines = rendered
+            .iter()
+            .filter(|line| line.contains("path: ") || line.contains("history/"))
+            .count();
+
+        assert!(
+            path_lines >= 2,
+            "expected long path metadata to wrap across multiple lines, got:\n{rendered_blob}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains(long_path)),
+            "expected narrow rendering to wrap long path instead of keeping it on one line: {rendered_blob}"
         );
     }
 

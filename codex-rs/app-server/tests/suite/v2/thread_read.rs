@@ -212,16 +212,19 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract active rows,
     let active_plan = thread.active_plan.expect("active plan should be returned");
     assert_eq!(active_plan.snapshot_id, "snapshot-1");
     assert_eq!(active_plan.rows.len(), 1);
-    assert_eq!(active_plan.rows[0].id, "plan-01");
-    assert_eq!(active_plan.rows[0].path, "codex-rs/core/src/plan_csv.rs");
+    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
+    assert_eq!(
+        active_plan.rows[0].path.as_deref(),
+        Some("codex-rs/core/src/plan_csv.rs")
+    );
     assert_eq!(active_plan.rows[0].status, TurnPlanStepStatus::InProgress);
     assert_eq!(
-        active_plan.rows[0].inputs,
-        vec!["proposed plan markdown".to_string()]
+        active_plan.rows[0].inputs.as_deref(),
+        Some(["proposed plan markdown".to_string()].as_slice())
     );
     assert_eq!(
-        active_plan.rows[0].outputs,
-        vec!["thread plan rows".to_string()]
+        active_plan.rows[0].outputs.as_deref(),
+        Some(["thread plan rows".to_string()].as_slice())
     );
     assert_eq!(
         active_plan.rows[0].acceptance.as_deref(),
@@ -344,13 +347,16 @@ INSERT INTO thread_plan_snapshots (
         .expect("legacy active plan should be returned");
     assert_eq!(active_plan.snapshot_id, "snapshot-legacy");
     assert_eq!(active_plan.rows.len(), 1);
-    assert_eq!(active_plan.rows[0].id, "plan-01");
+    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
     assert_eq!(active_plan.rows[0].step, "Legacy");
-    assert_eq!(active_plan.rows[0].path, "codex-rs/core/src/plan_csv.rs");
-    assert_eq!(active_plan.rows[0].details, "extract rows");
-    assert_eq!(active_plan.rows[0].inputs, Vec::<String>::new());
-    assert_eq!(active_plan.rows[0].outputs, Vec::<String>::new());
-    assert_eq!(active_plan.rows[0].depends_on, Vec::<String>::new());
+    assert_eq!(
+        active_plan.rows[0].path.as_deref(),
+        Some("codex-rs/core/src/plan_csv.rs")
+    );
+    assert_eq!(active_plan.rows[0].details.as_deref(), Some("extract rows"));
+    assert_eq!(active_plan.rows[0].inputs, None);
+    assert_eq!(active_plan.rows[0].outputs, None);
+    assert_eq!(active_plan.rows[0].depends_on, None);
     assert_eq!(active_plan.rows[0].acceptance, None);
 
     let active_plan_json = read_result
@@ -359,6 +365,114 @@ INSERT INTO thread_plan_snapshots (
         .and_then(|thread_json| thread_json.get("activePlan"))
         .and_then(Value::as_object)
         .expect("thread/read must serialize thread.activePlan");
+    assert_eq!(active_plan_json.get("rawCsv"), None);
+    assert!(
+        active_plan_json
+            .get("rawMarkdown")
+            .and_then(Value::as_str)
+            .is_some_and(|raw_markdown| raw_markdown.starts_with("<proposed_plan>\n```csv\n"))
+    );
+    assert!(
+        active_plan_json
+            .get("rawMarkdown")
+            .and_then(Value::as_str)
+            .is_some_and(|raw_markdown| raw_markdown.contains("id,status,step,path,details"))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_list_returns_active_plan_from_state_db() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let preview = "Saved user message";
+    let conversation_id = create_fake_rollout_with_text_elements(
+        codex_home.path(),
+        "2025-01-06T12-00-00",
+        "2025-01-06T12:00:00Z",
+        preview,
+        vec![],
+        Some("mock_provider"),
+        None,
+    )?;
+
+    let state_db =
+        StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
+    state_db.mark_backfill_complete(None).await?;
+    let active_plan = state_db
+        .replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+            id: "snapshot-list-1".to_string(),
+            thread_id: conversation_id.clone(),
+            source_turn_id: "turn-1".to_string(),
+            source_item_id: "item-1".to_string(),
+            raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Restore list active plan,codex-rs/app-server/src/codex_message_processor.rs,load active plan from state,,,,
+"
+            .to_string(),
+        })
+        .await?;
+    assert_eq!(active_plan.items.len(), 1);
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let list_id = mcp
+        .send_thread_list_request(ThreadListParams {
+            cursor: None,
+            limit: Some(20),
+            sort_key: None,
+            model_providers: Some(vec!["mock_provider".to_string()]),
+            source_kinds: None,
+            archived: None,
+            cwd: None,
+            search_term: None,
+        })
+        .await?;
+    let list_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+    )
+    .await??;
+    let list_result = list_resp.result.clone();
+    let ThreadListResponse { data, .. } = to_response::<ThreadListResponse>(list_resp)?;
+
+    let listed = data
+        .iter()
+        .find(|thread| thread.id == conversation_id)
+        .expect("thread/list should include the created thread");
+    let active_plan = listed
+        .active_plan
+        .as_ref()
+        .expect("thread/list should include active plan");
+    assert_eq!(active_plan.snapshot_id, "snapshot-list-1");
+    assert_eq!(active_plan.rows.len(), 1);
+    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
+    assert_eq!(
+        active_plan.rows[0].path.as_deref(),
+        Some("codex-rs/app-server/src/codex_message_processor.rs")
+    );
+    assert_eq!(active_plan.rows[0].status, TurnPlanStepStatus::InProgress);
+
+    let listed_json = list_result
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("thread/list result.data must be an array")
+        .iter()
+        .find(|thread| thread.get("id").and_then(Value::as_str) == Some(&conversation_id))
+        .and_then(Value::as_object)
+        .expect("thread/list should include the created thread as an object");
+    let active_plan_json = listed_json
+        .get("activePlan")
+        .and_then(Value::as_object)
+        .expect("thread/list must serialize thread.activePlan");
+    assert_eq!(
+        active_plan_json.get("snapshotId").and_then(Value::as_str),
+        Some("snapshot-list-1")
+    );
     assert_eq!(active_plan_json.get("rawCsv"), None);
     assert!(
         active_plan_json

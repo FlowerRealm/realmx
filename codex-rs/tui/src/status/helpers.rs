@@ -3,7 +3,7 @@ use crate::text_formatting;
 use chrono::DateTime;
 use chrono::Local;
 use codex_core::AuthManager;
-use codex_core::auth::AuthMode as CoreAuthMode;
+use codex_core::auth::AuthMode as AppServerAuthMode;
 use codex_core::config::Config;
 use codex_core::project_doc::discover_project_doc_paths;
 use codex_protocol::account::PlanType;
@@ -46,7 +46,7 @@ pub(crate) fn compose_agents_summary(config: &Config) -> String {
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_else(|| "<unknown>".to_string());
                 let display = if let Some(parent) = p.parent() {
-                    if parent == config.cwd {
+                    if parent == config.cwd.as_path() {
                         file_name.clone()
                     } else {
                         let mut cur = config.cwd.as_path();
@@ -90,9 +90,9 @@ pub(crate) fn compose_account_display(
 ) -> Option<StatusAccountDisplay> {
     let auth = auth_manager.auth_cached()?;
 
-    match auth.auth_mode() {
-        CoreAuthMode::ApiKey => Some(StatusAccountDisplay::ApiKey),
-        CoreAuthMode::Chatgpt => {
+    match auth.api_auth_mode() {
+        AppServerAuthMode::ApiKey | AppServerAuthMode::Oauth => Some(StatusAccountDisplay::ApiKey),
+        AppServerAuthMode::Chatgpt | AppServerAuthMode::ChatgptAuthTokens => {
             let email = auth.get_account_email();
             let plan = plan
                 .map(|plan_type| title_case(format!("{plan_type:?}").as_str()))

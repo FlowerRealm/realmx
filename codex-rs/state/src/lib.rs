@@ -37,6 +37,7 @@ pub use model::Anchor;
 pub use model::BackfillState;
 pub use model::BackfillStats;
 pub use model::BackfillStatus;
+pub use model::DirectionalThreadSpawnEdgeStatus;
 pub use model::ExtractionOutcome;
 pub use model::SortKey;
 pub use model::Stage1JobClaim;
@@ -67,7 +68,7 @@ pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";
 pub const LOGS_DB_FILENAME: &str = "logs";
 pub const LOGS_DB_VERSION: u32 = 1;
 pub const STATE_DB_FILENAME: &str = "state";
-pub const STATE_DB_VERSION: u32 = 7;
+pub const STATE_DB_VERSION: u32 = 8;
 
 /// Errors encountered during DB operations. Tags: [stage]
 pub const DB_ERROR_METRIC: &str = "codex.db.error";
