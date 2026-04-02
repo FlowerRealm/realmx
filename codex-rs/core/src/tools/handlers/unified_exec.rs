@@ -258,6 +258,7 @@ impl ToolHandler for UnifiedExecHandler {
                     turn.cwd.as_path(),
                     &cwd,
                     !is_known_safe_command(&command),
+                    shlex::split(args.cmd.as_str()).as_deref(),
                 )?;
                 let normalized_additional_permissions = match implicit_granted_permissions(
                     sandbox_permissions,

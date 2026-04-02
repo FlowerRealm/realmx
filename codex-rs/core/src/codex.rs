@@ -7112,22 +7112,32 @@ async fn maybe_complete_plan_item_from_message(
         }
         if let Some(plan_text) = extract_proposed_plan_text(&text) {
             let (plan_text, _citations) = strip_citations(&plan_text);
-            let canonical_plan = canonical_plan_csv_from_proposed_plan(plan_text.as_str())
-                .map_err(|err| {
-                    CodexErr::InvalidRequest(format!("invalid proposed plan CSV: {err}"))
-                })?;
+            let canonical_plan = match canonical_plan_csv_from_proposed_plan(plan_text.as_str()) {
+                Ok(canonical_plan) => canonical_plan,
+                Err(err) => {
+                    warn!(
+                        "ignoring invalid proposed plan CSV for thread {} turn {}: {err:#}",
+                        sess.conversation_id, turn_context.sub_id
+                    );
+                    return Ok(());
+                }
+            };
             if !state.plan_item_state.started {
                 state.plan_item_state.start(sess, turn_context).await;
             }
-            sess.persist_active_thread_plan(
-                turn_context,
-                state.plan_item_state.item_id.as_str(),
-                canonical_plan.raw_csv.as_str(),
-            )
-            .await
-            .map_err(|err| {
-                CodexErr::Fatal(format!("failed to persist active thread plan: {err}"))
-            })?;
+            if let Err(err) = sess
+                .persist_active_thread_plan(
+                    turn_context,
+                    state.plan_item_state.item_id.as_str(),
+                    canonical_plan.raw_csv.as_str(),
+                )
+                .await
+            {
+                warn!(
+                    "failed to persist active thread plan for thread {} turn {}: {err:#}",
+                    sess.conversation_id, turn_context.sub_id
+                );
+            }
             state
                 .plan_item_state
                 .complete_with_text(

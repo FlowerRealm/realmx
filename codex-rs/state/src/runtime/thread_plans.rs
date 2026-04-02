@@ -8,6 +8,7 @@ use crate::ThreadPlanSnapshotCreateParams;
 use crate::canonicalize_thread_plan_csv;
 use crate::model::ThreadPlanSnapshotRow;
 use crate::render_thread_plan_csv;
+use crate::thread_plan_csv::canonicalize_thread_plan_snapshot_csv;
 use crate::thread_plan_csv::parse_thread_plan_snapshot_csv;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -100,7 +101,17 @@ LIMIT 1
             return Ok(None);
         };
 
-        let snapshot = ThreadPlanSnapshot::try_from(snapshot_row)?;
+        let mut snapshot = ThreadPlanSnapshot::try_from(snapshot_row)?;
+        snapshot.raw_csv = match canonicalize_thread_plan_snapshot_csv(snapshot.raw_csv.as_str()) {
+            Ok(raw_csv) => raw_csv,
+            Err(err) => {
+                warn!(
+                    "ignoring incompatible active thread plan snapshot {}: {err}",
+                    snapshot.id
+                );
+                return Ok(None);
+            }
+        };
         let rows = match parse_thread_plan_snapshot_csv(snapshot.raw_csv.as_str()) {
             Ok(rows) => rows,
             Err(err) => {
@@ -255,7 +266,12 @@ mod tests {
     use super::test_support::unique_temp_dir;
     use crate::ThreadPlanItemStatus;
     use crate::ThreadPlanSnapshotCreateParams;
+    use crate::migrations::STATE_MIGRATOR;
     use pretty_assertions::assert_eq;
+    use sqlx::SqlitePool;
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::SqliteConnectOptions;
+    use std::borrow::Cow;
 
     const RAW_CSV: &str = "\
 id,status,step,path,details,inputs,outputs,depends_on,acceptance
@@ -486,6 +502,243 @@ INSERT INTO thread_plan_snapshots (
                 .await
                 .expect("clearing a missing active plan should be a no-op"),
             "clearing a missing active plan should report no change"
+        );
+    }
+
+    #[tokio::test]
+    async fn init_migrates_legacy_plan_rows_into_snapshot_csv() {
+        let codex_home = unique_temp_dir();
+        tokio::fs::create_dir_all(&codex_home)
+            .await
+            .expect("create codex home");
+        let state_path = super::super::state_db_path(codex_home.as_path());
+        let old_state_migrator = Migrator {
+            migrations: Cow::Owned(
+                STATE_MIGRATOR
+                    .migrations
+                    .iter()
+                    .filter(|migration| migration.version < 22)
+                    .cloned()
+                    .collect(),
+            ),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        };
+        let pool = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&state_path)
+                .create_if_missing(true),
+        )
+        .await
+        .expect("open legacy state db");
+        old_state_migrator
+            .run(&pool)
+            .await
+            .expect("apply legacy state schema");
+        sqlx::query(
+            r#"
+INSERT INTO thread_plan_snapshots (
+    id,
+    thread_id,
+    source_turn_id,
+    source_item_id,
+    raw_markdown,
+    created_at,
+    superseded_at
+) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            "#,
+        )
+        .bind("snapshot-migrated")
+        .bind("thread-migrated")
+        .bind("turn-1")
+        .bind("item-1")
+        .bind(
+            "<proposed_plan>\n```csv\nid,status,step,path,details\nplan-01,pending,Legacy row,codex-rs/core/src/plan_csv.rs,stale markdown\nplan-02,pending,Needs status,codex-rs/core/src/codex.rs,stale markdown\n```\n</proposed_plan>\n",
+        )
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("insert legacy snapshot");
+        sqlx::query(
+            r#"
+INSERT INTO thread_plan_items (
+    snapshot_id,
+    row_id,
+    row_index,
+    status,
+    step,
+    path,
+    details,
+    created_at,
+    updated_at,
+    completed_at,
+    inputs,
+    outputs,
+    depends_on,
+    acceptance
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind("snapshot-migrated")
+        .bind("plan-01")
+        .bind(0_i64)
+        .bind("completed")
+        .bind("Legacy row")
+        .bind("codex-rs/core/src/plan_csv.rs")
+        .bind("now complete")
+        .bind(1_i64)
+        .bind(2_i64)
+        .bind(2_i64)
+        .bind(r#"["plan markdown"]"#)
+        .bind(r#"["review output"]"#)
+        .bind("[]")
+        .bind("done")
+        .execute(&pool)
+        .await
+        .expect("insert migrated row 1");
+        sqlx::query(
+            r#"
+INSERT INTO thread_plan_items (
+    snapshot_id,
+    row_id,
+    row_index,
+    status,
+    step,
+    path,
+    details,
+    created_at,
+    updated_at,
+    completed_at,
+    inputs,
+    outputs,
+    depends_on,
+    acceptance
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind("snapshot-migrated")
+        .bind("plan-02")
+        .bind(1_i64)
+        .bind("in_progress")
+        .bind("Needs status")
+        .bind("codex-rs/core/src/codex.rs")
+        .bind("current state from rows")
+        .bind(1_i64)
+        .bind(3_i64)
+        .bind(Option::<i64>::None)
+        .bind("[]")
+        .bind(r#"["artifact"]"#)
+        .bind(r#"["plan-01"]"#)
+        .bind(Option::<&str>::None)
+        .execute(&pool)
+        .await
+        .expect("insert migrated row 2");
+        pool.close().await;
+
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let loaded = runtime
+            .get_active_thread_plan("thread-migrated")
+            .await
+            .expect("load migrated active plan")
+            .expect("migrated active plan should exist");
+        assert_eq!(loaded.snapshot.id, "snapshot-migrated");
+        assert_eq!(
+            loaded.snapshot.raw_csv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,completed,Legacy row,codex-rs/core/src/plan_csv.rs,now complete,plan markdown,review output,,done
+plan-02,in_progress,Needs status,codex-rs/core/src/codex.rs,current state from rows,,artifact,plan-01,
+"
+        );
+        assert_eq!(loaded.items.len(), 2);
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::Completed);
+        assert_eq!(loaded.items[0].inputs, vec!["plan markdown".to_string()]);
+        assert_eq!(loaded.items[0].outputs, vec!["review output".to_string()]);
+        assert_eq!(loaded.items[0].acceptance.as_deref(), Some("done"));
+        assert_eq!(loaded.items[1].status, ThreadPlanItemStatus::InProgress);
+        assert_eq!(loaded.items[1].depends_on, vec!["plan-01".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn init_keeps_legacy_markdown_snapshots_readable_without_row_table_data() {
+        let codex_home = unique_temp_dir();
+        tokio::fs::create_dir_all(&codex_home)
+            .await
+            .expect("create codex home");
+        let state_path = super::super::state_db_path(codex_home.as_path());
+        let old_state_migrator = Migrator {
+            migrations: Cow::Owned(
+                STATE_MIGRATOR
+                    .migrations
+                    .iter()
+                    .filter(|migration| migration.version < 22)
+                    .cloned()
+                    .collect(),
+            ),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        };
+        let pool = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&state_path)
+                .create_if_missing(true),
+        )
+        .await
+        .expect("open legacy state db");
+        old_state_migrator
+            .run(&pool)
+            .await
+            .expect("apply legacy state schema");
+        sqlx::query(
+            r#"
+INSERT INTO thread_plan_snapshots (
+    id,
+    thread_id,
+    source_turn_id,
+    source_item_id,
+    raw_markdown,
+    created_at,
+    superseded_at
+) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            "#,
+        )
+        .bind("snapshot-legacy-only")
+        .bind("thread-legacy-only")
+        .bind("turn-1")
+        .bind("item-1")
+        .bind(
+            "<proposed_plan>\n```csv\nid,status,step,path,details\nplan-01,pending,Legacy only,codex-rs/core/src/plan_csv.rs,still readable\n```\n</proposed_plan>\n",
+        )
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("insert legacy-only snapshot");
+        pool.close().await;
+
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let loaded = runtime
+            .get_active_thread_plan("thread-legacy-only")
+            .await
+            .expect("load migrated legacy-only active plan")
+            .expect("legacy-only active plan should exist");
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].row_id, "plan-01");
+        assert_eq!(loaded.items[0].status, ThreadPlanItemStatus::Pending);
+        assert_eq!(loaded.items[0].step, "Legacy only");
+        assert_eq!(
+            loaded.snapshot.raw_csv,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Legacy only,codex-rs/core/src/plan_csv.rs,still readable,,,,
+"
         );
     }
 }

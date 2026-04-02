@@ -79,6 +79,7 @@ fn shell_command_payload_command(payload: &ToolPayload) -> Option<String> {
 struct RunExecLikeArgs {
     tool_name: String,
     exec_params: ExecParams,
+    plan_mode_guard_command: Option<Vec<String>>,
     additional_permissions: Option<PermissionProfile>,
     prefix_rule: Option<Vec<String>>,
     session: Arc<crate::codex::Session>,
@@ -245,6 +246,7 @@ impl ToolHandler for ShellHandler {
                 Self::run_exec_like(RunExecLikeArgs {
                     tool_name: tool_name.clone(),
                     exec_params,
+                    plan_mode_guard_command: Some(params.command.clone()),
                     additional_permissions: params.additional_permissions.clone(),
                     prefix_rule,
                     session,
@@ -262,6 +264,7 @@ impl ToolHandler for ShellHandler {
                 Self::run_exec_like(RunExecLikeArgs {
                     tool_name: tool_name.clone(),
                     exec_params,
+                    plan_mode_guard_command: Some(params.command.clone()),
                     additional_permissions: None,
                     prefix_rule: None,
                     session,
@@ -370,6 +373,7 @@ impl ToolHandler for ShellCommandHandler {
         ShellHandler::run_exec_like(RunExecLikeArgs {
             tool_name,
             exec_params,
+            plan_mode_guard_command: shlex::split(params.command.as_str()),
             additional_permissions: params.additional_permissions.clone(),
             prefix_rule,
             session,
@@ -388,6 +392,7 @@ impl ShellHandler {
         let RunExecLikeArgs {
             tool_name,
             exec_params,
+            plan_mode_guard_command,
             additional_permissions,
             prefix_rule,
             session,
@@ -405,6 +410,7 @@ impl ShellHandler {
             turn.cwd.as_path(),
             &exec_params.cwd,
             !is_known_safe_command(&exec_params.command),
+            plan_mode_guard_command.as_deref(),
         )?;
         let dependency_env = session.dependency_env().await;
         if !dependency_env.is_empty() {

@@ -163,7 +163,7 @@ pub fn canonicalize_thread_plan_csv(raw_csv: &str) -> anyhow::Result<String> {
     render_thread_plan_csv(rows.as_slice())
 }
 
-fn canonicalize_thread_plan_snapshot_csv(raw_csv: &str) -> anyhow::Result<String> {
+pub(crate) fn canonicalize_thread_plan_snapshot_csv(raw_csv: &str) -> anyhow::Result<String> {
     let rows = parse_thread_plan_snapshot_csv(raw_csv)?;
     render_thread_plan_csv(rows.as_slice())
 }

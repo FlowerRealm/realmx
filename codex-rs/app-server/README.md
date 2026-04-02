@@ -864,7 +864,7 @@ Plan mode treats the fenced CSV inside `<proposed_plan>` as the only structured 
 id,status,step,path,details,inputs,outputs,depends_on,acceptance
 ```
 
-`inputs`, `outputs`, and `depends_on` use `|`-delimited values inside a single CSV cell. Older 5-column CSV blocks are no longer accepted.
+`inputs`, `outputs`, and `depends_on` use `|`-delimited values inside a single CSV cell. Older 5-column CSV blocks remain accepted for backward-compatible loading and migration, but newly emitted plan CSV should use the 9-column header above.
 
 #### reasoning
 

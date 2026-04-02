@@ -207,8 +207,63 @@ async fn plan_mode_mutating_exec_requires_scratch_dir() {
         repo.path(),
         repo.path(),
         true,
+        None,
     )
     .expect_err("repo-local mutation should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("must run outside the current target repo")
+    );
+}
+
+#[tokio::test]
+async fn plan_mode_mutating_exec_rejects_git_dash_c_target_repo_from_outside() {
+    let (mut session, _turn_context) = make_session_and_context().await;
+    session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+    let root = tempdir().expect("tempdir");
+    let repo = root.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git dir");
+    let scratch = root.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("scratch dir");
+
+    let command = shlex::split("git -C ../repo commit --amend").expect("split command");
+    let err = reject_plan_mode_target_repo_mutation(
+        &session,
+        ModeKind::Plan,
+        repo.as_path(),
+        scratch.as_path(),
+        true,
+        Some(command.as_slice()),
+    )
+    .expect_err("git -C target repo should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("must run outside the current target repo")
+    );
+}
+
+#[tokio::test]
+async fn plan_mode_mutating_exec_rejects_explicit_target_repo_path_argument() {
+    let (mut session, _turn_context) = make_session_and_context().await;
+    session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+    let root = tempdir().expect("tempdir");
+    let repo = root.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git dir");
+    let scratch = root.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("scratch dir");
+
+    let command = shlex::split("python mutate.py ../repo/Cargo.toml").expect("split command");
+    let err = reject_plan_mode_target_repo_mutation(
+        &session,
+        ModeKind::Plan,
+        repo.as_path(),
+        scratch.as_path(),
+        true,
+        Some(command.as_slice()),
+    )
+    .expect_err("explicit target repo path should be rejected");
 
     assert!(
         err.to_string()
