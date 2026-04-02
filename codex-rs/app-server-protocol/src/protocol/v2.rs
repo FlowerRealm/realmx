@@ -86,10 +86,6 @@ use codex_protocol::user_input::TextElement as CoreTextElement;
 use codex_protocol::user_input::UserInput as CoreUserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -3556,8 +3552,6 @@ pub struct Thread {
     /// For all other responses and notifications returning a Thread,
     /// the turns field will be an empty list.
     pub turns: Vec<Turn>,
-    #[schemars(required)]
-    #[schemars(schema_with = "required_nullable_thread_active_plan_schema")]
     pub active_plan: Option<ThreadActivePlan>,
 }
 
@@ -3585,25 +3579,6 @@ pub struct ThreadActivePlanRow {
     pub outputs: Option<Vec<String>>,
     pub depends_on: Option<Vec<String>>,
     pub acceptance: Option<String>,
-}
-
-fn required_nullable_thread_active_plan_schema(generator: &mut SchemaGenerator) -> Schema {
-    Schema::Object(SchemaObject {
-        subschemas: Some(
-            schemars::schema::SubschemaValidation {
-                any_of: Some(vec![
-                    generator.subschema_for::<ThreadActivePlan>(),
-                    Schema::Object(SchemaObject {
-                        instance_type: Some(InstanceType::Null.into()),
-                        ..Default::default()
-                    }),
-                ]),
-                ..Default::default()
-            }
-            .into(),
-        ),
-        ..Default::default()
-    })
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

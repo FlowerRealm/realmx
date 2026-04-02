@@ -748,7 +748,6 @@
         }
       },
       "required": [
-        "activePlan",
         "cliVersion",
         "createdAt",
         "cwd",
