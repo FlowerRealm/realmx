@@ -7,8 +7,8 @@ use crate::ThreadPlanSnapshot;
 use crate::ThreadPlanSnapshotCreateParams;
 use crate::canonicalize_thread_plan_csv;
 use crate::model::ThreadPlanSnapshotRow;
-use crate::parse_thread_plan_csv;
 use crate::render_thread_plan_csv;
+use crate::thread_plan_csv::parse_thread_plan_snapshot_csv;
 
 impl StateRuntime {
     pub async fn replace_active_thread_plan(
@@ -16,7 +16,7 @@ impl StateRuntime {
         snapshot: &ThreadPlanSnapshotCreateParams,
     ) -> anyhow::Result<ActiveThreadPlan> {
         let raw_csv = canonicalize_thread_plan_csv(snapshot.raw_csv.as_str())?;
-        let rows = parse_thread_plan_csv(raw_csv.as_str())?;
+        let rows = parse_thread_plan_snapshot_csv(raw_csv.as_str())?;
         let now = Utc::now().timestamp();
         let mut tx = self.pool.begin().await?;
 
@@ -99,7 +99,7 @@ LIMIT 1
         };
 
         let snapshot = ThreadPlanSnapshot::try_from(snapshot_row)?;
-        let rows = match parse_thread_plan_csv(snapshot.raw_csv.as_str()) {
+        let rows = match parse_thread_plan_snapshot_csv(snapshot.raw_csv.as_str()) {
             Ok(rows) => rows,
             Err(err) => {
                 warn!(
@@ -261,7 +261,7 @@ plan-02,pending,Render plan,codex-rs/tui/src/history_cell.rs,,active plan rows,h
     }
 
     #[tokio::test]
-    async fn get_active_thread_plan_ignores_legacy_markdown_snapshots() {
+    async fn get_active_thread_plan_restores_legacy_markdown_snapshots() {
         let codex_home = unique_temp_dir();
         let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
             .await
@@ -293,7 +293,13 @@ INSERT INTO thread_plan_snapshots (
         let loaded = runtime
             .get_active_thread_plan("thread-legacy")
             .await
-            .expect("load active plan");
-        assert_eq!(loaded, None);
+            .expect("load active plan")
+            .expect("legacy active plan should load");
+        assert_eq!(loaded.snapshot.id, "snapshot-legacy");
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].row_id, "plan-01");
+        assert_eq!(loaded.items[0].step, "Legacy");
+        assert_eq!(loaded.items[0].inputs, Vec::<String>::new());
+        assert_eq!(loaded.items[0].depends_on, Vec::<String>::new());
     }
 }

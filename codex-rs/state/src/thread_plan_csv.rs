@@ -2,6 +2,9 @@ use crate::ThreadPlanItemCreateParams;
 use crate::ThreadPlanItemStatus;
 use std::collections::HashSet;
 
+const CSV_OPEN_FENCE: &str = "```csv";
+const CSV_CLOSE_FENCE: &str = "```";
+
 pub const THREAD_PLAN_CSV_HEADERS: [&str; 9] = [
     "id",
     "status",
@@ -14,14 +17,31 @@ pub const THREAD_PLAN_CSV_HEADERS: [&str; 9] = [
     "acceptance",
 ];
 
+const LEGACY_THREAD_PLAN_CSV_HEADERS: [&str; 5] = ["id", "status", "step", "path", "details"];
+
 pub fn parse_thread_plan_csv(raw_csv: &str) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
+    parse_thread_plan_csv_impl(raw_csv, /*allow_legacy_headers*/ false)
+}
+
+pub(crate) fn parse_thread_plan_snapshot_csv(
+    raw_csv: &str,
+) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
+    parse_thread_plan_csv_impl(raw_csv, /*allow_legacy_headers*/ true)
+}
+
+fn parse_thread_plan_csv_impl(
+    raw_csv: &str,
+    allow_legacy_headers: bool,
+) -> anyhow::Result<Vec<ThreadPlanItemCreateParams>> {
+    let raw_csv = extract_embedded_csv_block(raw_csv).unwrap_or(raw_csv);
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(false)
         .from_reader(raw_csv.as_bytes());
     let headers = reader.headers()?;
     let headers = headers.iter().collect::<Vec<_>>();
-    if headers != THREAD_PLAN_CSV_HEADERS {
+    let uses_legacy_headers = allow_legacy_headers && headers == LEGACY_THREAD_PLAN_CSV_HEADERS;
+    if headers != THREAD_PLAN_CSV_HEADERS && !uses_legacy_headers {
         let expected = THREAD_PLAN_CSV_HEADERS.join(",");
         let found = headers.join(",");
         return Err(anyhow::anyhow!(
@@ -63,10 +83,26 @@ pub fn parse_thread_plan_csv(raw_csv: &str) -> anyhow::Result<Vec<ThreadPlanItem
         }
 
         let details = record.get(4).unwrap_or_default().trim().to_string();
-        let inputs = split_pipe_list(record.get(5).unwrap_or_default());
-        let outputs = split_pipe_list(record.get(6).unwrap_or_default());
-        let depends_on = split_pipe_list(record.get(7).unwrap_or_default());
-        let acceptance = parse_optional_string(record.get(8).unwrap_or_default());
+        let inputs = if uses_legacy_headers {
+            Vec::new()
+        } else {
+            split_pipe_list(record.get(5).unwrap_or_default())
+        };
+        let outputs = if uses_legacy_headers {
+            Vec::new()
+        } else {
+            split_pipe_list(record.get(6).unwrap_or_default())
+        };
+        let depends_on = if uses_legacy_headers {
+            Vec::new()
+        } else {
+            split_pipe_list(record.get(7).unwrap_or_default())
+        };
+        let acceptance = if uses_legacy_headers {
+            None
+        } else {
+            parse_optional_string(record.get(8).unwrap_or_default())
+        };
 
         rows.push(ThreadPlanItemCreateParams {
             row_id,
@@ -127,6 +163,21 @@ pub fn canonicalize_thread_plan_csv(raw_csv: &str) -> anyhow::Result<String> {
     render_thread_plan_csv(rows.as_slice())
 }
 
+fn canonicalize_thread_plan_snapshot_csv(raw_csv: &str) -> anyhow::Result<String> {
+    let rows = parse_thread_plan_snapshot_csv(raw_csv)?;
+    render_thread_plan_csv(rows.as_slice())
+}
+
+fn extract_embedded_csv_block(markdown: &str) -> Option<&str> {
+    let open_index = markdown.find(CSV_OPEN_FENCE)?;
+    let body_start = open_index + CSV_OPEN_FENCE.len();
+    let body = markdown[body_start..]
+        .strip_prefix('\n')
+        .unwrap_or(&markdown[body_start..]);
+    let close_index = body.find(&format!("\n{CSV_CLOSE_FENCE}"))?;
+    Some(&body[..close_index])
+}
+
 fn parse_status(value: &str) -> anyhow::Result<ThreadPlanItemStatus> {
     match value.trim() {
         "pending" => Ok(ThreadPlanItemStatus::Pending),
@@ -182,8 +233,12 @@ fn validate_dependencies(rows: &[ThreadPlanItemCreateParams]) -> anyhow::Result<
 #[cfg(test)]
 mod tests {
     use super::canonicalize_thread_plan_csv;
+    use super::canonicalize_thread_plan_snapshot_csv;
     use super::parse_thread_plan_csv;
+    use super::parse_thread_plan_snapshot_csv;
     use super::render_thread_plan_csv;
+    use crate::ThreadPlanItemCreateParams;
+    use crate::ThreadPlanItemStatus;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -204,7 +259,55 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows,plan ma
     }
 
     #[test]
-    fn rejects_legacy_headers() {
+    fn parses_legacy_headers() {
+        let raw_csv = "\
+id,status,step,path,details
+plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows
+";
+
+        let rows =
+            parse_thread_plan_snapshot_csv(raw_csv).expect("legacy snapshot csv should parse");
+        assert_eq!(
+            rows,
+            vec![ThreadPlanItemCreateParams {
+                row_id: "plan-01".to_string(),
+                row_index: 0,
+                status: ThreadPlanItemStatus::Pending,
+                step: "Parse CSV".to_string(),
+                path: "codex-rs/core/src/plan_csv.rs".to_string(),
+                details: "extract rows".to_string(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                depends_on: Vec::new(),
+                acceptance: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn canonicalizes_embedded_legacy_markdown_csv() {
+        let raw_csv = "\
+<proposed_plan>
+```csv
+id,status,step,path,details
+plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows
+```
+</proposed_plan>
+";
+
+        let canonical = canonicalize_thread_plan_snapshot_csv(raw_csv)
+            .expect("legacy snapshot markdown should parse");
+        assert_eq!(
+            canonical,
+            "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows,,,,
+"
+        );
+    }
+
+    #[test]
+    fn strict_parser_rejects_legacy_headers() {
         let raw_csv = "\
 id,status,step,path,details
 plan-01,pending,Parse CSV,codex-rs/core/src/plan_csv.rs,extract rows

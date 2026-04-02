@@ -4209,7 +4209,7 @@ impl CodexMessageProcessor {
             snapshot_id: active_plan.snapshot.id,
             source_turn_id: active_plan.snapshot.source_turn_id,
             source_item_id: active_plan.snapshot.source_item_id,
-            raw_csv: active_plan.snapshot.raw_csv,
+            raw_markdown: Self::thread_plan_raw_markdown(active_plan.snapshot.raw_csv.as_str()),
             rows: active_plan
                 .items
                 .into_iter()
@@ -4236,6 +4236,15 @@ impl CodexMessageProcessor {
                 })
                 .collect(),
         }))
+    }
+
+    fn thread_plan_raw_markdown(raw_csv: &str) -> String {
+        if raw_csv.contains("```csv") {
+            return raw_csv.to_string();
+        }
+
+        let raw_csv = raw_csv.trim_end_matches('\n');
+        format!("<proposed_plan>\n```csv\n{raw_csv}\n```\n</proposed_plan>\n")
     }
 
     async fn state_db_ctx_for_thread(&self) -> Option<StateDbHandle> {

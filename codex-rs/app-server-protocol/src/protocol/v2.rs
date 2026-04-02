@@ -3562,7 +3562,7 @@ pub struct ThreadActivePlan {
     pub snapshot_id: String,
     pub source_turn_id: String,
     pub source_item_id: String,
-    pub raw_csv: String,
+    pub raw_markdown: String,
     pub rows: Vec<ThreadActivePlanRow>,
 }
 

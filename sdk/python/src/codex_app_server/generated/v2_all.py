@@ -7096,7 +7096,7 @@ class ThreadActivePlan(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    raw_csv: Annotated[str, Field(alias="rawCsv")]
+    raw_markdown: Annotated[str, Field(alias="rawMarkdown")]
     rows: list[ThreadActivePlanRow]
     snapshot_id: Annotated[str, Field(alias="snapshotId")]
     source_item_id: Annotated[str, Field(alias="sourceItemId")]
