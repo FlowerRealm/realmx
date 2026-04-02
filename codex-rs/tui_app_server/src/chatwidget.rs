@@ -155,7 +155,6 @@ use codex_protocol::protocol::DeprecationNoticeEvent;
 use codex_protocol::protocol::ErrorEvent;
 #[cfg(test)]
 use codex_protocol::protocol::Event;
-#[cfg(test)]
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecApprovalRequestEvent;
 use codex_protocol::protocol::ExecCommandBeginEvent;
@@ -1992,19 +1991,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_initial_messages(&mut self, events: Vec<EventMsg>) {
-        for msg in events {
-            if matches!(
-                msg,
-                EventMsg::SessionConfigured(_) | EventMsg::ThreadNameUpdated(_)
-            ) {
-                continue;
-            }
-            self.dispatch_event_msg(
-                /*id*/ None,
-                msg,
-                Some(ReplayKind::ResumeInitialMessages),
-            );
-        }
+        self.replay_initial_messages(events);
     }
 
     fn emit_forked_thread_event(&self, forked_from_id: ThreadId) {
@@ -6622,7 +6609,6 @@ impl ChatWidget {
         });
     }
 
-    #[cfg(test)]
     fn replay_initial_messages(&mut self, events: Vec<EventMsg>) {
         for msg in events {
             if matches!(
@@ -6660,7 +6646,6 @@ impl ChatWidget {
     /// `id` is `Some` for live events and `None` for replayed events from
     /// `replay_initial_messages()`. Callers should treat `None` as a "fake" id
     /// that must not be used to correlate follow-up actions.
-    #[cfg(test)]
     fn dispatch_event_msg(
         &mut self,
         id: Option<String>,
