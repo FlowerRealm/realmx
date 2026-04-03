@@ -42,17 +42,13 @@ use base64::Engine;
 use codex_app_server_protocol::McpServerStatus;
 use codex_core::config::Config;
 use codex_core::config::types::McpServerTransportConfig;
-#[cfg(test)]
 use codex_core::mcp::McpManager;
-#[cfg(test)]
 use codex_core::plugins::PluginsManager;
 use codex_core::web_search::web_search_detail;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::account::PlanType;
 use codex_protocol::config_types::ServiceTier;
-#[cfg(test)]
 use codex_protocol::mcp::Resource;
-#[cfg(test)]
 use codex_protocol::mcp::ResourceTemplate;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::models::local_image_label_text;
@@ -83,7 +79,6 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(test)]
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;

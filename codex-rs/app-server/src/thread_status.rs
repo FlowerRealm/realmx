@@ -338,9 +338,7 @@ impl ThreadWatchState {
         F: FnOnce(&mut RuntimeFacts),
     {
         let previous_status = self.status_for(thread_id);
-        let Some(runtime) = self.runtime_by_thread_id.get_mut(thread_id) else {
-            return None;
-        };
+        let runtime = self.runtime_by_thread_id.get_mut(thread_id)?;
         runtime.is_loaded = true;
         mutate(runtime);
         self.status_changed_notification(thread_id.to_string(), previous_status)
