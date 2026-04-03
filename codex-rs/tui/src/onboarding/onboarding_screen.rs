@@ -512,16 +512,13 @@ mod tests {
 
         let rendered = compact_render(&terminal.backend().to_string());
         assert!(!rendered.contains("Welcome to Codex"));
-        insta::assert_snapshot!(
-                                                                                                                                                                                                                                                            rendered,
-                                                                                                                                                                                                                                                            @r"
+        insta::assert_snapshot!(rendered, @r"
 > You are in /workspace/project
 Do you trust the contents of this directory? Working with untrusted
 contents comes with higher risk of prompt injection.
 › 1. Yes, continue
   2. No, quit
 Press Enter to continue
-"
-                                                                                                                                                                                                                                                );
+");
     }
 }
