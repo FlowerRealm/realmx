@@ -164,7 +164,6 @@ impl ChatWidget {
         )
     }
 
-    #[cfg(test)]
     pub(super) fn should_render_realtime_user_message_event(
         &self,
         event: &UserMessageEvent,
