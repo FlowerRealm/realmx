@@ -170,7 +170,7 @@ fn command_targets_target_repo(
             continue;
         }
 
-        if token == "-C" {
+        if matches!(token.as_str(), "-C" | "--work-tree" | "--git-dir") {
             expects_repo_path_for_flag = true;
             continue;
         }
@@ -668,6 +668,68 @@ mod tests {
             ]),
         )
         .expect_err("explicit repo path argument should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("must run outside the current target repo")
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_mode_rejects_git_work_tree_flag_targeting_repo() {
+        let (mut session, _turn_context) = make_session_and_context().await;
+        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        let root = tempdir().expect("tempdir");
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).expect("git dir");
+        let scratch = root.path().join("scratch");
+        std::fs::create_dir_all(&scratch).expect("scratch dir");
+
+        let err = reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::Plan,
+            repo.as_path(),
+            scratch.as_path(),
+            true,
+            Some(&[
+                "git".to_string(),
+                "--work-tree".to_string(),
+                repo.display().to_string(),
+                "status".to_string(),
+            ]),
+        )
+        .expect_err("git --work-tree repo should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("must run outside the current target repo")
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_mode_rejects_git_dir_flag_targeting_repo() {
+        let (mut session, _turn_context) = make_session_and_context().await;
+        session.enable_feature_for_test(Feature::PlanModePreparatoryMutations);
+        let root = tempdir().expect("tempdir");
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).expect("git dir");
+        let scratch = root.path().join("scratch");
+        std::fs::create_dir_all(&scratch).expect("scratch dir");
+
+        let err = reject_plan_mode_target_repo_mutation(
+            &session,
+            ModeKind::Plan,
+            repo.as_path(),
+            scratch.as_path(),
+            true,
+            Some(&[
+                "git".to_string(),
+                "--git-dir".to_string(),
+                repo.join(".git").display().to_string(),
+                "status".to_string(),
+            ]),
+        )
+        .expect_err("git --git-dir repo/.git should be rejected");
 
         assert!(
             err.to_string()
