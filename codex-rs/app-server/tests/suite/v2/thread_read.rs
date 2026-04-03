@@ -386,6 +386,118 @@ plan-01,in_progress,Restore list active plan,codex-rs/app-server/src/codex_messa
 }
 
 #[tokio::test]
+async fn thread_list_prefers_loaded_thread_state_db_for_active_plan() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let sqlite_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new_with_env(
+        codex_home.path(),
+        &[("CODEX_SQLITE_HOME", Some(sqlite_home.path().to_str().expect("sqlite home utf8")))],
+    )
+    .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+
+    let loaded_thread_state_db =
+        StateRuntime::init(sqlite_home.path().to_path_buf(), "mock_provider".into()).await?;
+    loaded_thread_state_db.mark_backfill_complete(None).await?;
+    let active_plan = loaded_thread_state_db
+        .replace_active_thread_plan(&ThreadPlanSnapshotCreateParams {
+            id: "snapshot-loaded-thread-1".to_string(),
+            thread_id: thread.id.clone(),
+            source_turn_id: "turn-1".to_string(),
+            source_item_id: "item-1".to_string(),
+            raw_csv: "\
+id,status,step,path,details,inputs,outputs,depends_on,acceptance
+plan-01,in_progress,Use loaded thread db,codex-rs/app-server/src/codex_message_processor.rs,prefer thread state db,,,,
+"
+            .to_string(),
+        })
+        .await?;
+    assert_eq!(active_plan.items.len(), 1);
+
+    let global_state_db =
+        StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
+    global_state_db.mark_backfill_complete(None).await?;
+
+    let list_id = mcp
+        .send_thread_list_request(ThreadListParams {
+            cursor: None,
+            limit: Some(20),
+            sort_key: None,
+            model_providers: Some(vec!["mock_provider".to_string()]),
+            source_kinds: None,
+            archived: None,
+            cwd: None,
+            search_term: None,
+        })
+        .await?;
+    let list_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+    )
+    .await??;
+    let list_result = list_resp.result.clone();
+    let ThreadListResponse { data, .. } = to_response::<ThreadListResponse>(list_resp)?;
+
+    let listed = data
+        .iter()
+        .find(|listed_thread| listed_thread.id == thread.id)
+        .expect("thread/list should include the loaded thread");
+    let active_plan = listed
+        .active_plan
+        .as_ref()
+        .expect("thread/list should use the loaded thread state db active plan");
+    assert_eq!(active_plan.snapshot_id, "snapshot-loaded-thread-1");
+    assert_eq!(active_plan.rows.len(), 1);
+    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
+    assert_eq!(
+        active_plan.rows[0].path.as_deref(),
+        Some("codex-rs/app-server/src/codex_message_processor.rs")
+    );
+
+    let listed_json = list_result
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("thread/list result.data must be an array")
+        .iter()
+        .find(|listed_thread| listed_thread.get("id").and_then(Value::as_str) == Some(&thread.id))
+        .and_then(Value::as_object)
+        .expect("thread/list should include the loaded thread as an object");
+    let active_plan_json = listed_json
+        .get("activePlan")
+        .and_then(Value::as_object)
+        .expect("thread/list must serialize thread.activePlan");
+    assert_eq!(
+        active_plan_json.get("snapshotId").and_then(Value::as_str),
+        Some("snapshot-loaded-thread-1")
+    );
+    assert_eq!(active_plan_json.get("rawCsv"), None);
+    assert!(
+        active_plan_json
+            .get("rawMarkdown")
+            .and_then(Value::as_str)
+            .is_some_and(|raw_markdown| raw_markdown.contains("Use loaded thread db"))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_read_loaded_thread_returns_precomputed_path_before_materialization() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

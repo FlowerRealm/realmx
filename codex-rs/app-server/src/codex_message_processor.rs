@@ -3515,15 +3515,18 @@ impl CodexMessageProcessor {
         let mut threads = Vec::with_capacity(summaries.len());
         let mut thread_ids = HashSet::with_capacity(summaries.len());
         let mut status_ids = Vec::with_capacity(summaries.len());
-        let state_db_ctx = get_state_db(&self.config).await;
-
         for summary in summaries {
             let conversation_id = summary.conversation_id;
             thread_ids.insert(conversation_id);
 
             let mut thread = summary_to_thread(summary);
-            thread.active_plan =
-                active_plan_from_state_db(state_db_ctx.as_ref(), conversation_id).await;
+            thread.active_plan = match self.active_plan_for_thread(conversation_id).await {
+                Ok(active_plan) => active_plan,
+                Err(message) => {
+                    self.send_internal_error(request_id, message).await;
+                    return;
+                }
+            };
             status_ids.push(thread.id.clone());
             threads.push((conversation_id, thread));
         }
