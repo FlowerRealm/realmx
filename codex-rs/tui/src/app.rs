@@ -2366,6 +2366,9 @@ impl App {
                 default_mode_request_user_input: config
                     .features
                     .enabled(Feature::DefaultModeRequestUserInput),
+                plan_mode_preparatory_mutations: config
+                    .features
+                    .enabled(Feature::PlanModePreparatoryMutations),
             },
             environment_manager,
         ));
