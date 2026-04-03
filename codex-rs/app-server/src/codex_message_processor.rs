@@ -8512,11 +8512,15 @@ pub(crate) async fn active_plan_from_state_db(
         snapshot_id: active_plan.snapshot.id,
         source_turn_id: active_plan.snapshot.source_turn_id,
         source_item_id: active_plan.snapshot.source_item_id,
-        raw_markdown: if active_plan.snapshot.raw_csv.contains("```csv") {
-            active_plan.snapshot.raw_csv.clone()
-        } else {
+        raw_markdown: {
             let raw_csv = active_plan.snapshot.raw_csv.trim_end_matches('\n');
-            format!("<proposed_plan>\n```csv\n{raw_csv}\n```\n</proposed_plan>\n")
+            if raw_csv.starts_with("<proposed_plan>\n```csv\n")
+                && raw_csv.ends_with("\n```\n</proposed_plan>")
+            {
+                active_plan.snapshot.raw_csv.clone()
+            } else {
+                format!("<proposed_plan>\n```csv\n{raw_csv}\n```\n</proposed_plan>\n")
+            }
         },
         rows: active_plan
             .items

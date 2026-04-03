@@ -127,32 +127,13 @@ use codex_protocol::models::local_image_label_text;
 use codex_protocol::parse_command::ParsedCommand;
 use codex_protocol::plan_tool::PlanItemArg as UpdatePlanItemArg;
 use codex_protocol::plan_tool::StepStatus as UpdatePlanItemStatus;
-#[cfg(test)]
-use codex_protocol::protocol::AgentMessageDeltaEvent;
-#[cfg(test)]
-use codex_protocol::protocol::AgentMessageEvent;
-#[cfg(test)]
-use codex_protocol::protocol::AgentReasoningDeltaEvent;
-#[cfg(test)]
-use codex_protocol::protocol::AgentReasoningEvent;
-#[cfg(test)]
-use codex_protocol::protocol::AgentReasoningRawContentDeltaEvent;
-#[cfg(test)]
-use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
-#[cfg(test)]
-use codex_protocol::protocol::BackgroundEventEvent;
-#[cfg(test)]
 use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use codex_protocol::protocol::CollabAgentRef;
-#[cfg(test)]
-use codex_protocol::protocol::CollabAgentSpawnBeginEvent;
 use codex_protocol::protocol::CollabAgentStatusEntry;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::DeprecationNoticeEvent;
-#[cfg(test)]
-use codex_protocol::protocol::ErrorEvent;
 #[cfg(test)]
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -161,19 +142,15 @@ use codex_protocol::protocol::ExecCommandBeginEvent;
 use codex_protocol::protocol::ExecCommandEndEvent;
 use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
 use codex_protocol::protocol::ExecCommandSource;
-#[cfg(test)]
 use codex_protocol::protocol::ExitedReviewModeEvent;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::ImageGenerationBeginEvent;
 use codex_protocol::protocol::ImageGenerationEndEvent;
 use codex_protocol::protocol::ListSkillsResponseEvent;
-#[cfg(test)]
 use codex_protocol::protocol::McpListToolsResponseEvent;
-#[cfg(test)]
 use codex_protocol::protocol::McpStartupCompleteEvent;
 use codex_protocol::protocol::McpStartupStatus;
-#[cfg(test)]
 use codex_protocol::protocol::McpStartupUpdateEvent;
 use codex_protocol::protocol::McpToolCallBeginEvent;
 use codex_protocol::protocol::McpToolCallEndEvent;
@@ -183,23 +160,14 @@ use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::protocol::SkillMetadata as ProtocolSkillMetadata;
-#[cfg(test)]
-use codex_protocol::protocol::StreamErrorEvent;
 use codex_protocol::protocol::TerminalInteractionEvent;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnAbortReason;
-#[cfg(test)]
-use codex_protocol::protocol::TurnCompleteEvent;
-#[cfg(test)]
-use codex_protocol::protocol::TurnDiffEvent;
-#[cfg(test)]
 use codex_protocol::protocol::UndoCompletedEvent;
-#[cfg(test)]
 use codex_protocol::protocol::UndoStartedEvent;
 use codex_protocol::protocol::UserMessageEvent;
 use codex_protocol::protocol::ViewImageToolCallEvent;
-#[cfg(test)]
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::protocol::WebSearchBeginEvent;
 use codex_protocol::protocol::WebSearchEndEvent;
@@ -597,7 +565,6 @@ enum RateLimitErrorKind {
     Generic,
 }
 
-#[cfg(test)]
 fn core_rate_limit_error_kind(info: &CoreCodexErrorInfo) -> Option<RateLimitErrorKind> {
     match info {
         CoreCodexErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
@@ -2440,7 +2407,6 @@ impl ChatWidget {
         true
     }
 
-    #[cfg(test)]
     fn handle_steer_rejected_error(&mut self, codex_error_info: &CoreCodexErrorInfo) -> bool {
         matches!(
             codex_error_info,
@@ -2730,7 +2696,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     fn on_mcp_startup_update(&mut self, ev: McpStartupUpdateEvent) {
         let mut status = self.mcp_startup_status.take().unwrap_or_default();
         if let McpStartupStatus::Failed { error } = &ev.status {
@@ -2777,7 +2742,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     fn on_mcp_startup_complete(&mut self, ev: McpStartupCompleteEvent) {
         let mut parts = Vec::new();
         if !ev.failed.is_empty() {
@@ -3785,7 +3749,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     fn on_background_event(&mut self, message: String) {
         debug!("BackgroundEvent: {message}");
         self.bottom_pane.ensure_status_indicator();
@@ -3826,7 +3789,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     fn on_undo_started(&mut self, event: UndoStartedEvent) {
         self.bottom_pane.ensure_status_indicator();
         self.bottom_pane
@@ -3838,7 +3800,6 @@ impl ChatWidget {
         self.set_status_header(message);
     }
 
-    #[cfg(test)]
     fn on_undo_completed(&mut self, event: UndoCompletedEvent) {
         let UndoCompletedEvent { success, message } = event;
         self.bottom_pane.hide_status_indicator();
@@ -6612,8 +6573,10 @@ impl ChatWidget {
     fn replay_initial_messages(&mut self, events: Vec<EventMsg>) {
         for msg in events {
             if matches!(
-                msg,
-                EventMsg::SessionConfigured(_) | EventMsg::ThreadNameUpdated(_)
+                &msg,
+                EventMsg::SessionConfigured(_)
+                    | EventMsg::ThreadNameUpdated(_)
+                    | EventMsg::ShutdownComplete
             ) {
                 continue;
             }
@@ -6635,7 +6598,7 @@ impl ChatWidget {
     #[cfg(test)]
     pub(crate) fn handle_codex_event_replay(&mut self, event: Event) {
         let Event { msg, .. } = event;
-        if matches!(msg, EventMsg::ShutdownComplete) {
+        if matches!(&msg, EventMsg::ShutdownComplete) {
             return;
         }
         self.dispatch_event_msg(/*id*/ None, msg, Some(ReplayKind::ThreadSnapshot));
@@ -6674,29 +6637,25 @@ impl ChatWidget {
         match msg {
             EventMsg::SessionConfigured(e) => self.on_session_configured(e),
             EventMsg::ThreadNameUpdated(e) => self.on_thread_name_updated(e),
-            EventMsg::AgentMessage(AgentMessageEvent { .. })
+            EventMsg::AgentMessage(_)
                 if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot))
                     && !self.is_review_mode => {}
-            EventMsg::AgentMessage(AgentMessageEvent { message, .. })
-                if from_replay || self.is_review_mode =>
-            {
+            EventMsg::AgentMessage(event) if from_replay || self.is_review_mode => {
                 // TODO(ccunningham): stop relying on legacy AgentMessage in review mode,
                 // including thread-snapshot replay, and forward
                 // ItemCompleted(TurnItem::AgentMessage(_)) instead.
-                self.on_agent_message(message)
+                self.on_agent_message(event.message)
             }
-            EventMsg::AgentMessage(AgentMessageEvent { .. }) => {}
-            EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
-                self.on_agent_message_delta(delta)
-            }
+            EventMsg::AgentMessage(_) => {}
+            EventMsg::AgentMessageDelta(event) => self.on_agent_message_delta(event.delta),
             EventMsg::PlanDelta(event) => self.on_plan_delta(event.delta),
-            EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta })
-            | EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
-                delta,
-            }) => self.on_agent_reasoning_delta(delta),
-            EventMsg::AgentReasoning(AgentReasoningEvent { .. }) => self.on_agent_reasoning_final(),
-            EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
-                self.on_agent_reasoning_delta(text);
+            EventMsg::AgentReasoningDelta(event) => self.on_agent_reasoning_delta(event.delta),
+            EventMsg::AgentReasoningRawContentDelta(event) => {
+                self.on_agent_reasoning_delta(event.delta)
+            }
+            EventMsg::AgentReasoning(_) => self.on_agent_reasoning_final(),
+            EventMsg::AgentReasoningRawContent(event) => {
+                self.on_agent_reasoning_delta(event.text);
                 self.on_agent_reasoning_final();
             }
             EventMsg::AgentReasoningSectionBreak(_) => self.on_reasoning_section_break(),
@@ -6706,10 +6665,8 @@ impl ChatWidget {
                     self.on_task_started();
                 }
             }
-            EventMsg::TurnComplete(TurnCompleteEvent {
-                last_agent_message, ..
-            }) => {
-                self.on_task_complete(last_agent_message, from_replay);
+            EventMsg::TurnComplete(event) => {
+                self.on_task_complete(event.last_agent_message, from_replay);
             }
             EventMsg::TokenCount(ev) => {
                 self.set_token_info(ev.info);
@@ -6726,10 +6683,9 @@ impl ChatWidget {
             }
             EventMsg::GuardianAssessment(ev) => self.on_guardian_assessment(ev),
             EventMsg::ModelReroute(_) => {}
-            EventMsg::Error(ErrorEvent {
-                message,
-                codex_error_info,
-            }) => {
+            EventMsg::Error(event) => {
+                let message = event.message;
+                let codex_error_info = event.codex_error_info;
                 if codex_error_info
                     .as_ref()
                     .is_some_and(|info| self.handle_steer_rejected_error(info))
@@ -6811,20 +6767,14 @@ impl ChatWidget {
                 ));
             }
             EventMsg::ShutdownComplete => self.on_shutdown_complete(),
-            EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => self.on_turn_diff(unified_diff),
+            EventMsg::TurnDiff(event) => self.on_turn_diff(event.unified_diff),
             EventMsg::DeprecationNotice(ev) => self.on_deprecation_notice(ev),
-            EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
-                self.on_background_event(message)
-            }
+            EventMsg::BackgroundEvent(event) => self.on_background_event(event.message),
             EventMsg::UndoStarted(ev) => self.on_undo_started(ev),
             EventMsg::UndoCompleted(ev) => self.on_undo_completed(ev),
-            EventMsg::StreamError(StreamErrorEvent {
-                message,
-                additional_details,
-                ..
-            }) => {
+            EventMsg::StreamError(event) => {
                 if !is_resume_initial_replay {
-                    self.on_stream_error(message, additional_details);
+                    self.on_stream_error(event.message, event.additional_details);
                 }
             }
             EventMsg::UserMessage(ev) => {
@@ -6837,17 +6787,12 @@ impl ChatWidget {
             }
             EventMsg::ExitedReviewMode(review) => self.on_exited_review_mode(review),
             EventMsg::ContextCompacted(_) => self.on_agent_message("Context compacted".to_owned()),
-            EventMsg::CollabAgentSpawnBegin(CollabAgentSpawnBeginEvent {
-                call_id,
-                model,
-                reasoning_effort,
-                ..
-            }) => {
+            EventMsg::CollabAgentSpawnBegin(event) => {
                 self.pending_collab_spawn_requests.insert(
-                    call_id,
+                    event.call_id,
                     multi_agents::SpawnRequestSummary {
-                        model,
-                        reasoning_effort,
+                        model: event.model,
+                        reasoning_effort: event.reasoning_effort,
                     },
                 );
             }
@@ -6909,7 +6854,7 @@ impl ChatWidget {
                         unreachable!("user message item should convert to a legacy user message");
                     };
                     let rendered = Self::rendered_user_message_event_from_event(&event);
-                    let compare_key = Self::pending_steer_compare_key_from_item(item);
+                    let compare_key = Self::pending_steer_compare_key_from_items(&item.content);
                     if self
                         .pending_steers
                         .front()
@@ -6979,7 +6924,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     fn on_entered_review_mode(&mut self, review: ReviewRequest, from_replay: bool) {
         let hint = review
             .user_facing_hint
@@ -6987,7 +6931,6 @@ impl ChatWidget {
         self.enter_review_mode_with_hint(hint, from_replay);
     }
 
-    #[cfg(test)]
     fn on_exited_review_mode(&mut self, review: ExitedReviewModeEvent) {
         if let Some(output) = review.review_output {
             self.flush_answer_stream_with_separator();
@@ -10245,7 +10188,6 @@ impl ChatWidget {
         true
     }
 
-    #[cfg(test)]
     fn on_list_mcp_tools(&mut self, ev: McpListToolsResponseEvent) {
         self.add_to_history(history_cell::new_mcp_tools_output(
             &self.config,

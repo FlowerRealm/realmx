@@ -1860,6 +1860,7 @@ mod tests {
                     error: None,
                 },
             ],
+            active_plan: None,
         };
 
         assert_eq!(
@@ -1954,6 +1955,7 @@ mod tests {
                 git_info: None,
                 name: Some("thread".to_string()),
                 turns: vec![],
+                active_plan: None,
             },
             model: "gpt-5.4".to_string(),
             model_provider: "openai".to_string(),
