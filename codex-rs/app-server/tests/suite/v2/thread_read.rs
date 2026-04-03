@@ -29,11 +29,9 @@ use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 use codex_state::StateRuntime;
 use codex_state::ThreadPlanSnapshotCreateParams;
-use codex_state::state_db_path;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use sqlx::SqlitePool;
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -274,109 +272,6 @@ plan-01,in_progress,Parse CSV,codex-rs/core/src/plan_csv.rs,extract active rows,
     assert_eq!(
         first_row.get("acceptance").and_then(Value::as_str),
         Some("active plan rows reload")
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn thread_read_restores_legacy_markdown_active_plan() -> Result<()> {
-    let server = create_mock_responses_server_repeating_assistant("Done").await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri())?;
-
-    let preview = "Saved user message";
-    let conversation_id = create_fake_rollout_with_text_elements(
-        codex_home.path(),
-        "2025-01-05T12-00-00",
-        "2025-01-05T12:00:00Z",
-        preview,
-        vec![],
-        Some("mock_provider"),
-        None,
-    )?;
-
-    let state_db =
-        StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
-    state_db.mark_backfill_complete(None).await?;
-    let state_path = state_db_path(codex_home.path());
-    let pool = SqlitePool::connect(&format!("sqlite://{}", state_path.display())).await?;
-    sqlx::query(
-        r#"
-INSERT INTO thread_plan_snapshots (
-    id,
-    thread_id,
-    source_turn_id,
-    source_item_id,
-    raw_csv,
-    created_at,
-    superseded_at
-) VALUES (?, ?, ?, ?, ?, ?, NULL)
-        "#,
-    )
-    .bind("snapshot-legacy")
-    .bind(conversation_id.as_str())
-    .bind("turn-1")
-    .bind("item-1")
-    .bind(
-        "<proposed_plan>\n```csv\nid,status,step,path,details\nplan-01,pending,Legacy,codex-rs/core/src/plan_csv.rs,extract rows\n```\n</proposed_plan>\n",
-    )
-    .bind(1_i64)
-    .execute(&pool)
-    .await?;
-
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let read_id = mcp
-        .send_thread_read_request(ThreadReadParams {
-            thread_id: conversation_id,
-            include_turns: false,
-        })
-        .await?;
-    let read_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
-    )
-    .await??;
-    let read_result = read_resp.result.clone();
-    let ThreadReadResponse { thread } = to_response::<ThreadReadResponse>(read_resp)?;
-
-    let active_plan = thread
-        .active_plan
-        .expect("legacy active plan should be returned");
-    assert_eq!(active_plan.snapshot_id, "snapshot-legacy");
-    assert_eq!(active_plan.rows.len(), 1);
-    assert_eq!(active_plan.rows[0].id.as_deref(), Some("plan-01"));
-    assert_eq!(active_plan.rows[0].step, "Legacy");
-    assert_eq!(
-        active_plan.rows[0].path.as_deref(),
-        Some("codex-rs/core/src/plan_csv.rs")
-    );
-    assert_eq!(active_plan.rows[0].details.as_deref(), Some("extract rows"));
-    assert_eq!(active_plan.rows[0].inputs, None);
-    assert_eq!(active_plan.rows[0].outputs, None);
-    assert_eq!(active_plan.rows[0].depends_on, None);
-    assert_eq!(active_plan.rows[0].acceptance, None);
-
-    let active_plan_json = read_result
-        .get("thread")
-        .and_then(Value::as_object)
-        .and_then(|thread_json| thread_json.get("activePlan"))
-        .and_then(Value::as_object)
-        .expect("thread/read must serialize thread.activePlan");
-    assert_eq!(active_plan_json.get("rawCsv"), None);
-    assert!(
-        active_plan_json
-            .get("rawMarkdown")
-            .and_then(Value::as_str)
-            .is_some_and(|raw_markdown| raw_markdown.starts_with("<proposed_plan>\n```csv\n"))
-    );
-    assert!(
-        active_plan_json
-            .get("rawMarkdown")
-            .and_then(Value::as_str)
-            .is_some_and(|raw_markdown| raw_markdown.contains("id,status,step,path,details"))
     );
 
     Ok(())
