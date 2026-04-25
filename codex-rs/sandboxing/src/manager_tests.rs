@@ -5,9 +5,9 @@ use super::SandboxType;
 use super::SandboxablePreference;
 use super::get_platform_sandbox;
 use codex_protocol::config_types::WindowsSandboxLevel;
+use codex_protocol::models::AdditionalPermissionProfile as PermissionProfile;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::NetworkPermissions;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -15,7 +15,6 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::NetworkAccess;
-use codex_protocol::protocol::ReadOnlyAccess;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use dunce::canonicalize;
@@ -31,7 +30,7 @@ fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
         NetworkSandboxPolicy::Enabled,
         SandboxablePreference::Auto,
         WindowsSandboxLevel::Disabled,
-        false,
+        /*has_managed_network_requirements*/ false,
     );
     assert_eq!(sandbox, SandboxType::None);
 }
@@ -39,13 +38,14 @@ fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
 #[test]
 fn danger_full_access_uses_platform_sandbox_with_network_requirements() {
     let manager = SandboxManager::new();
-    let expected = get_platform_sandbox(false).unwrap_or(SandboxType::None);
+    let expected =
+        get_platform_sandbox(/*windows_sandbox_enabled*/ false).unwrap_or(SandboxType::None);
     let sandbox = manager.select_initial(
         &FileSystemSandboxPolicy::unrestricted(),
         NetworkSandboxPolicy::Enabled,
         SandboxablePreference::Auto,
         WindowsSandboxLevel::Disabled,
-        true,
+        /*has_managed_network_requirements*/ true,
     );
     assert_eq!(sandbox, expected);
 }
@@ -53,7 +53,8 @@ fn danger_full_access_uses_platform_sandbox_with_network_requirements() {
 #[test]
 fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
     let manager = SandboxManager::new();
-    let expected = get_platform_sandbox(false).unwrap_or(SandboxType::None);
+    let expected =
+        get_platform_sandbox(/*windows_sandbox_enabled*/ false).unwrap_or(SandboxType::None);
     let sandbox = manager.select_initial(
         &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -64,7 +65,7 @@ fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
         NetworkSandboxPolicy::Enabled,
         SandboxablePreference::Auto,
         WindowsSandboxLevel::Disabled,
-        false,
+        /*has_managed_network_requirements*/ false,
     );
     assert_eq!(sandbox, expected);
 }
@@ -72,11 +73,11 @@ fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
 #[test]
 fn transform_preserves_unrestricted_file_system_policy_for_restricted_network() {
     let manager = SandboxManager::new();
-    let cwd = std::env::current_dir().expect("current dir");
+    let cwd = AbsolutePathBuf::current_dir().expect("current dir");
     let exec_request = manager
         .transform(SandboxTransformRequest {
             command: SandboxCommand {
-                program: "true".to_string(),
+                program: "true".into(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
                 env: HashMap::new(),
@@ -91,8 +92,6 @@ fn transform_preserves_unrestricted_file_system_policy_for_restricted_network() 
             enforce_managed_network: false,
             network: None,
             sandbox_policy_cwd: cwd.as_path(),
-            #[cfg(target_os = "macos")]
-            macos_seatbelt_profile_extensions: None,
             codex_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -113,7 +112,7 @@ fn transform_preserves_unrestricted_file_system_policy_for_restricted_network() 
 #[test]
 fn transform_additional_permissions_enable_network_for_external_sandbox() {
     let manager = SandboxManager::new();
-    let cwd = std::env::current_dir().expect("current dir");
+    let cwd = AbsolutePathBuf::current_dir().expect("current dir");
     let temp_dir = TempDir::new().expect("create temp dir");
     let path = AbsolutePathBuf::from_absolute_path(
         canonicalize(temp_dir.path()).expect("canonicalize temp dir"),
@@ -122,7 +121,7 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
     let exec_request = manager
         .transform(SandboxTransformRequest {
             command: SandboxCommand {
-                program: "true".to_string(),
+                program: "true".into(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
                 env: HashMap::new(),
@@ -130,11 +129,10 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
                     network: Some(NetworkPermissions {
                         enabled: Some(true),
                     }),
-                    file_system: Some(FileSystemPermissions {
-                        read: Some(vec![path]),
-                        write: Some(Vec::new()),
-                    }),
-                    ..Default::default()
+                    file_system: Some(FileSystemPermissions::from_read_write_roots(
+                        Some(vec![path]),
+                        Some(Vec::new()),
+                    )),
                 }),
             },
             policy: &SandboxPolicy::ExternalSandbox {
@@ -146,8 +144,6 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             enforce_managed_network: false,
             network: None,
             sandbox_policy_cwd: cwd.as_path(),
-            #[cfg(target_os = "macos")]
-            macos_seatbelt_profile_extensions: None,
             codex_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -170,31 +166,30 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
 #[test]
 fn transform_additional_permissions_preserves_denied_entries() {
     let manager = SandboxManager::new();
-    let cwd = std::env::current_dir().expect("current dir");
+    let cwd = AbsolutePathBuf::current_dir().expect("current dir");
     let temp_dir = TempDir::new().expect("create temp dir");
     let workspace_root = AbsolutePathBuf::from_absolute_path(
         canonicalize(temp_dir.path()).expect("canonicalize temp dir"),
     )
     .expect("absolute temp dir");
-    let allowed_path = workspace_root.join("allowed").expect("allowed path");
-    let denied_path = workspace_root.join("denied").expect("denied path");
+    let allowed_path = workspace_root.join("allowed");
+    let denied_path = workspace_root.join("denied");
     let exec_request = manager
         .transform(SandboxTransformRequest {
             command: SandboxCommand {
-                program: "true".to_string(),
+                program: "true".into(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
                 env: HashMap::new(),
                 additional_permissions: Some(PermissionProfile {
-                    file_system: Some(FileSystemPermissions {
-                        read: None,
-                        write: Some(vec![allowed_path.clone()]),
-                    }),
+                    file_system: Some(FileSystemPermissions::from_read_write_roots(
+                        /*read*/ None,
+                        Some(vec![allowed_path.clone()]),
+                    )),
                     ..Default::default()
                 }),
             },
             policy: &SandboxPolicy::ReadOnly {
-                access: ReadOnlyAccess::FullAccess,
                 network_access: false,
             },
             file_system_policy: &FileSystemSandboxPolicy::restricted(vec![
@@ -216,8 +211,6 @@ fn transform_additional_permissions_preserves_denied_entries() {
             enforce_managed_network: false,
             network: None,
             sandbox_policy_cwd: cwd.as_path(),
-            #[cfg(target_os = "macos")]
-            macos_seatbelt_profile_extensions: None,
             codex_linux_sandbox_exe: None,
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -252,14 +245,14 @@ fn transform_additional_permissions_preserves_denied_entries() {
 
 #[cfg(target_os = "linux")]
 fn transform_linux_seccomp_request(
-    codex_linux_sandbox_exe: &std::path::PathBuf,
+    codex_linux_sandbox_exe: &std::path::Path,
 ) -> super::SandboxExecRequest {
     let manager = SandboxManager::new();
-    let cwd = std::env::current_dir().expect("current dir");
+    let cwd = AbsolutePathBuf::current_dir().expect("current dir");
     manager
         .transform(SandboxTransformRequest {
             command: SandboxCommand {
-                program: "true".to_string(),
+                program: "true".into(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
                 env: HashMap::new(),
@@ -278,6 +271,66 @@ fn transform_linux_seccomp_request(
             windows_sandbox_private_desktop: false,
         })
         .expect("transform")
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn wsl1_rejects_linux_bubblewrap_path() {
+    let restricted_policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::Root,
+        },
+        access: FileSystemAccessMode::Read,
+    }]);
+
+    assert!(matches!(
+        super::ensure_linux_bubblewrap_is_supported(
+            &restricted_policy,
+            /*use_legacy_landlock*/ false,
+            /*allow_network_for_proxy*/ false,
+            /*is_wsl1*/ true,
+        ),
+        Err(super::SandboxTransformError::Wsl1UnsupportedForBubblewrap)
+    ));
+    assert!(matches!(
+        super::ensure_linux_bubblewrap_is_supported(
+            &FileSystemSandboxPolicy::unrestricted(),
+            /*use_legacy_landlock*/ false,
+            /*allow_network_for_proxy*/ true,
+            /*is_wsl1*/ true,
+        ),
+        Err(super::SandboxTransformError::Wsl1UnsupportedForBubblewrap)
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn wsl1_allows_non_bubblewrap_linux_paths() {
+    assert!(
+        super::ensure_linux_bubblewrap_is_supported(
+            &FileSystemSandboxPolicy::unrestricted(),
+            /*use_legacy_landlock*/ false,
+            /*allow_network_for_proxy*/ false,
+            /*is_wsl1*/ true,
+        )
+        .is_ok()
+    );
+
+    let restricted_policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::Root,
+        },
+        access: FileSystemAccessMode::Read,
+    }]);
+    assert!(
+        super::ensure_linux_bubblewrap_is_supported(
+            &restricted_policy,
+            /*use_legacy_landlock*/ true,
+            /*allow_network_for_proxy*/ false,
+            /*is_wsl1*/ true,
+        )
+        .is_ok()
+    );
 }
 
 #[cfg(target_os = "linux")]

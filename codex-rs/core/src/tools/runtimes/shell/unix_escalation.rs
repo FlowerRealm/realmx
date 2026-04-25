@@ -1,18 +1,20 @@
 use super::ShellRequest;
-use crate::error::CodexErr;
-use crate::error::SandboxErr;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
-use crate::exec::ExecToolCallOutput;
 use crate::exec::is_likely_sandbox_denied;
 use crate::guardian::GuardianApprovalRequest;
+use crate::guardian::guardian_rejection_message;
+use crate::guardian::guardian_timeout_message;
+use crate::guardian::new_guardian_review_id;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
+use crate::hook_runtime::run_permission_request_hooks;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::ShellType;
 use crate::tools::runtimes::build_sandbox_command;
+use crate::tools::sandboxing::PermissionRequestPayload;
 use crate::tools::sandboxing::SandboxAttempt;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
@@ -22,12 +24,19 @@ use codex_execpolicy::MatchOptions;
 use codex_execpolicy::Policy;
 use codex_execpolicy::RuleMatch;
 use codex_features::Feature;
+use codex_hooks::PermissionRequestDecision;
 use codex_protocol::config_types::WindowsSandboxLevel;
-use codex_protocol::models::MacOsSeatbeltProfileExtensions;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::SandboxErr;
+use codex_protocol::exec_output::ExecToolCallOutput;
+use codex_protocol::exec_output::StreamOutput;
+use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::GuardianCommandSource;
 use codex_protocol::protocol::NetworkPolicyRuleAction;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
@@ -46,8 +55,8 @@ use codex_shell_escalation::EscalationPolicy;
 use codex_shell_escalation::EscalationSession;
 use codex_shell_escalation::ExecParams;
 use codex_shell_escalation::ExecResult;
-use codex_shell_escalation::Permissions as EscalatedPermissions;
 use codex_shell_escalation::PreparedExec;
+use codex_shell_escalation::ResolvedPermissionProfile;
 use codex_shell_escalation::ShellCommandExecutor;
 use codex_shell_escalation::Stopwatch;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -122,16 +131,18 @@ pub(super) async fn try_run_zsh_fork(
         command,
         cwd: sandbox_cwd,
         env: sandbox_env,
+        exec_server_env_config: _,
         network: sandbox_network,
         expiration: _sandbox_expiration,
         capture_policy: _capture_policy,
         sandbox,
+        windows_sandbox_policy_cwd: sandbox_policy_cwd,
         windows_sandbox_level,
         windows_sandbox_private_desktop: _windows_sandbox_private_desktop,
         sandbox_policy,
         file_system_sandbox_policy,
         network_sandbox_policy,
-        windows_restricted_token_filesystem_overlay: _windows_restricted_token_filesystem_overlay,
+        windows_sandbox_filesystem_overrides: _windows_sandbox_filesystem_overrides,
         arg0,
     } = sandbox_exec_request;
     let ParsedShellCommand { script, login, .. } = extract_shell_script(&command)?;
@@ -153,13 +164,7 @@ pub(super) async fn try_run_zsh_fork(
         network: sandbox_network,
         windows_sandbox_level,
         arg0,
-        sandbox_policy_cwd: ctx.turn.cwd.to_path_buf(),
-        macos_seatbelt_profile_extensions: ctx
-            .turn
-            .config
-            .permissions
-            .macos_seatbelt_profile_extensions
-            .clone(),
+        sandbox_policy_cwd,
         codex_linux_sandbox_exe: ctx.turn.codex_linux_sandbox_exe.clone(),
         use_legacy_landlock: ctx.turn.features.use_legacy_landlock(),
     };
@@ -194,7 +199,7 @@ pub(super) async fn try_run_zsh_fork(
         session: Arc::clone(&ctx.session),
         turn: Arc::clone(&ctx.turn),
         call_id: ctx.call_id.clone(),
-        tool_name: "shell",
+        tool_name: GuardianCommandSource::Shell,
         approval_policy: ctx.turn.approval_policy.value(),
         sandbox_policy: command_executor.sandbox_policy.clone(),
         file_system_sandbox_policy: command_executor.file_system_sandbox_policy.clone(),
@@ -257,13 +262,7 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
         network: exec_request.network.clone(),
         windows_sandbox_level: exec_request.windows_sandbox_level,
         arg0: exec_request.arg0.clone(),
-        sandbox_policy_cwd: ctx.turn.cwd.to_path_buf(),
-        macos_seatbelt_profile_extensions: ctx
-            .turn
-            .config
-            .permissions
-            .macos_seatbelt_profile_extensions
-            .clone(),
+        sandbox_policy_cwd: ctx.turn.cwd.clone(),
         codex_linux_sandbox_exe: ctx.turn.codex_linux_sandbox_exe.clone(),
         use_legacy_landlock: ctx.turn.features.use_legacy_landlock(),
     };
@@ -272,7 +271,7 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
         session: Arc::clone(&ctx.session),
         turn: Arc::clone(&ctx.turn),
         call_id: ctx.call_id.clone(),
-        tool_name: "exec_command",
+        tool_name: GuardianCommandSource::UnifiedExec,
         approval_policy: ctx.turn.approval_policy.value(),
         sandbox_policy: exec_request.sandbox_policy.clone(),
         file_system_sandbox_policy: exec_request.file_system_sandbox_policy.clone(),
@@ -304,17 +303,17 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
 
 struct CoreShellActionProvider {
     policy: Arc<RwLock<Policy>>,
-    session: Arc<crate::codex::Session>,
-    turn: Arc<crate::codex::TurnContext>,
+    session: Arc<crate::session::session::Session>,
+    turn: Arc<crate::session::turn_context::TurnContext>,
     call_id: String,
-    tool_name: &'static str,
+    tool_name: GuardianCommandSource,
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     file_system_sandbox_policy: FileSystemSandboxPolicy,
     network_sandbox_policy: NetworkSandboxPolicy,
     sandbox_permissions: SandboxPermissions,
     approval_sandbox_permissions: SandboxPermissions,
-    prompt_permissions: Option<PermissionProfile>,
+    prompt_permissions: Option<AdditionalPermissionProfile>,
     stopwatch: Stopwatch,
 }
 
@@ -323,6 +322,12 @@ enum DecisionSource {
     PrefixRule,
     /// Often, this is `is_safe_command()`.
     UnmatchedCommandFallback,
+}
+
+struct PromptDecision {
+    decision: ReviewDecision,
+    guardian_review_id: Option<String>,
+    rejection_message: Option<String>,
 }
 
 fn execve_prompt_is_rejected_by_policy(
@@ -358,8 +363,7 @@ impl CoreShellActionProvider {
         sandbox_policy: &SandboxPolicy,
         file_system_sandbox_policy: &FileSystemSandboxPolicy,
         network_sandbox_policy: NetworkSandboxPolicy,
-        additional_permissions: Option<&PermissionProfile>,
-        macos_seatbelt_profile_extensions: Option<&MacOsSeatbeltProfileExtensions>,
+        additional_permissions: Option<&AdditionalPermissionProfile>,
     ) -> EscalationExecution {
         match sandbox_permissions {
             SandboxPermissions::UseDefault => EscalationExecution::TurnDefault,
@@ -368,15 +372,21 @@ impl CoreShellActionProvider {
                 .map(|_| {
                     // Shell request additional permissions were already normalized and
                     // merged into the first-attempt sandbox policy.
-                    EscalationExecution::Permissions(EscalationPermissions::Permissions(
-                        EscalatedPermissions {
-                            sandbox_policy: sandbox_policy.clone(),
-                            file_system_sandbox_policy: file_system_sandbox_policy.clone(),
-                            network_sandbox_policy,
-                            macos_seatbelt_profile_extensions: macos_seatbelt_profile_extensions
-                                .cloned(),
-                        },
-                    ))
+                    EscalationExecution::Permissions(
+                        EscalationPermissions::ResolvedPermissionProfile(
+                            ResolvedPermissionProfile {
+                                permission_profile:
+                                    PermissionProfile::from_runtime_permissions_with_enforcement(
+                                        SandboxEnforcement::from_legacy_sandbox_policy(
+                                            sandbox_policy,
+                                        ),
+                                        file_system_sandbox_policy,
+                                        network_sandbox_policy,
+                                    ),
+                                sandbox_policy: sandbox_policy.clone(),
+                            },
+                        ),
+                    )
                 })
                 .unwrap_or(EscalationExecution::TurnDefault),
         }
@@ -388,48 +398,93 @@ impl CoreShellActionProvider {
         argv: &[String],
         workdir: &AbsolutePathBuf,
         stopwatch: &Stopwatch,
-        additional_permissions: Option<PermissionProfile>,
-    ) -> anyhow::Result<ReviewDecision> {
+        additional_permissions: Option<AdditionalPermissionProfile>,
+    ) -> anyhow::Result<PromptDecision> {
         let command = join_program_and_argv(program, argv);
-        let workdir = workdir.to_path_buf();
+        let workdir = workdir.clone();
         let session = self.session.clone();
         let turn = self.turn.clone();
         let call_id = self.call_id.clone();
         let approval_id = Some(Uuid::new_v4().to_string());
-        let tool_name = self.tool_name;
+        let source = self.tool_name;
+        let guardian_review_id = routes_approval_to_guardian(&turn).then(new_guardian_review_id);
         Ok(stopwatch
             .pause_for(async move {
-                if routes_approval_to_guardian(&turn) {
-                    return review_approval_request(
+                // 1) Run PermissionRequest hooks
+                let permission_request = PermissionRequestPayload::bash(
+                    codex_shell_command::parse_command::shlex_join(&command),
+                    /*description*/ None,
+                );
+                let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
+                match run_permission_request_hooks(
+                    &session,
+                    &turn,
+                    &effective_approval_id,
+                    permission_request,
+                )
+                .await
+                {
+                    Some(PermissionRequestDecision::Allow) => {
+                        return PromptDecision {
+                            decision: ReviewDecision::Approved,
+                            guardian_review_id: None,
+                            rejection_message: None,
+                        };
+                    }
+                    Some(PermissionRequestDecision::Deny { message }) => {
+                        return PromptDecision {
+                            decision: ReviewDecision::Denied,
+                            guardian_review_id: None,
+                            rejection_message: Some(message),
+                        };
+                    }
+                    None => {}
+                }
+
+                // 2) Route to Guardian if configured
+                if let Some(review_id) = guardian_review_id.clone() {
+                    let decision = review_approval_request(
                         &session,
                         &turn,
+                        review_id.clone(),
                         GuardianApprovalRequest::Execve {
                             id: call_id.clone(),
-                            tool_name: tool_name.to_string(),
+                            source,
                             program: program.to_string_lossy().into_owned(),
                             argv: argv.to_vec(),
-                            cwd: workdir,
+                            cwd: workdir.clone(),
                             additional_permissions,
                         },
                         /*retry_reason*/ None,
                     )
                     .await;
+                    return PromptDecision {
+                        decision,
+                        guardian_review_id,
+                        rejection_message: None,
+                    };
                 }
-                session
+
+                // 3) Fall back to regular user prompt
+                let decision = session
                     .request_command_approval(
                         &turn,
                         call_id,
                         approval_id,
                         command,
-                        workdir,
+                        workdir.clone(),
                         /*reason*/ None,
                         /*network_approval_context*/ None,
                         /*proposed_execpolicy_amendment*/ None,
                         additional_permissions,
-                        /*skill_metadata*/ None,
                         Some(vec![ReviewDecision::Approved, ReviewDecision::Abort]),
                     )
-                    .await
+                    .await;
+                PromptDecision {
+                    decision,
+                    guardian_review_id: None,
+                    rejection_message: None,
+                }
             })
             .await)
     }
@@ -442,7 +497,7 @@ impl CoreShellActionProvider {
         program: &AbsolutePathBuf,
         argv: &[String],
         workdir: &AbsolutePathBuf,
-        prompt_permissions: Option<PermissionProfile>,
+        prompt_permissions: Option<AdditionalPermissionProfile>,
         escalation_execution: EscalationExecution,
         decision_source: DecisionSource,
     ) -> anyhow::Result<EscalationDecision> {
@@ -456,10 +511,10 @@ impl CoreShellActionProvider {
                 {
                     EscalationDecision::deny(Some("Execution forbidden by policy".to_string()))
                 } else {
-                    match self
+                    let prompt_decision = self
                         .prompt(program, argv, workdir, &self.stopwatch, prompt_permissions)
-                        .await?
-                    {
+                        .await?;
+                    match prompt_decision.decision {
                         ReviewDecision::Approved
                         | ReviewDecision::ApprovedForSession
                         | ReviewDecision::ApprovedExecpolicyAmendment { .. } => {
@@ -484,7 +539,21 @@ impl CoreShellActionProvider {
                             }
                         },
                         ReviewDecision::Denied => {
-                            EscalationDecision::deny(Some("User denied execution".to_string()))
+                            let message = if let Some(message) =
+                                prompt_decision.rejection_message.clone()
+                            {
+                                message
+                            } else if let Some(review_id) =
+                                prompt_decision.guardian_review_id.as_deref()
+                            {
+                                guardian_rejection_message(self.session.as_ref(), review_id).await
+                            } else {
+                                "User denied execution".to_string()
+                            };
+                            EscalationDecision::deny(Some(message))
+                        }
+                        ReviewDecision::TimedOut => {
+                            EscalationDecision::deny(Some(guardian_timeout_message()))
                         }
                         ReviewDecision::Abort => {
                             EscalationDecision::deny(Some("User cancelled execution".to_string()))
@@ -561,11 +630,6 @@ impl EscalationPolicy for CoreShellActionProvider {
                 &self.file_system_sandbox_policy,
                 self.network_sandbox_policy,
                 self.prompt_permissions.as_ref(),
-                self.turn
-                    .config
-                    .permissions
-                    .macos_seatbelt_profile_extensions
-                    .as_ref(),
             ),
         };
         self.process_decision(
@@ -678,7 +742,7 @@ fn commands_for_intercepted_exec_policy(
 
 struct CoreShellCommandExecutor {
     command: Vec<String>,
-    cwd: PathBuf,
+    cwd: AbsolutePathBuf,
     sandbox_policy: SandboxPolicy,
     file_system_sandbox_policy: FileSystemSandboxPolicy,
     network_sandbox_policy: NetworkSandboxPolicy,
@@ -687,9 +751,7 @@ struct CoreShellCommandExecutor {
     network: Option<codex_network_proxy::NetworkProxy>,
     windows_sandbox_level: WindowsSandboxLevel,
     arg0: Option<String>,
-    sandbox_policy_cwd: PathBuf,
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    macos_seatbelt_profile_extensions: Option<MacOsSeatbeltProfileExtensions>,
+    sandbox_policy_cwd: AbsolutePathBuf,
     codex_linux_sandbox_exe: Option<PathBuf>,
     use_legacy_landlock: bool,
 }
@@ -701,9 +763,7 @@ struct PrepareSandboxedExecParams<'a> {
     sandbox_policy: &'a SandboxPolicy,
     file_system_sandbox_policy: &'a FileSystemSandboxPolicy,
     network_sandbox_policy: NetworkSandboxPolicy,
-    additional_permissions: Option<PermissionProfile>,
-    #[cfg(target_os = "macos")]
-    macos_seatbelt_profile_extensions: Option<&'a MacOsSeatbeltProfileExtensions>,
+    additional_permissions: Option<AdditionalPermissionProfile>,
 }
 
 #[async_trait::async_trait]
@@ -730,16 +790,18 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                 command: self.command.clone(),
                 cwd: self.cwd.clone(),
                 env: exec_env,
+                exec_server_env_config: None,
                 network: self.network.clone(),
                 expiration: ExecExpiration::Cancellation(cancel_rx),
                 capture_policy: ExecCapturePolicy::ShellTool,
                 sandbox: self.sandbox,
+                windows_sandbox_policy_cwd: self.sandbox_policy_cwd.clone(),
                 windows_sandbox_level: self.windows_sandbox_level,
                 windows_sandbox_private_desktop: false,
                 sandbox_policy: self.sandbox_policy.clone(),
                 file_system_sandbox_policy: self.file_system_sandbox_policy.clone(),
                 network_sandbox_policy: self.network_sandbox_policy,
-                windows_restricted_token_filesystem_overlay: None,
+                windows_sandbox_filesystem_overrides: None,
                 arg0: self.arg0.clone(),
             },
             /*stdout_stream*/ None,
@@ -788,17 +850,12 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                     file_system_sandbox_policy: &self.file_system_sandbox_policy,
                     network_sandbox_policy: self.network_sandbox_policy,
                     additional_permissions: None,
-                    #[cfg(target_os = "macos")]
-                    macos_seatbelt_profile_extensions: self
-                        .macos_seatbelt_profile_extensions
-                        .as_ref(),
                 })?
             }
-            EscalationExecution::Permissions(EscalationPermissions::PermissionProfile(
-                permission_profile,
-            )) => {
+            EscalationExecution::Permissions(
+                EscalationPermissions::AdditionalPermissionProfile(permission_profile),
+            ) => {
                 // Merge additive permissions into the existing turn/request sandbox policy.
-                // On macOS, additional profile extensions are unioned with the turn defaults.
                 self.prepare_sandboxed_exec(PrepareSandboxedExecParams {
                     command,
                     workdir,
@@ -807,26 +864,22 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                     file_system_sandbox_policy: &self.file_system_sandbox_policy,
                     network_sandbox_policy: self.network_sandbox_policy,
                     additional_permissions: Some(permission_profile),
-                    #[cfg(target_os = "macos")]
-                    macos_seatbelt_profile_extensions: self
-                        .macos_seatbelt_profile_extensions
-                        .as_ref(),
                 })?
             }
-            EscalationExecution::Permissions(EscalationPermissions::Permissions(permissions)) => {
-                // Use a fully specified sandbox policy instead of merging into the turn policy.
+            EscalationExecution::Permissions(EscalationPermissions::ResolvedPermissionProfile(
+                permissions,
+            )) => {
+                // Use a fully specified permission profile instead of merging into the turn policy.
+                let (file_system_sandbox_policy, network_sandbox_policy) =
+                    permissions.permission_profile.to_runtime_permissions();
                 self.prepare_sandboxed_exec(PrepareSandboxedExecParams {
                     command,
                     workdir,
                     env,
                     sandbox_policy: &permissions.sandbox_policy,
-                    file_system_sandbox_policy: &permissions.file_system_sandbox_policy,
-                    network_sandbox_policy: permissions.network_sandbox_policy,
+                    file_system_sandbox_policy: &file_system_sandbox_policy,
+                    network_sandbox_policy,
                     additional_permissions: None,
-                    #[cfg(target_os = "macos")]
-                    macos_seatbelt_profile_extensions: permissions
-                        .macos_seatbelt_profile_extensions
-                        .as_ref(),
                 })?
             }
         };
@@ -849,8 +902,6 @@ impl CoreShellCommandExecutor {
             file_system_sandbox_policy,
             network_sandbox_policy,
             additional_permissions,
-            #[cfg(target_os = "macos")]
-            macos_seatbelt_profile_extensions,
         } = params;
         let (program, args) = command
             .split_first()
@@ -864,9 +915,9 @@ impl CoreShellCommandExecutor {
             self.network.is_some(),
         );
         let command = SandboxCommand {
-            program: program.clone(),
+            program: program.clone().into(),
             args: args.to_vec(),
-            cwd: workdir.to_path_buf(),
+            cwd: workdir.clone(),
             env,
             additional_permissions,
         };
@@ -883,22 +934,23 @@ impl CoreShellCommandExecutor {
             enforce_managed_network: self.network.is_some(),
             network: self.network.as_ref(),
             sandbox_policy_cwd: &self.sandbox_policy_cwd,
-            #[cfg(target_os = "macos")]
-            macos_seatbelt_profile_extensions,
-            codex_linux_sandbox_exe: self.codex_linux_sandbox_exe.as_ref(),
+            codex_linux_sandbox_exe: self.codex_linux_sandbox_exe.as_deref(),
             use_legacy_landlock: self.use_legacy_landlock,
             windows_sandbox_level: self.windows_sandbox_level,
             windows_sandbox_private_desktop: false,
         })?;
-        let mut exec_request =
-            crate::sandboxing::ExecRequest::from_sandbox_exec_request(exec_request, options);
+        let mut exec_request = crate::sandboxing::ExecRequest::from_sandbox_exec_request(
+            exec_request,
+            options,
+            self.sandbox_policy_cwd.clone(),
+        );
         if let Some(network) = exec_request.network.as_ref() {
             network.apply_to_env(&mut exec_request.env);
         }
 
         Ok(PreparedExec {
             command: exec_request.command,
-            cwd: exec_request.cwd,
+            cwd: exec_request.cwd.to_path_buf(),
             env: exec_request.env,
             arg0: exec_request.arg0,
         })
@@ -943,9 +995,9 @@ fn map_exec_result(
 ) -> Result<ExecToolCallOutput, ToolError> {
     let output = ExecToolCallOutput {
         exit_code: result.exit_code,
-        stdout: crate::exec::StreamOutput::new(result.stdout.clone()),
-        stderr: crate::exec::StreamOutput::new(result.stderr.clone()),
-        aggregated_output: crate::exec::StreamOutput::new(result.output.clone()),
+        stdout: StreamOutput::new(result.stdout.clone()),
+        stderr: StreamOutput::new(result.stderr.clone()),
+        aggregated_output: StreamOutput::new(result.output.clone()),
         duration: result.duration,
         timed_out: result.timed_out,
     };

@@ -1,13 +1,9 @@
-use crate::config::types::McpServerConfig;
-use crate::config::types::Notice;
-use crate::features::FEATURES;
-use crate::model_provider_info::ModelProviderInfo;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
-use crate::provider_id::validate_model_provider_id;
-use crate::provider_id::validate_model_provider_reference;
 use anyhow::Context;
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::types::McpServerConfig;
+use codex_features::FEATURES;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::TrustLevel;
@@ -17,12 +13,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::task;
-use toml::Value as TomlValue;
 use toml_edit::ArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use toml_edit::value;
+
+const NOTICE_TABLE_KEY: &str = "notice";
 
 /// Discrete config mutations supported by the persistence engine.
 #[derive(Clone, Debug)]
@@ -40,17 +37,27 @@ pub enum ConfigEdit {
     SetNoticeHideFullAccessWarning(bool),
     /// Toggle the Windows world-writable directories warning acknowledgement flag.
     SetNoticeHideWorldWritableWarning(bool),
+    /// Toggle the opt-out marker for Codex-managed fast defaults.
+    SetNoticeFastDefaultOptOut(bool),
     /// Toggle the rate limit model nudge acknowledgement flag.
     SetNoticeHideRateLimitModelNudge(bool),
     /// Toggle the Windows onboarding acknowledgement flag.
     SetWindowsWslSetupAcknowledged(bool),
     /// Toggle the model migration prompt acknowledgement flag.
     SetNoticeHideModelMigrationPrompt(String, bool),
+    /// Toggle the home external config migration prompt acknowledgement flag.
+    SetNoticeHideExternalConfigMigrationPromptHome(bool),
+    /// Record when the home external config migration prompt was last shown.
+    SetNoticeExternalConfigMigrationPromptHomeLastPromptedAt(i64),
+    /// Toggle the project external config migration prompt acknowledgement flag.
+    SetNoticeHideExternalConfigMigrationPromptProject(String, bool),
+    /// Record when the project external config migration prompt was last shown.
+    SetNoticeExternalConfigMigrationPromptProjectLastPromptedAt(String, i64),
     /// Record that a migration prompt was shown for an old->new model mapping.
     RecordModelMigrationSeen { from: String, to: String },
     /// Replace the entire `[mcp_servers]` table.
     ReplaceMcpServers(BTreeMap<String, McpServerConfig>),
-    /// Set or clear a skill config entry under `[[skills.config]]`.
+    /// Set or clear a skill config entry under `[[skills.config]]` by path.
     SetSkillConfig { path: PathBuf, enabled: bool },
     /// Set or clear a skill config entry under `[[skills.config]]` by name.
     SetSkillConfigByName { name: String, enabled: bool },
@@ -64,15 +71,6 @@ pub enum ConfigEdit {
     },
     /// Remove the value stored at the exact dotted path.
     ClearPath { segments: Vec<String> },
-    /// Set or replace a provider entry under `[model_providers.<id>]`.
-    SetModelProvider {
-        id: String,
-        provider: Box<ModelProviderInfo>,
-    },
-    /// Remove a provider entry under `[model_providers.<id>]`.
-    RemoveModelProvider { id: String },
-    /// Set the active default model provider.
-    SetDefaultModelProvider { id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,7 +79,7 @@ enum SkillConfigSelector {
     Path(PathBuf),
 }
 
-/// Produces a config edit that sets `[tui] theme = "<name>"`.
+/// Produces a config edit that sets `[tui].theme = "<name>"`.
 pub fn syntax_theme_edit(name: &str) -> ConfigEdit {
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "theme".to_string()],
@@ -89,11 +87,12 @@ pub fn syntax_theme_edit(name: &str) -> ConfigEdit {
     }
 }
 
+/// Produces a config edit that sets `[tui].status_line` to an explicit ordered list.
+///
+/// The array is written even when it is empty so "hide the status line" stays
+/// distinct from "unset, so use defaults".
 pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
-    let mut array = toml_edit::Array::new();
-    for item in items {
-        array.push(item.clone());
-    }
+    let array = items.iter().cloned().collect::<toml_edit::Array>();
 
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "status_line".to_string()],
@@ -101,11 +100,12 @@ pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
     }
 }
 
+/// Produces a config edit that sets `[tui].terminal_title` to an explicit ordered list.
+///
+/// The array is written even when it is empty so "disabled title updates" stays
+/// distinct from "unset, so use defaults".
 pub fn terminal_title_items_edit(items: &[String]) -> ConfigEdit {
-    let mut array = toml_edit::Array::new();
-    for item in items {
-        array.push(item.clone());
-    }
+    let array = items.iter().cloned().collect::<toml_edit::Array>();
 
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "terminal_title".to_string()],
@@ -136,8 +136,11 @@ pub fn model_availability_nux_count_edits(shown_count: &HashMap<String, u32>) ->
 
 // TODO(jif) move to a dedicated file
 mod document_helpers {
-    use crate::config::types::McpServerConfig;
-    use crate::config::types::McpServerTransportConfig;
+    use codex_config::types::AppToolApproval;
+    use codex_config::types::McpServerConfig;
+    use codex_config::types::McpServerEnvVar;
+    use codex_config::types::McpServerToolConfig;
+    use codex_config::types::McpServerTransportConfig;
     use toml_edit::Array as TomlArray;
     use toml_edit::InlineTable;
     use toml_edit::Item as TomlItem;
@@ -198,7 +201,7 @@ mod document_helpers {
                     entry["env"] = table_from_pairs(env.iter());
                 }
                 if !env_vars.is_empty() {
-                    entry["env_vars"] = array_from_iter(env_vars.iter().cloned());
+                    entry["env_vars"] = array_from_env_vars(env_vars);
                 }
                 if let Some(cwd) = cwd {
                     entry["cwd"] = value(cwd.to_string_lossy().to_string());
@@ -230,14 +233,27 @@ mod document_helpers {
         if !config.enabled {
             entry["enabled"] = value(false);
         }
+        if let Some(environment) = &config.experimental_environment {
+            entry["experimental_environment"] = value(environment.clone());
+        }
         if config.required {
             entry["required"] = value(true);
+        }
+        if config.supports_parallel_tool_calls {
+            entry["supports_parallel_tool_calls"] = value(true);
         }
         if let Some(timeout) = config.startup_timeout_sec {
             entry["startup_timeout_sec"] = value(timeout.as_secs_f64());
         }
         if let Some(timeout) = config.tool_timeout_sec {
             entry["tool_timeout_sec"] = value(timeout.as_secs_f64());
+        }
+        if let Some(approval_mode) = config.default_tools_approval_mode {
+            entry["default_tools_approval_mode"] = value(match approval_mode {
+                AppToolApproval::Auto => "auto",
+                AppToolApproval::Prompt => "prompt",
+                AppToolApproval::Approve => "approve",
+            });
         }
         if let Some(enabled_tools) = &config.enabled_tools
             && !enabled_tools.is_empty()
@@ -263,22 +279,26 @@ mod document_helpers {
             let mut tools = new_implicit_table();
             let mut tool_entries: Vec<_> = config.tools.iter().collect();
             tool_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-            for (tool_name, tool_config) in tool_entries {
-                let mut tool = TomlTable::new();
-                tool.set_implicit(false);
-                if let Some(approval_mode) = tool_config.approval_mode {
-                    tool["approval_mode"] = value(match approval_mode {
-                        crate::config::types::AppToolApproval::Auto => "auto",
-                        crate::config::types::AppToolApproval::Prompt => "prompt",
-                        crate::config::types::AppToolApproval::Approve => "approve",
-                    });
-                }
-                tools.insert(tool_name, TomlItem::Table(tool));
+            for (name, tool_config) in tool_entries {
+                tools.insert(name, serialize_mcp_server_tool(tool_config));
             }
-            entry["tools"] = TomlItem::Table(tools);
+            entry.insert("tools", TomlItem::Table(tools));
         }
 
         entry
+    }
+
+    fn serialize_mcp_server_tool(config: &McpServerToolConfig) -> TomlItem {
+        let mut entry = TomlTable::new();
+        entry.set_implicit(false);
+        if let Some(approval_mode) = config.approval_mode {
+            entry["approval_mode"] = value(match approval_mode {
+                AppToolApproval::Auto => "auto",
+                AppToolApproval::Prompt => "prompt",
+                AppToolApproval::Approve => "approve",
+            });
+        }
+        TomlItem::Table(entry)
     }
 
     pub(super) fn serialize_mcp_server(config: &McpServerConfig) -> TomlItem {
@@ -327,6 +347,24 @@ mod document_helpers {
         let mut array = TomlArray::new();
         for value in iter {
             array.push(value);
+        }
+        TomlItem::Value(array.into())
+    }
+
+    fn array_from_env_vars(env_vars: &[McpServerEnvVar]) -> TomlItem {
+        let mut array = TomlArray::new();
+        for env_var in env_vars {
+            match env_var {
+                McpServerEnvVar::Name(name) => array.push(name.clone()),
+                McpServerEnvVar::Config { name, source } => {
+                    let mut table = InlineTable::new();
+                    table.insert("name", name.clone().into());
+                    if let Some(source) = source {
+                        table.insert("source", source.clone().into());
+                    }
+                    array.push(table);
+                }
+            }
         }
         TomlItem::Value(array.into())
     }
@@ -392,29 +430,81 @@ impl ConfigDocument {
             )),
             ConfigEdit::SetNoticeHideFullAccessWarning(acknowledged) => Ok(self.write_value(
                 Scope::Global,
-                &[Notice::TABLE_KEY, "hide_full_access_warning"],
+                &[NOTICE_TABLE_KEY, "hide_full_access_warning"],
                 value(*acknowledged),
             )),
             ConfigEdit::SetNoticeHideWorldWritableWarning(acknowledged) => Ok(self.write_value(
                 Scope::Global,
-                &[Notice::TABLE_KEY, "hide_world_writable_warning"],
+                &[NOTICE_TABLE_KEY, "hide_world_writable_warning"],
                 value(*acknowledged),
+            )),
+            ConfigEdit::SetNoticeFastDefaultOptOut(opted_out) => Ok(self.write_value(
+                Scope::Global,
+                &[NOTICE_TABLE_KEY, "fast_default_opt_out"],
+                value(*opted_out),
             )),
             ConfigEdit::SetNoticeHideRateLimitModelNudge(acknowledged) => Ok(self.write_value(
                 Scope::Global,
-                &[Notice::TABLE_KEY, "hide_rate_limit_model_nudge"],
+                &[NOTICE_TABLE_KEY, "hide_rate_limit_model_nudge"],
                 value(*acknowledged),
             )),
             ConfigEdit::SetNoticeHideModelMigrationPrompt(migration_config, acknowledged) => {
                 Ok(self.write_value(
                     Scope::Global,
-                    &[Notice::TABLE_KEY, migration_config.as_str()],
+                    &[NOTICE_TABLE_KEY, migration_config.as_str()],
                     value(*acknowledged),
                 ))
             }
+            ConfigEdit::SetNoticeHideExternalConfigMigrationPromptHome(acknowledged) => Ok(self
+                .write_value(
+                    Scope::Global,
+                    &[
+                        NOTICE_TABLE_KEY,
+                        "external_config_migration_prompts",
+                        "home",
+                    ],
+                    value(*acknowledged),
+                )),
+            ConfigEdit::SetNoticeExternalConfigMigrationPromptHomeLastPromptedAt(timestamp) => {
+                Ok(self.write_value(
+                    Scope::Global,
+                    &[
+                        NOTICE_TABLE_KEY,
+                        "external_config_migration_prompts",
+                        "home_last_prompted_at",
+                    ],
+                    value(*timestamp),
+                ))
+            }
+            ConfigEdit::SetNoticeHideExternalConfigMigrationPromptProject(
+                project,
+                acknowledged,
+            ) => Ok(self.write_value(
+                Scope::Global,
+                &[
+                    NOTICE_TABLE_KEY,
+                    "external_config_migration_prompts",
+                    "projects",
+                    project.as_str(),
+                ],
+                value(*acknowledged),
+            )),
+            ConfigEdit::SetNoticeExternalConfigMigrationPromptProjectLastPromptedAt(
+                project,
+                timestamp,
+            ) => Ok(self.write_value(
+                Scope::Global,
+                &[
+                    NOTICE_TABLE_KEY,
+                    "external_config_migration_prompts",
+                    "project_last_prompted_at",
+                    project.as_str(),
+                ],
+                value(*timestamp),
+            )),
             ConfigEdit::RecordModelMigrationSeen { from, to } => Ok(self.write_value(
                 Scope::Global,
-                &[Notice::TABLE_KEY, "model_migrations", from.as_str()],
+                &[NOTICE_TABLE_KEY, "model_migrations", from.as_str()],
                 value(to.clone()),
             )),
             ConfigEdit::SetWindowsWslSetupAcknowledged(acknowledged) => Ok(self.write_value(
@@ -431,19 +521,6 @@ impl ConfigDocument {
             }
             ConfigEdit::SetPath { segments, value } => Ok(self.insert(segments, value.clone())),
             ConfigEdit::ClearPath { segments } => Ok(self.clear_owned(segments)),
-            ConfigEdit::SetModelProvider { id, provider } => {
-                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
-                let item = model_provider_to_item(provider.as_ref())?;
-                Ok(self.insert(&["model_providers".to_string(), id.clone()], item))
-            }
-            ConfigEdit::RemoveModelProvider { id } => {
-                validate_model_provider_id(id).map_err(anyhow::Error::msg)?;
-                Ok(self.remove(&["model_providers".to_string(), id.clone()]))
-            }
-            ConfigEdit::SetDefaultModelProvider { id } => {
-                validate_model_provider_reference(id).map_err(anyhow::Error::msg)?;
-                Ok(self.write_profile_value(&["model_provider"], Some(value(id.clone()))))
-            }
             ConfigEdit::SetProjectTrustLevel { path, level } => {
                 // Delegate to the existing, tested logic in config.rs to
                 // ensure tables are explicit and migration is preserved.
@@ -788,132 +865,6 @@ fn write_skill_config_selector(table: &mut TomlTable, selector: &SkillConfigSele
     }
 }
 
-fn model_provider_to_item(provider: &ModelProviderInfo) -> anyhow::Result<TomlItem> {
-    let provider = provider.sanitized_for_config_persistence();
-    let api_key = provider.inline_api_key();
-    let mut table = TomlTable::new();
-    table.set_implicit(false);
-    table["name"] = value(provider.name);
-    if let Some(base_url) = provider.base_url {
-        table["base_url"] = value(base_url);
-    }
-    table["wire_api"] = value(provider.wire_api.to_string());
-    if provider.requires_openai_auth {
-        table["requires_openai_auth"] = value(true);
-    }
-    if provider.supports_websockets {
-        table["supports_websockets"] = value(true);
-    }
-    if provider.auth_strategy != crate::ModelProviderAuthStrategy::None {
-        let auth_strategy = match provider.auth_strategy {
-            crate::ModelProviderAuthStrategy::None => unreachable!(),
-            crate::ModelProviderAuthStrategy::OpenAi => "openai",
-            crate::ModelProviderAuthStrategy::ApiKey => "api_key",
-            crate::ModelProviderAuthStrategy::OAuth => "oauth",
-            crate::ModelProviderAuthStrategy::OAuthOrApiKey => "oauth_or_api_key",
-        };
-        table["auth_strategy"] = value(auth_strategy);
-    }
-    if let Some(oauth) = provider.oauth {
-        let oauth_value = TomlValue::try_from(oauth)?;
-        table["oauth"] = toml_value_to_item(&oauth_value)?;
-    }
-    if let Some(api_key) = api_key {
-        table["api_key"] = value(api_key);
-    }
-    if let Some(env_key) = provider.env_key {
-        table["env_key"] = value(env_key);
-    }
-    if let Some(env_key_instructions) = provider.env_key_instructions {
-        table["env_key_instructions"] = value(env_key_instructions);
-    }
-    if let Some(token) = provider.experimental_bearer_token {
-        table["experimental_bearer_token"] = value(token);
-    }
-    if let Some(query_params) = provider.query_params
-        && !query_params.is_empty()
-    {
-        let mut ordered = toml::map::Map::new();
-        let mut entries = query_params.into_iter().collect::<Vec<_>>();
-        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        for (key, value) in entries {
-            ordered.insert(key, TomlValue::String(value));
-        }
-        table["query_params"] = toml_value_to_item(&TomlValue::Table(ordered))?;
-    }
-    if let Some(http_headers) = provider.http_headers
-        && !http_headers.is_empty()
-    {
-        let mut ordered = toml::map::Map::new();
-        let mut entries = http_headers.into_iter().collect::<Vec<_>>();
-        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        for (key, value) in entries {
-            ordered.insert(key, TomlValue::String(value));
-        }
-        table["http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
-    }
-    if let Some(env_http_headers) = provider.env_http_headers
-        && !env_http_headers.is_empty()
-    {
-        let mut ordered = toml::map::Map::new();
-        let mut entries = env_http_headers.into_iter().collect::<Vec<_>>();
-        entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        for (key, value) in entries {
-            ordered.insert(key, TomlValue::String(value));
-        }
-        table["env_http_headers"] = toml_value_to_item(&TomlValue::Table(ordered))?;
-    }
-    if let Some(request_max_retries) = provider.request_max_retries {
-        table["request_max_retries"] = value(i64::try_from(request_max_retries)?);
-    }
-    if let Some(stream_max_retries) = provider.stream_max_retries {
-        table["stream_max_retries"] = value(i64::try_from(stream_max_retries)?);
-    }
-    if let Some(stream_idle_timeout_ms) = provider.stream_idle_timeout_ms {
-        table["stream_idle_timeout_ms"] = value(i64::try_from(stream_idle_timeout_ms)?);
-    }
-    Ok(TomlItem::Table(table))
-}
-
-/// Convert a `toml::Value` into the `toml_edit` item used by config persistence.
-pub fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
-    match value {
-        TomlValue::Table(table) => {
-            let mut table_item = TomlTable::new();
-            table_item.set_implicit(false);
-            for (key, val) in table {
-                table_item.insert(key, toml_value_to_item(val)?);
-            }
-            Ok(TomlItem::Table(table_item))
-        }
-        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
-    }
-}
-
-fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
-    match value {
-        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
-        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Array(items) => {
-            let mut array = toml_edit::Array::new();
-            for item in items {
-                array.push(toml_value_to_value(item)?);
-            }
-            Ok(toml_edit::Value::Array(array))
-        }
-        TomlValue::Table(table) => {
-            let mut inline = toml_edit::InlineTable::new();
-            for (key, val) in table {
-                inline.insert(key, toml_value_to_value(val)?);
-            }
-            Ok(toml_edit::Value::InlineTable(inline))
-        }
-    }
-}
-
 /// Persist edits using a blocking strategy.
 pub fn apply_blocking(
     codex_home: &Path,
@@ -1034,6 +985,12 @@ impl ConfigEditsBuilder {
         self
     }
 
+    pub fn set_fast_default_opt_out(mut self, opted_out: bool) -> Self {
+        self.edits
+            .push(ConfigEdit::SetNoticeFastDefaultOptOut(opted_out));
+        self
+    }
+
     pub fn set_hide_rate_limit_model_nudge(mut self, acknowledged: bool) -> Self {
         self.edits
             .push(ConfigEdit::SetNoticeHideRateLimitModelNudge(acknowledged));
@@ -1046,6 +1003,28 @@ impl ConfigEditsBuilder {
                 model.to_string(),
                 acknowledged,
             ));
+        self
+    }
+
+    pub fn set_hide_external_config_migration_prompt_home(mut self, acknowledged: bool) -> Self {
+        self.edits
+            .push(ConfigEdit::SetNoticeHideExternalConfigMigrationPromptHome(
+                acknowledged,
+            ));
+        self
+    }
+
+    pub fn set_hide_external_config_migration_prompt_project(
+        mut self,
+        project: &str,
+        acknowledged: bool,
+    ) -> Self {
+        self.edits.push(
+            ConfigEdit::SetNoticeHideExternalConfigMigrationPromptProject(
+                project.to_string(),
+                acknowledged,
+            ),
+        );
         self
     }
 
@@ -1072,26 +1051,6 @@ impl ConfigEditsBuilder {
     pub fn replace_mcp_servers(mut self, servers: &BTreeMap<String, McpServerConfig>) -> Self {
         self.edits
             .push(ConfigEdit::ReplaceMcpServers(servers.clone()));
-        self
-    }
-
-    pub fn set_model_provider(mut self, id: &str, provider: &ModelProviderInfo) -> Self {
-        self.edits.push(ConfigEdit::SetModelProvider {
-            id: id.to_string(),
-            provider: Box::new(provider.clone()),
-        });
-        self
-    }
-
-    pub fn remove_model_provider(mut self, id: &str) -> Self {
-        self.edits
-            .push(ConfigEdit::RemoveModelProvider { id: id.to_string() });
-        self
-    }
-
-    pub fn set_default_model_provider(mut self, id: &str) -> Self {
-        self.edits
-            .push(ConfigEdit::SetDefaultModelProvider { id: id.to_string() });
         self
     }
 
@@ -1140,21 +1099,6 @@ impl ConfigEditsBuilder {
         self
     }
 
-    pub fn clear_feature_override(mut self, key: &str) -> Self {
-        let segments = if let Some(profile) = self.profile.as_ref() {
-            vec![
-                "profiles".to_string(),
-                profile.clone(),
-                "features".to_string(),
-                key.to_string(),
-            ]
-        } else {
-            vec!["features".to_string(), key.to_string()]
-        };
-        self.edits.push(ConfigEdit::ClearPath { segments });
-        self
-    }
-
     pub fn set_windows_sandbox_mode(mut self, mode: &str) -> Self {
         let segments = if let Some(profile) = self.profile.as_ref() {
             vec![
@@ -1191,6 +1135,18 @@ impl ConfigEditsBuilder {
             Some(speaker) => self.edits.push(ConfigEdit::SetPath {
                 segments,
                 value: value(speaker),
+            }),
+            None => self.edits.push(ConfigEdit::ClearPath { segments }),
+        }
+        self
+    }
+
+    pub fn set_realtime_voice(mut self, voice: Option<&str>) -> Self {
+        let segments = vec!["realtime".to_string(), "voice".to_string()];
+        match voice {
+            Some(voice) => self.edits.push(ConfigEdit::SetPath {
+                segments,
+                value: value(voice),
             }),
             None => self.edits.push(ConfigEdit::ClearPath { segments }),
         }

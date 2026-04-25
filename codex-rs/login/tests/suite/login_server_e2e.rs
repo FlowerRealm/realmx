@@ -7,9 +7,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use base64::Engine;
+use codex_config::types::AuthCredentialsStoreMode;
 use codex_login::ServerOptions;
-use codex_login::auth::AuthCredentialsStoreMode;
-use codex_login::load_auth_dot_json;
 use codex_login::run_login_server;
 use core_test_support::skip_if_no_network;
 use tempfile::tempdir;
@@ -119,7 +118,6 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
         open_browser: false,
         force_state: Some(state),
         forced_chatgpt_workspace_id: Some(chatgpt_account_id.to_string()),
-        auth_scope: codex_login::AuthScope::Default,
     };
     let server = run_login_server(opts)?;
     assert!(
@@ -142,16 +140,16 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     server.block_until_done().await?;
 
     // Validate auth.json
-    let auth = load_auth_dot_json(codex_home.as_path(), AuthCredentialsStoreMode::File)?
-        .expect("auth.json written");
+    let auth_path = codex_home.join("auth.json");
+    let data = std::fs::read_to_string(&auth_path)?;
+    let json: serde_json::Value = serde_json::from_str(&data)?;
     // The following assert is here because of the old oauth flow that exchanges tokens for an
     // API key. See obtain_api_key in server.rs for details. Once we remove this old mechanism
     // from the code, this test should be updated to expect that the API key is no longer present.
-    assert_eq!(auth.api_key.as_deref(), Some("access-123"));
-    let tokens = auth.tokens.expect("tokens persisted");
-    assert_eq!(tokens.access_token, "access-123");
-    assert_eq!(tokens.refresh_token, "refresh-123");
-    assert_eq!(tokens.account_id.as_deref(), Some(chatgpt_account_id));
+    assert_eq!(json["OPENAI_API_KEY"], "access-123");
+    assert_eq!(json["tokens"]["access_token"], "access-123");
+    assert_eq!(json["tokens"]["refresh_token"], "refresh-123");
+    assert_eq!(json["tokens"]["account_id"], chatgpt_account_id);
 
     // Stop mock issuer
     drop(issuer_handle);
@@ -181,7 +179,6 @@ async fn creates_missing_codex_home_dir() -> Result<()> {
         open_browser: false,
         force_state: Some(state),
         forced_chatgpt_workspace_id: None,
-        auth_scope: codex_login::AuthScope::Default,
     };
     let server = run_login_server(opts)?;
     let login_port = server.actual_port;
@@ -221,7 +218,6 @@ async fn forced_chatgpt_workspace_id_mismatch_blocks_login() -> Result<()> {
         open_browser: false,
         force_state: Some(state.clone()),
         forced_chatgpt_workspace_id: Some("org-required".to_string()),
-        auth_scope: codex_login::AuthScope::Default,
     };
     let server = run_login_server(opts)?;
     assert!(
@@ -279,7 +275,6 @@ async fn oauth_access_denied_missing_entitlement_blocks_login_with_clear_error()
         open_browser: false,
         force_state: Some(state.clone()),
         forced_chatgpt_workspace_id: None,
-        auth_scope: codex_login::AuthScope::Default,
     };
     let server = run_login_server(opts)?;
     let login_port = server.actual_port;
@@ -347,7 +342,6 @@ async fn oauth_access_denied_unknown_reason_uses_generic_error_page() -> Result<
         open_browser: false,
         force_state: Some(state.clone()),
         forced_chatgpt_workspace_id: None,
-        auth_scope: codex_login::AuthScope::Default,
     };
     let server = run_login_server(opts)?;
     let login_port = server.actual_port;
@@ -426,7 +420,6 @@ async fn cancels_previous_login_server_when_port_is_in_use() -> Result<()> {
         open_browser: false,
         force_state: Some("cancel_state".to_string()),
         forced_chatgpt_workspace_id: None,
-        auth_scope: codex_login::AuthScope::Default,
     };
 
     let first_server = run_login_server(first_opts)?;
@@ -447,7 +440,6 @@ async fn cancels_previous_login_server_when_port_is_in_use() -> Result<()> {
         open_browser: false,
         force_state: Some("cancel_state_2".to_string()),
         forced_chatgpt_workspace_id: None,
-        auth_scope: codex_login::AuthScope::Default,
     };
 
     let second_server = run_login_server(second_opts)?;

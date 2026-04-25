@@ -117,7 +117,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![AbsolutePathBuf::try_from(extra_root.as_path()).unwrap()],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
@@ -144,7 +143,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: false,
@@ -172,7 +170,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: false,
@@ -200,7 +197,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: false,
@@ -231,7 +227,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: false,
@@ -261,7 +256,6 @@ mod tests {
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: Default::default(),
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: false,

@@ -4,18 +4,25 @@
 //! behavior easier to review without paging through the rest of `chatwidget.rs`.
 
 use super::*;
+use crate::status::format_tokens_compact;
 
-pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["spinner", "project"];
+/// Items shown in the terminal title when the user has not configured a
+/// custom selection. Intentionally minimal: spinner + project name.
+pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["spinner", "project-name"];
+
+/// Braille-pattern dot-spinner frames for the terminal title animation.
 pub(super) const TERMINAL_TITLE_SPINNER_FRAMES: [&str; 10] =
     ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/// Time between spinner frame advances in the terminal title.
 pub(super) const TERMINAL_TITLE_SPINNER_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// Compact runtime states that can be rendered into the terminal title.
 ///
 /// This is intentionally smaller than the full status-header vocabulary. The
 /// title needs short, stable labels, so callers map richer lifecycle events
 /// onto one of these buckets before rendering.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum TerminalTitleStatusKind {
     Working,
     WaitingForBackgroundTerminal,
@@ -47,12 +54,12 @@ impl StatusSurfaceSelections {
     }
 }
 
-#[derive(Clone, Debug)]
 /// Cached project-root display name keyed by the cwd used for the last lookup.
 ///
 /// Terminal-title refreshes can happen very frequently, so the title path avoids
 /// repeatedly walking up the filesystem to rediscover the same project root name
 /// while the working directory is unchanged.
+#[derive(Clone, Debug)]
 pub(super) struct CachedProjectRootName {
     pub(super) cwd: PathBuf,
     pub(super) root_name: Option<String>,
@@ -270,20 +277,7 @@ impl ChatWidget {
     ///
     /// Unknown ids are deduplicated in insertion order for warning messages.
     fn status_line_items_with_invalids(&self) -> (Vec<StatusLineItem>, Vec<String>) {
-        let mut invalid = Vec::new();
-        let mut invalid_seen = HashSet::new();
-        let mut items = Vec::new();
-        for id in self.configured_status_line_items() {
-            match id.parse::<StatusLineItem>() {
-                Ok(item) => items.push(item),
-                Err(_) => {
-                    if invalid_seen.insert(id.clone()) {
-                        invalid.push(format!(r#""{id}""#));
-                    }
-                }
-            }
-        }
-        (items, invalid)
+        parse_items_with_invalids(self.configured_status_line_items())
     }
 
     pub(super) fn configured_status_line_items(&self) -> Vec<String> {
@@ -299,20 +293,7 @@ impl ChatWidget {
     ///
     /// Unknown ids are deduplicated in insertion order for warning messages.
     fn terminal_title_items_with_invalids(&self) -> (Vec<TerminalTitleItem>, Vec<String>) {
-        let mut invalid = Vec::new();
-        let mut invalid_seen = HashSet::new();
-        let mut items = Vec::new();
-        for id in self.configured_terminal_title_items() {
-            match id.parse::<TerminalTitleItem>() {
-                Ok(item) => items.push(item),
-                Err(_) => {
-                    if invalid_seen.insert(id.clone()) {
-                        invalid.push(format!(r#""{id}""#));
-                    }
-                }
-            }
-        }
-        (items, invalid)
+        parse_items_with_invalids(self.configured_terminal_title_items())
     }
 
     /// Returns the configured terminal-title ids, or the default ordering when unset.
@@ -441,18 +422,7 @@ impl ChatWidget {
     pub(super) fn status_line_value_for_item(&mut self, item: &StatusLineItem) -> Option<String> {
         match item {
             StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
-            StatusLineItem::ModelWithReasoning => {
-                let label =
-                    Self::status_line_reasoning_effort_label(self.effective_reasoning_effort());
-                let fast_label = if self
-                    .should_show_fast_status(self.current_model(), self.config.service_tier)
-                {
-                    " fast"
-                } else {
-                    ""
-                };
-                Some(format!("{} {label}{fast_label}", self.model_display_name()))
-            }
+            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(
                     self.status_line_cwd(),
@@ -461,6 +431,7 @@ impl ChatWidget {
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
+            StatusLineItem::Status => Some(self.terminal_title_status_text()),
             StatusLineItem::UsedTokens => {
                 let usage = self.status_line_total_usage();
                 let total = usage.tokens_in_context_window();
@@ -472,10 +443,10 @@ impl ChatWidget {
             }
             StatusLineItem::ContextRemaining => self
                 .status_line_context_remaining_percent()
-                .map(|remaining| format!("{remaining}% left")),
+                .map(|remaining| format!("Context {remaining}% left")),
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
-                .map(|used| format!("{used}% used")),
+                .map(|used| format!("Context {used}% used")),
             StatusLineItem::FiveHourLimit => {
                 let window = self
                     .rate_limit_snapshots_by_limit_id
@@ -512,20 +483,55 @@ impl ChatWidget {
             )),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
             StatusLineItem::FastMode => Some(
-                if matches!(self.config.service_tier, Some(ServiceTier::Fast)) {
+                if matches!(self.current_service_tier(), Some(ServiceTier::Fast)) {
                     "Fast on".to_string()
                 } else {
                     "Fast off".to_string()
                 },
             ),
+            StatusLineItem::ThreadTitle => self.thread_name.as_ref().and_then(|name| {
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }),
+            StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
         }
+    }
+
+    pub(super) fn status_surface_preview_value_for_item(
+        &mut self,
+        item: StatusSurfacePreviewItem,
+    ) -> Option<String> {
+        let status_line_item = match item {
+            StatusSurfacePreviewItem::AppName => return Some("codex".to_string()),
+            StatusSurfacePreviewItem::ProjectName => return self.terminal_title_project_name(),
+            StatusSurfacePreviewItem::ProjectRoot => StatusLineItem::ProjectRoot,
+            StatusSurfacePreviewItem::Status => return Some(self.terminal_title_status_text()),
+            StatusSurfacePreviewItem::TaskProgress => return self.terminal_title_task_progress(),
+            StatusSurfacePreviewItem::CurrentDir => StatusLineItem::CurrentDir,
+            StatusSurfacePreviewItem::ThreadTitle => StatusLineItem::ThreadTitle,
+            StatusSurfacePreviewItem::GitBranch => StatusLineItem::GitBranch,
+            StatusSurfacePreviewItem::ContextRemaining => StatusLineItem::ContextRemaining,
+            StatusSurfacePreviewItem::ContextUsed => StatusLineItem::ContextUsed,
+            StatusSurfacePreviewItem::FiveHourLimit => StatusLineItem::FiveHourLimit,
+            StatusSurfacePreviewItem::WeeklyLimit => StatusLineItem::WeeklyLimit,
+            StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
+            StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
+            StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
+            StatusSurfacePreviewItem::TotalInputTokens => StatusLineItem::TotalInputTokens,
+            StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
+            StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,
+            StatusSurfacePreviewItem::FastMode => StatusLineItem::FastMode,
+            StatusSurfacePreviewItem::Model => StatusLineItem::ModelName,
+            StatusSurfacePreviewItem::ModelWithReasoning => StatusLineItem::ModelWithReasoning,
+        };
+        self.status_line_value_for_item(&status_line_item)
     }
 
     /// Resolves one configured terminal-title item into a displayable segment.
     ///
     /// Returning `None` means "omit this segment for now" so callers can keep
     /// the configured order while hiding values that are not yet available.
-    fn terminal_title_value_for_item(
+    pub(super) fn terminal_title_value_for_item(
         &mut self,
         item: TerminalTitleItem,
         now: Instant,
@@ -533,6 +539,10 @@ impl ChatWidget {
         match item {
             TerminalTitleItem::AppName => Some("codex".to_string()),
             TerminalTitleItem::Project => self.terminal_title_project_name(),
+            TerminalTitleItem::CurrentDir => Some(Self::truncate_terminal_title_part(
+                format_directory_display(self.status_line_cwd(), /*max_width*/ None),
+                /*max_chars*/ 32,
+            )),
             TerminalTitleItem::Spinner => self.terminal_title_spinner_text_at(now),
             TerminalTitleItem::Status => Some(self.terminal_title_status_text()),
             TerminalTitleItem::Thread => self.thread_name.as_ref().and_then(|name| {
@@ -549,12 +559,57 @@ impl ChatWidget {
             TerminalTitleItem::GitBranch => self.status_line_branch.as_ref().map(|branch| {
                 Self::truncate_terminal_title_part(branch.clone(), /*max_chars*/ 32)
             }),
+            TerminalTitleItem::ContextRemaining => self
+                .status_line_value_for_item(&StatusLineItem::ContextRemaining)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::ContextUsed => self
+                .status_line_value_for_item(&StatusLineItem::ContextUsed)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::FiveHourLimit => self
+                .status_line_value_for_item(&StatusLineItem::FiveHourLimit)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::WeeklyLimit => self
+                .status_line_value_for_item(&StatusLineItem::WeeklyLimit)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::CodexVersion => self
+                .status_line_value_for_item(&StatusLineItem::CodexVersion)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::UsedTokens => self
+                .status_line_value_for_item(&StatusLineItem::UsedTokens)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::TotalInputTokens => self
+                .status_line_value_for_item(&StatusLineItem::TotalInputTokens)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::TotalOutputTokens => self
+                .status_line_value_for_item(&StatusLineItem::TotalOutputTokens)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::SessionId => self
+                .status_line_value_for_item(&StatusLineItem::SessionId)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
+            TerminalTitleItem::FastMode => self
+                .status_line_value_for_item(&StatusLineItem::FastMode)
+                .map(|value| Self::truncate_terminal_title_part(value, /*max_chars*/ 32)),
             TerminalTitleItem::Model => Some(Self::truncate_terminal_title_part(
                 self.model_display_name().to_string(),
                 /*max_chars*/ 32,
             )),
+            TerminalTitleItem::ModelWithReasoning => Some(Self::truncate_terminal_title_part(
+                self.model_with_reasoning_display_name(),
+                /*max_chars*/ 32,
+            )),
             TerminalTitleItem::TaskProgress => self.terminal_title_task_progress(),
         }
+    }
+
+    fn model_with_reasoning_display_name(&self) -> String {
+        let label = Self::status_line_reasoning_effort_label(self.effective_reasoning_effort());
+        let fast_label =
+            if self.should_show_fast_status(self.current_model(), self.current_service_tier()) {
+                " fast"
+            } else {
+                ""
+            };
+        format!("{} {label}{fast_label}", self.model_display_name())
     }
 
     /// Computes the compact runtime status label used by the terminal title.
@@ -659,4 +714,24 @@ impl ChatWidget {
         truncated.push_str("...");
         truncated
     }
+}
+
+fn parse_items_with_invalids<T>(ids: impl IntoIterator<Item = String>) -> (Vec<T>, Vec<String>)
+where
+    T: std::str::FromStr,
+{
+    let mut invalid = Vec::new();
+    let mut invalid_seen = HashSet::new();
+    let mut items = Vec::new();
+    for id in ids {
+        match id.parse::<T>() {
+            Ok(item) => items.push(item),
+            Err(_) => {
+                if invalid_seen.insert(id.clone()) {
+                    invalid.push(format!(r#""{id}""#));
+                }
+            }
+        }
+    }
+    (items, invalid)
 }

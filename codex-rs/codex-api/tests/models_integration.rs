@@ -1,8 +1,7 @@
 use codex_api::AuthProvider;
 use codex_api::ModelsClient;
-use codex_api::RemoteModelsPayload;
-use codex_api::provider::Provider;
-use codex_api::provider::RetryConfig;
+use codex_api::Provider;
+use codex_api::RetryConfig;
 use codex_client::ReqwestTransport;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
@@ -15,6 +14,7 @@ use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::default_input_modalities;
 use http::HeaderMap;
 use http::Method;
+use std::sync::Arc;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -25,9 +25,7 @@ use wiremock::matchers::path;
 struct DummyAuth;
 
 impl AuthProvider for DummyAuth {
-    fn bearer_token(&self) -> Option<String> {
-        None
-    }
+    fn add_auth_headers(&self, _headers: &mut HeaderMap) {}
 }
 
 fn provider(base_url: &str) -> Provider {
@@ -55,7 +53,6 @@ async fn models_client_hits_models_endpoint() {
     let response = ModelsResponse {
         models: vec![ModelInfo {
             slug: "gpt-test".to_string(),
-            api_model_slug: None,
             display_name: "gpt-test".to_string(),
             description: Some("desc".to_string()),
             default_reasoning_level: Some(ReasoningEffort::Medium),
@@ -77,6 +74,7 @@ async fn models_client_hits_models_endpoint() {
             visibility: ModelVisibility::List,
             supported_in_api: true,
             priority: 1,
+            additional_speed_tiers: Vec::new(),
             upgrade: None,
             base_instructions: "base instructions".to_string(),
             model_messages: None,
@@ -87,10 +85,11 @@ async fn models_client_hits_models_endpoint() {
             availability_nux: None,
             apply_patch_tool_type: None,
             web_search_tool_type: Default::default(),
-            truncation_policy: TruncationPolicyConfig::bytes(10_000),
+            truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
             supports_parallel_tool_calls: false,
             supports_image_detail_original: false,
             context_window: Some(272_000),
+            max_context_window: None,
             auto_compact_token_limit: None,
             effective_context_window_percent: 95,
             experimental_supported_tools: Vec::new(),
@@ -111,17 +110,15 @@ async fn models_client_hits_models_endpoint() {
         .await;
 
     let transport = ReqwestTransport::new(reqwest::Client::new());
-    let client = ModelsClient::new(transport, provider(&base_url), DummyAuth);
+    let client = ModelsClient::new(transport, provider(&base_url), Arc::new(DummyAuth));
 
     let (models, _) = client
         .list_models("0.1.0", HeaderMap::new())
         .await
         .expect("models request should succeed");
 
-    assert_eq!(
-        models,
-        RemoteModelsPayload::Enhanced(response.models.clone())
-    );
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].slug, "gpt-test");
 
     let received = server
         .received_requests()
@@ -130,49 +127,4 @@ async fn models_client_hits_models_endpoint() {
     assert_eq!(received.len(), 1);
     assert_eq!(received[0].method, Method::GET.as_str());
     assert_eq!(received[0].url.path(), "/api/codex/models");
-}
-
-#[tokio::test]
-async fn models_client_parses_openai_models_endpoint_response() {
-    let server = MockServer::start().await;
-    let base_url = format!("{}/v1", server.uri());
-
-    Mock::given(method("GET"))
-        .and(path("/v1/models"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "application/json")
-                .set_body_json(serde_json::json!({
-                    "object": "list",
-                    "data": [
-                        {
-                            "id": "gpt-5.4",
-                            "object": "model",
-                            "created": 0,
-                            "owned_by": "openai"
-                        },
-                        {
-                            "id": "gpt-5.3-codex",
-                            "object": "model",
-                            "created": 0,
-                            "owned_by": "openai"
-                        }
-                    ]
-                })),
-        )
-        .mount(&server)
-        .await;
-
-    let transport = ReqwestTransport::new(reqwest::Client::new());
-    let client = ModelsClient::new(transport, provider(&base_url), DummyAuth);
-
-    let (models, _) = client
-        .list_models("0.1.0", HeaderMap::new())
-        .await
-        .expect("models request should succeed");
-
-    assert_eq!(
-        models,
-        RemoteModelsPayload::OpenAiIds(vec!["gpt-5.4".to_string(), "gpt-5.3-codex".to_string(),])
-    );
 }
