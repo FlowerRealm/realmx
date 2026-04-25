@@ -1991,22 +1991,6 @@ impl ChatWidget {
         self.on_session_configured(thread_session_state_to_legacy_event(session));
     }
 
-    pub(crate) fn handle_initial_messages(&mut self, events: Vec<EventMsg>) {
-        for msg in events {
-            if matches!(
-                msg,
-                EventMsg::SessionConfigured(_) | EventMsg::ThreadNameUpdated(_)
-            ) {
-                continue;
-            }
-            self.dispatch_event_msg(
-                /*id*/ None,
-                msg,
-                Some(ReplayKind::ResumeInitialMessages),
-            );
-        }
-    }
-
     fn emit_forked_thread_event(&self, forked_from_id: ThreadId) {
         let app_event_tx = self.app_event_tx.clone();
         let codex_home = self.config.codex_home.clone();
@@ -6220,19 +6204,12 @@ impl ChatWidget {
                         .plan
                         .into_iter()
                         .map(|step| UpdatePlanItemArg {
-                            id: step.id,
                             step: step.step,
                             status: match step.status {
                                 TurnPlanStepStatus::Pending => UpdatePlanItemStatus::Pending,
                                 TurnPlanStepStatus::InProgress => UpdatePlanItemStatus::InProgress,
                                 TurnPlanStepStatus::Completed => UpdatePlanItemStatus::Completed,
                             },
-                            path: step.path,
-                            details: step.details,
-                            inputs: step.inputs,
-                            outputs: step.outputs,
-                            depends_on: step.depends_on,
-                            acceptance: step.acceptance,
                         })
                         .collect(),
                 })

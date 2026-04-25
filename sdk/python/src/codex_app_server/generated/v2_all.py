@@ -33,13 +33,6 @@ class ApiKeyAccount(BaseModel):
     type: Annotated[Literal["apiKey"], Field(title="ApiKeyAccountType")]
 
 
-class OauthAccount(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[Literal["oauth"], Field(title="OauthAccountType")]
-
-
 class AccountLoginCompletedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -206,7 +199,6 @@ class AskForApproval(RootModel[AskForApprovalValue | GranularAskForApproval]):
 
 class AuthMode(Enum):
     apikey = "apikey"
-    oauth = "oauth"
     chatgpt = "chatgpt"
     chatgpt_auth_tokens = "chatgptAuthTokens"
 
@@ -1276,13 +1268,6 @@ class ChatgptLoginAccountParams(BaseModel):
     ]
 
 
-class OauthLoginAccountParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[Literal["oauth"], Field(title="Oauthv2::LoginAccountParamsType")]
-
-
 class ChatgptAuthTokensLoginAccountParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1318,7 +1303,6 @@ class LoginAccountParams(
     RootModel[
         ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
-        | OauthLoginAccountParams
         | ChatgptAuthTokensLoginAccountParams
     ]
 ):
@@ -1328,7 +1312,6 @@ class LoginAccountParams(
     root: Annotated[
         ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
-        | OauthLoginAccountParams
         | ChatgptAuthTokensLoginAccountParams,
         Field(title="LoginAccountParams"),
     ]
@@ -1341,15 +1324,6 @@ class ApiKeyLoginAccountResponse(BaseModel):
     type: Annotated[
         Literal["apiKey"], Field(title="ApiKeyv2::LoginAccountResponseType")
     ]
-
-
-class OauthLoginAccountResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    auth_url: Annotated[str, Field(alias="authUrl")]
-    login_id: Annotated[str, Field(alias="loginId")]
-    type: Annotated[Literal["oauth"], Field(title="Oauthv2::LoginAccountResponseType")]
 
 
 class ChatgptLoginAccountResponse(BaseModel):
@@ -1382,7 +1356,6 @@ class ChatgptAuthTokensLoginAccountResponse(BaseModel):
 class LoginAccountResponse(
     RootModel[
         ApiKeyLoginAccountResponse
-        | OauthLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptAuthTokensLoginAccountResponse
     ]
@@ -1392,7 +1365,6 @@ class LoginAccountResponse(
     )
     root: Annotated[
         ApiKeyLoginAccountResponse
-        | OauthLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptAuthTokensLoginAccountResponse,
         Field(title="LoginAccountResponse"),
@@ -1495,7 +1467,6 @@ class MessagePhase(Enum):
 
 class ModeKind(Enum):
     plan = "plan"
-    auto_plan = "auto_plan"
     default = "default"
 
 
@@ -2539,11 +2510,6 @@ class SkillInterface(BaseModel):
     short_description: Annotated[str | None, Field(alias="shortDescription")] = None
 
 
-class SkillInvocationType(Enum):
-    explicit = "explicit"
-    implicit = "implicit"
-
-
 class SkillScope(Enum):
     user = "user"
     repo = "repo"
@@ -2572,16 +2538,6 @@ class SkillToolDependency(BaseModel):
     type: str
     url: str | None = None
     value: str
-
-
-class SkillUsedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    invocation_type: Annotated[SkillInvocationType, Field(alias="invocationType")]
-    name: str
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
 
 
 class SkillsChangedNotification(BaseModel):
@@ -3578,11 +3534,11 @@ class ChatgptAccount(BaseModel):
     type: Annotated[Literal["chatgpt"], Field(title="ChatgptAccountType")]
 
 
-class Account(RootModel[ApiKeyAccount | OauthAccount | ChatgptAccount]):
+class Account(RootModel[ApiKeyAccount | ChatgptAccount]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: ApiKeyAccount | OauthAccount | ChatgptAccount
+    root: ApiKeyAccount | ChatgptAccount
 
 
 class AccountUpdatedNotification(BaseModel):
@@ -3591,8 +3547,6 @@ class AccountUpdatedNotification(BaseModel):
     )
     auth_mode: Annotated[AuthMode | None, Field(alias="authMode")] = None
     plan_type: Annotated[PlanType | None, Field(alias="planType")] = None
-    provider_id: Annotated[str | None, Field(alias="providerId")] = None
-    provider_name: Annotated[str | None, Field(alias="providerName")] = None
 
 
 class AppConfig(BaseModel):
@@ -4512,9 +4466,6 @@ class GetAccountResponse(BaseModel):
         populate_by_name=True,
     )
     account: Account | None = None
-    provider_id: Annotated[str | None, Field(alias="providerId")] = None
-    provider_name: Annotated[str | None, Field(alias="providerName")] = None
-    requires_auth: Annotated[bool | None, Field(alias="requiresAuth")] = None
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
 
 
@@ -4668,7 +4619,6 @@ class PluginMarketplaceEntry(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    display_name: Annotated[str | None, Field(alias="displayName")] = None
     interface: MarketplaceInterface | None = None
     name: str
     path: AbsolutePathBuf
@@ -4777,16 +4727,6 @@ class SkillsChangedServerNotification(BaseModel):
         Literal["skills/changed"], Field(title="Skills/changedNotificationMethod")
     ]
     params: SkillsChangedNotification
-
-
-class SkillUsedServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    method: Annotated[
-        Literal["skill/used"], Field(title="Skill/usedNotificationMethod")
-    ]
-    params: SkillUsedNotification
 
 
 class ThreadNameUpdatedServerNotification(BaseModel):
@@ -5029,21 +4969,6 @@ class SubAgentSource(
         populate_by_name=True,
     )
     root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
-
-
-class ThreadActivePlanRow(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    acceptance: str | None = None
-    depends_on: Annotated[list[str] | None, Field(alias="dependsOn")] = None
-    details: str | None = None
-    id: str | None = None
-    inputs: list[str] | None = None
-    outputs: list[str] | None = None
-    path: str | None = None
-    status: TurnPlanStepStatus
-    step: str
 
 
 class UserMessageThreadItem(BaseModel):
@@ -5294,13 +5219,6 @@ class TurnPlanStep(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    acceptance: str | None = None
-    depends_on: Annotated[list[str] | None, Field(alias="dependsOn")] = None
-    details: str | None = None
-    id: str | None = None
-    inputs: list[str] | None = None
-    outputs: list[str] | None = None
-    path: str | None = None
     status: TurnPlanStepStatus
     step: str
 
@@ -5899,222 +5817,10 @@ class SessionSource(RootModel[SessionSourceValue | SubAgentSessionSource]):
     root: SessionSourceValue | SubAgentSessionSource
 
 
-class ThreadActivePlan(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    raw_markdown: Annotated[str, Field(alias="rawMarkdown")]
-    rows: list[ThreadActivePlanRow]
-    snapshot_id: Annotated[str, Field(alias="snapshotId")]
-    source_item_id: Annotated[str, Field(alias="sourceItemId")]
-    source_turn_id: Annotated[str, Field(alias="sourceTurnId")]
-
-
-class ExternalAgentConfigImportRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/import"],
-        Field(title="ExternalAgentConfig/importRequestMethod"),
-    ]
-    params: ExternalAgentConfigImportParams
-
-
-class ConfigBatchWriteRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["config/batchWrite"], Field(title="Config/batchWriteRequestMethod")
-    ]
-    params: ConfigBatchWriteParams
-
-
-class ClientRequest(
-    RootModel[
-        InitializeRequest
-        | ThreadStartRequest
-        | ThreadResumeRequest
-        | ThreadForkRequest
-        | ThreadArchiveRequest
-        | ThreadUnsubscribeRequest
-        | ThreadNameSetRequest
-        | ThreadMetadataUpdateRequest
-        | ThreadUnarchiveRequest
-        | ThreadCompactStartRequest
-        | ThreadRollbackRequest
-        | ThreadListRequest
-        | ThreadLoadedListRequest
-        | ThreadReadRequest
-        | SkillsListRequest
-        | PluginListRequest
-        | PluginReadRequest
-        | AppListRequest
-        | FsReadFileRequest
-        | FsWriteFileRequest
-        | FsCreateDirectoryRequest
-        | FsGetMetadataRequest
-        | FsReadDirectoryRequest
-        | FsRemoveRequest
-        | FsCopyRequest
-        | SkillsConfigWriteRequest
-        | PluginInstallRequest
-        | PluginUninstallRequest
-        | TurnStartRequest
-        | TurnSteerRequest
-        | TurnInterruptRequest
-        | ReviewStartRequest
-        | ModelListRequest
-        | ExperimentalFeatureListRequest
-        | McpServerOauthLoginRequest
-        | ConfigMcpServerReloadRequest
-        | McpServerStatusListRequest
-        | WindowsSandboxSetupStartRequest
-        | AccountLoginStartRequest
-        | AccountLoginCancelRequest
-        | AccountLogoutRequest
-        | AccountRateLimitsReadRequest
-        | FeedbackUploadRequest
-        | CommandExecRequest
-        | CommandExecWriteRequest
-        | CommandExecTerminateRequest
-        | CommandExecResizeRequest
-        | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ConfigValueWriteRequest
-        | ConfigBatchWriteRequest
-        | ConfigRequirementsReadRequest
-        | AccountReadRequest
-        | FuzzyFileSearchRequest
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        InitializeRequest
-        | ThreadStartRequest
-        | ThreadResumeRequest
-        | ThreadForkRequest
-        | ThreadArchiveRequest
-        | ThreadUnsubscribeRequest
-        | ThreadNameSetRequest
-        | ThreadMetadataUpdateRequest
-        | ThreadUnarchiveRequest
-        | ThreadCompactStartRequest
-        | ThreadRollbackRequest
-        | ThreadListRequest
-        | ThreadLoadedListRequest
-        | ThreadReadRequest
-        | SkillsListRequest
-        | PluginListRequest
-        | PluginReadRequest
-        | AppListRequest
-        | FsReadFileRequest
-        | FsWriteFileRequest
-        | FsCreateDirectoryRequest
-        | FsGetMetadataRequest
-        | FsReadDirectoryRequest
-        | FsRemoveRequest
-        | FsCopyRequest
-        | SkillsConfigWriteRequest
-        | PluginInstallRequest
-        | PluginUninstallRequest
-        | TurnStartRequest
-        | TurnSteerRequest
-        | TurnInterruptRequest
-        | ReviewStartRequest
-        | ModelListRequest
-        | ExperimentalFeatureListRequest
-        | McpServerOauthLoginRequest
-        | ConfigMcpServerReloadRequest
-        | McpServerStatusListRequest
-        | WindowsSandboxSetupStartRequest
-        | AccountLoginStartRequest
-        | AccountLoginCancelRequest
-        | AccountLogoutRequest
-        | AccountRateLimitsReadRequest
-        | FeedbackUploadRequest
-        | CommandExecRequest
-        | CommandExecWriteRequest
-        | CommandExecTerminateRequest
-        | CommandExecResizeRequest
-        | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ConfigValueWriteRequest
-        | ConfigBatchWriteRequest
-        | ConfigRequirementsReadRequest
-        | AccountReadRequest
-        | FuzzyFileSearchRequest,
-        Field(
-            description="Request from the client to the server.", title="ClientRequest"
-        ),
-    ]
-
-
-class Config(BaseModel):
-    model_config = ConfigDict(
-        extra="allow",
-        populate_by_name=True,
-    )
-    analytics: AnalyticsConfig | None = None
-    approval_policy: AskForApproval | None = None
-    approvals_reviewer: Annotated[
-        ApprovalsReviewer | None,
-        Field(
-            description="[UNSTABLE] Optional default for where approval requests are routed for review."
-        ),
-    ] = None
-    compact_prompt: str | None = None
-    developer_instructions: str | None = None
-    forced_chatgpt_workspace_id: str | None = None
-    forced_login_method: ForcedLoginMethod | None = None
-    instructions: str | None = None
-    model: str | None = None
-    model_auto_compact_token_limit: int | None = None
-    model_context_window: int | None = None
-    model_provider: str | None = None
-    model_reasoning_effort: ReasoningEffort | None = None
-    model_reasoning_summary: ReasoningSummary | None = None
-    model_verbosity: Verbosity | None = None
-    profile: str | None = None
-    profiles: dict[str, ProfileV2] | None = {}
-    review_model: str | None = None
-    sandbox_mode: SandboxMode | None = None
-    sandbox_workspace_write: SandboxWorkspaceWrite | None = None
-    service_tier: ServiceTier | None = None
-    tools: ToolsV2 | None = None
-    web_search: WebSearchMode | None = None
-
-
-class ConfigReadResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    config: Config
-    layers: list[ConfigLayer] | None = None
-    origins: dict[str, ConfigLayerMetadata]
-
-
-class RawResponseItemCompletedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    item: ResponseItem
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
-
-
 class Thread(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    active_plan: Annotated[ThreadActivePlan | None, Field(alias="activePlan")] = None
     agent_nickname: Annotated[
         str | None,
         Field(
@@ -6324,6 +6030,206 @@ class ThreadUnarchiveResponse(BaseModel):
     thread: Thread
 
 
+class ExternalAgentConfigImportRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["externalAgentConfig/import"],
+        Field(title="ExternalAgentConfig/importRequestMethod"),
+    ]
+    params: ExternalAgentConfigImportParams
+
+
+class ConfigBatchWriteRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["config/batchWrite"], Field(title="Config/batchWriteRequestMethod")
+    ]
+    params: ConfigBatchWriteParams
+
+
+class ClientRequest(
+    RootModel[
+        InitializeRequest
+        | ThreadStartRequest
+        | ThreadResumeRequest
+        | ThreadForkRequest
+        | ThreadArchiveRequest
+        | ThreadUnsubscribeRequest
+        | ThreadNameSetRequest
+        | ThreadMetadataUpdateRequest
+        | ThreadUnarchiveRequest
+        | ThreadCompactStartRequest
+        | ThreadRollbackRequest
+        | ThreadListRequest
+        | ThreadLoadedListRequest
+        | ThreadReadRequest
+        | SkillsListRequest
+        | PluginListRequest
+        | PluginReadRequest
+        | AppListRequest
+        | FsReadFileRequest
+        | FsWriteFileRequest
+        | FsCreateDirectoryRequest
+        | FsGetMetadataRequest
+        | FsReadDirectoryRequest
+        | FsRemoveRequest
+        | FsCopyRequest
+        | SkillsConfigWriteRequest
+        | PluginInstallRequest
+        | PluginUninstallRequest
+        | TurnStartRequest
+        | TurnSteerRequest
+        | TurnInterruptRequest
+        | ReviewStartRequest
+        | ModelListRequest
+        | ExperimentalFeatureListRequest
+        | McpServerOauthLoginRequest
+        | ConfigMcpServerReloadRequest
+        | McpServerStatusListRequest
+        | WindowsSandboxSetupStartRequest
+        | AccountLoginStartRequest
+        | AccountLoginCancelRequest
+        | AccountLogoutRequest
+        | AccountRateLimitsReadRequest
+        | FeedbackUploadRequest
+        | CommandExecRequest
+        | CommandExecWriteRequest
+        | CommandExecTerminateRequest
+        | CommandExecResizeRequest
+        | ConfigReadRequest
+        | ExternalAgentConfigDetectRequest
+        | ExternalAgentConfigImportRequest
+        | ConfigValueWriteRequest
+        | ConfigBatchWriteRequest
+        | ConfigRequirementsReadRequest
+        | AccountReadRequest
+        | FuzzyFileSearchRequest
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        InitializeRequest
+        | ThreadStartRequest
+        | ThreadResumeRequest
+        | ThreadForkRequest
+        | ThreadArchiveRequest
+        | ThreadUnsubscribeRequest
+        | ThreadNameSetRequest
+        | ThreadMetadataUpdateRequest
+        | ThreadUnarchiveRequest
+        | ThreadCompactStartRequest
+        | ThreadRollbackRequest
+        | ThreadListRequest
+        | ThreadLoadedListRequest
+        | ThreadReadRequest
+        | SkillsListRequest
+        | PluginListRequest
+        | PluginReadRequest
+        | AppListRequest
+        | FsReadFileRequest
+        | FsWriteFileRequest
+        | FsCreateDirectoryRequest
+        | FsGetMetadataRequest
+        | FsReadDirectoryRequest
+        | FsRemoveRequest
+        | FsCopyRequest
+        | SkillsConfigWriteRequest
+        | PluginInstallRequest
+        | PluginUninstallRequest
+        | TurnStartRequest
+        | TurnSteerRequest
+        | TurnInterruptRequest
+        | ReviewStartRequest
+        | ModelListRequest
+        | ExperimentalFeatureListRequest
+        | McpServerOauthLoginRequest
+        | ConfigMcpServerReloadRequest
+        | McpServerStatusListRequest
+        | WindowsSandboxSetupStartRequest
+        | AccountLoginStartRequest
+        | AccountLoginCancelRequest
+        | AccountLogoutRequest
+        | AccountRateLimitsReadRequest
+        | FeedbackUploadRequest
+        | CommandExecRequest
+        | CommandExecWriteRequest
+        | CommandExecTerminateRequest
+        | CommandExecResizeRequest
+        | ConfigReadRequest
+        | ExternalAgentConfigDetectRequest
+        | ExternalAgentConfigImportRequest
+        | ConfigValueWriteRequest
+        | ConfigBatchWriteRequest
+        | ConfigRequirementsReadRequest
+        | AccountReadRequest
+        | FuzzyFileSearchRequest,
+        Field(
+            description="Request from the client to the server.", title="ClientRequest"
+        ),
+    ]
+
+
+class Config(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
+    analytics: AnalyticsConfig | None = None
+    approval_policy: AskForApproval | None = None
+    approvals_reviewer: Annotated[
+        ApprovalsReviewer | None,
+        Field(
+            description="[UNSTABLE] Optional default for where approval requests are routed for review."
+        ),
+    ] = None
+    compact_prompt: str | None = None
+    developer_instructions: str | None = None
+    forced_chatgpt_workspace_id: str | None = None
+    forced_login_method: ForcedLoginMethod | None = None
+    instructions: str | None = None
+    model: str | None = None
+    model_auto_compact_token_limit: int | None = None
+    model_context_window: int | None = None
+    model_provider: str | None = None
+    model_reasoning_effort: ReasoningEffort | None = None
+    model_reasoning_summary: ReasoningSummary | None = None
+    model_verbosity: Verbosity | None = None
+    profile: str | None = None
+    profiles: dict[str, ProfileV2] | None = {}
+    review_model: str | None = None
+    sandbox_mode: SandboxMode | None = None
+    sandbox_workspace_write: SandboxWorkspaceWrite | None = None
+    service_tier: ServiceTier | None = None
+    tools: ToolsV2 | None = None
+    web_search: WebSearchMode | None = None
+
+
+class ConfigReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    config: Config
+    layers: list[ConfigLayer] | None = None
+    origins: dict[str, ConfigLayerMetadata]
+
+
+class RawResponseItemCompletedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    item: ResponseItem
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class ThreadStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6343,7 +6249,6 @@ class ServerNotification(
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
         | SkillsChangedServerNotification
-        | SkillUsedServerNotification
         | ThreadNameUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
@@ -6398,7 +6303,6 @@ class ServerNotification(
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
         | SkillsChangedServerNotification
-        | SkillUsedServerNotification
         | ThreadNameUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification

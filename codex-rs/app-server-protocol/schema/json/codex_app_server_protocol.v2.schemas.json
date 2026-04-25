@@ -9879,16 +9879,6 @@
     },
     "Thread": {
       "properties": {
-        "activePlan": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ThreadActivePlan"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "agentNickname": {
           "description": "Optional random unique nickname assigned to an AgentControl-spawned sub-agent.",
           "type": [
@@ -10006,102 +9996,6 @@
         "waitingOnUserInput"
       ],
       "type": "string"
-    },
-    "ThreadActivePlan": {
-      "properties": {
-        "rawMarkdown": {
-          "type": "string"
-        },
-        "rows": {
-          "items": {
-            "$ref": "#/definitions/ThreadActivePlanRow"
-          },
-          "type": "array"
-        },
-        "snapshotId": {
-          "type": "string"
-        },
-        "sourceItemId": {
-          "type": "string"
-        },
-        "sourceTurnId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "rawMarkdown",
-        "rows",
-        "snapshotId",
-        "sourceItemId",
-        "sourceTurnId"
-      ],
-      "type": "object"
-    },
-    "ThreadActivePlanRow": {
-      "properties": {
-        "acceptance": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "dependsOn": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "details": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "inputs": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "outputs": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "path": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "$ref": "#/definitions/TurnPlanStepStatus"
-        },
-        "step": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "status",
-        "step"
-      ],
-      "type": "object"
     },
     "ThreadArchiveParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -12275,57 +12169,6 @@
     },
     "TurnPlanStep": {
       "properties": {
-        "acceptance": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "dependsOn": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "details": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "inputs": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "outputs": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "path": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "status": {
           "$ref": "#/definitions/TurnPlanStepStatus"
         },

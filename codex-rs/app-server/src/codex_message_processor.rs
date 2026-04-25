@@ -109,8 +109,6 @@ use codex_app_server_protocol::SkillsConfigWriteResponse;
 use codex_app_server_protocol::SkillsListParams;
 use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadActivePlan;
-use codex_app_server_protocol::ThreadActivePlanRow;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadArchivedNotification;
@@ -3509,15 +3507,12 @@ impl CodexMessageProcessor {
         let mut threads = Vec::with_capacity(summaries.len());
         let mut thread_ids = HashSet::with_capacity(summaries.len());
         let mut status_ids = Vec::with_capacity(summaries.len());
-        let state_db_ctx = get_state_db(&self.config).await;
 
         for summary in summaries {
             let conversation_id = summary.conversation_id;
             thread_ids.insert(conversation_id);
 
-            let mut thread = summary_to_thread(summary);
-            thread.active_plan =
-                active_plan_from_state_db(state_db_ctx.as_ref(), conversation_id).await;
+            let thread = summary_to_thread(summary);
             status_ids.push(thread.id.clone());
             threads.push((conversation_id, thread));
         }
@@ -4336,24 +4331,6 @@ impl CodexMessageProcessor {
                 warn!("Failed to read thread name for {thread_id}: {err}");
             }
         }
-        thread.active_plan = self.active_plan_for_thread(thread_id).await;
-    }
-
-    async fn active_plan_for_thread(&self, thread_id: ThreadId) -> Option<ThreadActivePlan> {
-        let state_db_ctx = if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
-            if let Some(state_db) = thread.state_db() {
-                Some(state_db)
-            } else {
-                self.state_db_ctx_for_thread().await
-            }
-        } else {
-            self.state_db_ctx_for_thread().await
-        };
-        active_plan_from_state_db(state_db_ctx.as_ref(), thread_id).await
-    }
-
-    async fn state_db_ctx_for_thread(&self) -> Option<StateDbHandle> {
-        get_state_db(&self.config).await
     }
 
     async fn thread_fork(&mut self, request_id: ConnectionRequestId, params: ThreadForkParams) {
@@ -8473,56 +8450,6 @@ async fn read_summary_from_state_db_context_by_thread_id(
     Some(summary_from_thread_metadata(&metadata))
 }
 
-pub(crate) async fn active_plan_from_state_db(
-    state_db_ctx: Option<&StateDbHandle>,
-    thread_id: ThreadId,
-) -> Option<ThreadActivePlan> {
-    let state_db_ctx = state_db_ctx?;
-    let active_plan = match state_db_ctx
-        .get_active_thread_plan(thread_id.to_string().as_str())
-        .await
-    {
-        Ok(Some(active_plan)) => active_plan,
-        Ok(None) => return None,
-        Err(err) => {
-            warn!("failed to read active plan for {thread_id}: {err:#}");
-            return None;
-        }
-    };
-
-    Some(ThreadActivePlan {
-        snapshot_id: active_plan.snapshot.id,
-        source_turn_id: active_plan.snapshot.source_turn_id,
-        source_item_id: active_plan.snapshot.source_item_id,
-        raw_markdown: active_plan.snapshot.raw_markdown,
-        rows: active_plan
-            .items
-            .into_iter()
-            .map(|item| ThreadActivePlanRow {
-                id: Some(item.row_id),
-                step: item.step,
-                status: match item.status {
-                    codex_state::ThreadPlanItemStatus::Pending => {
-                        codex_app_server_protocol::TurnPlanStepStatus::Pending
-                    }
-                    codex_state::ThreadPlanItemStatus::InProgress => {
-                        codex_app_server_protocol::TurnPlanStepStatus::InProgress
-                    }
-                    codex_state::ThreadPlanItemStatus::Completed => {
-                        codex_app_server_protocol::TurnPlanStepStatus::Completed
-                    }
-                },
-                path: (!item.path.is_empty()).then_some(item.path),
-                details: (!item.details.is_empty()).then_some(item.details),
-                inputs: (!item.inputs.is_empty()).then_some(item.inputs),
-                outputs: (!item.outputs.is_empty()).then_some(item.outputs),
-                depends_on: (!item.depends_on.is_empty()).then_some(item.depends_on),
-                acceptance: item.acceptance,
-            })
-            .collect(),
-    })
-}
-
 async fn summary_from_thread_list_item(
     it: codex_core::ThreadItem,
     fallback_provider: &str,
@@ -8803,7 +8730,6 @@ async fn load_thread_summary_for_rollout(
     fallback_provider: &str,
     persisted_metadata: Option<&ThreadMetadata>,
 ) -> std::result::Result<Thread, String> {
-    let state_db_ctx = get_state_db(config).await;
     let mut thread = read_summary_from_rollout(rollout_path, fallback_provider)
         .await
         .map(summary_to_thread)
@@ -8818,12 +8744,9 @@ async fn load_thread_summary_for_rollout(
             &mut thread,
             summary_to_thread(summary_from_thread_metadata(persisted_metadata)),
         );
-    } else if let Some(summary) =
-        read_summary_from_state_db_context_by_thread_id(state_db_ctx.as_ref(), thread_id).await
-    {
+    } else if let Some(summary) = read_summary_from_state_db_by_thread_id(config, thread_id).await {
         merge_mutable_thread_metadata(&mut thread, summary_to_thread(summary));
     }
-    thread.active_plan = active_plan_from_state_db(state_db_ctx.as_ref(), thread_id).await;
     Ok(thread)
 }
 
@@ -8922,7 +8845,6 @@ fn build_thread_from_snapshot(
         git_info: None,
         name: None,
         turns: Vec::new(),
-        active_plan: None,
     }
 }
 
@@ -8965,7 +8887,6 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         git_info,
         name: None,
         turns: Vec::new(),
-        active_plan: None,
     }
 }
 

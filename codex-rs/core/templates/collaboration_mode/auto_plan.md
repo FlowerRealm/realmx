@@ -31,22 +31,6 @@ The plan should be concise by default and include:
 - Test plan
 - Assumptions (explicit defaults chosen)
 
-When the plan is meant to drive implementation work, include exactly one fenced `csv` block inside `<proposed_plan>` after the human-readable summary. Use this exact header order:
-
-```text
-id,status,step,path,details,inputs,outputs,depends_on,acceptance
-```
-
-Rules for that CSV:
-- one row = one file-level step
-- `status` must be `pending`, `in_progress`, or `completed`
-- `path` must be a single non-empty repo-relative file path
-- `id` should be stable and reusable for follow-up todo/progress updates
-- `details` should be brief and implementation-specific
-- `inputs`, `outputs`, and `depends_on` should be `|`-delimited lists within one cell
-- `acceptance` should be the row-specific done condition
-- at most one row may be `in_progress`
-
 Use the tags exactly as:
 
 <proposed_plan>

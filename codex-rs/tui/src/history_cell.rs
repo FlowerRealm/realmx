@@ -2216,87 +2216,20 @@ impl HistoryCell for PlanUpdateCell {
             out
         };
 
-        let render_step = |item: &PlanItemArg| -> Vec<Line<'static>> {
-            let PlanItemArg {
-                step,
-                status,
-                path,
-                details,
-                inputs,
-                outputs,
-                depends_on,
-                acceptance,
-                ..
-            } = item;
+        let render_step = |status: &StepStatus, text: &str| -> Vec<Line<'static>> {
             let (box_str, step_style) = match status {
                 StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
                 StepStatus::InProgress => ("□ ", Style::default().cyan().bold()),
                 StepStatus::Pending => ("□ ", Style::default().dim()),
             };
 
-            let wrap_width = width.saturating_sub(4).max(1) as usize;
-            let opts = RtOptions::new(wrap_width)
+            let opts = RtOptions::new(width.saturating_sub(4).max(1) as usize)
                 .initial_indent(box_str.into())
                 .subsequent_indent("  ".into());
+            let step = Line::from(text.to_string().set_style(step_style));
+            let wrapped = adaptive_wrap_line(&step, opts);
             let mut out = Vec::new();
-            let step_line = Line::from(step.clone().set_style(step_style));
-            let wrapped = adaptive_wrap_line(&step_line, opts);
             push_owned_lines(&wrapped, &mut out);
-
-            if let Some(path) = path.as_ref().filter(|path| !path.trim().is_empty()) {
-                let path_line = Line::from(vec!["path: ".dim(), path.as_str().dim()]);
-                let wrapped = adaptive_wrap_line(
-                    &path_line,
-                    RtOptions::new(wrap_width)
-                        .initial_indent("  ".into())
-                        .subsequent_indent("  ".into()),
-                );
-                push_owned_lines(&wrapped, &mut out);
-            }
-            if let Some(details) = details
-                .as_ref()
-                .filter(|details| !details.trim().is_empty())
-            {
-                let detail_line = Line::from(vec!["details: ".dim(), details.as_str().dim()]);
-                let wrapped = adaptive_wrap_line(
-                    &detail_line,
-                    RtOptions::new(wrap_width)
-                        .initial_indent("  ".into())
-                        .subsequent_indent("  ".into()),
-                );
-                push_owned_lines(&wrapped, &mut out);
-            }
-            for (label, values) in [
-                ("inputs", inputs.as_ref()),
-                ("outputs", outputs.as_ref()),
-                ("dependsOn", depends_on.as_ref()),
-            ] {
-                let Some(values) = values.filter(|values| !values.is_empty()) else {
-                    continue;
-                };
-                let detail_line =
-                    Line::from(vec![format!("{label}: ").dim(), values.join(", ").dim()]);
-                let wrapped = adaptive_wrap_line(
-                    &detail_line,
-                    RtOptions::new(wrap_width)
-                        .initial_indent("  ".into())
-                        .subsequent_indent("  ".into()),
-                );
-                push_owned_lines(&wrapped, &mut out);
-            }
-            if let Some(acceptance) = acceptance
-                .as_ref()
-                .filter(|acceptance| !acceptance.trim().is_empty())
-            {
-                let detail_line = Line::from(vec!["acceptance: ".dim(), acceptance.as_str().dim()]);
-                let wrapped = adaptive_wrap_line(
-                    &detail_line,
-                    RtOptions::new(wrap_width)
-                        .initial_indent("  ".into())
-                        .subsequent_indent("  ".into()),
-                );
-                push_owned_lines(&wrapped, &mut out);
-            }
             out
         };
 
@@ -2316,8 +2249,8 @@ impl HistoryCell for PlanUpdateCell {
         if self.plan.is_empty() {
             indented_lines.push(Line::from("(no steps provided)".dim().italic()));
         } else {
-            for item in &self.plan {
-                indented_lines.extend(render_step(item));
+            for PlanItemArg { step, status } in self.plan.iter() {
+                indented_lines.extend(render_step(status, step));
             }
         }
         lines.extend(prefix_lines(indented_lines, "  └ ".dim(), "    ".into()));
@@ -4123,37 +4056,16 @@ mod tests {
             ),
             plan: vec![
                 PlanItemArg {
-                    id: None,
                     step: "Investigate existing error paths and logging around HTTP timeouts".into(),
                     status: StepStatus::Completed,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
                 },
                 PlanItemArg {
-                    id: None,
                     step: "Harden Grafana client error handling with retry/backoff and user‑friendly messages".into(),
                     status: StepStatus::InProgress,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
                 },
                 PlanItemArg {
-                    id: None,
                     step: "Add tests for transient failure scenarios and surfacing to the UI".into(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
                 },
             ],
         };
@@ -4171,26 +4083,12 @@ mod tests {
             explanation: None,
             plan: vec![
                 PlanItemArg {
-                    id: None,
                     step: "Define error taxonomy".into(),
                     status: StepStatus::InProgress,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
                 },
                 PlanItemArg {
-                    id: None,
                     step: "Implement mapping to user messages".into(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
-                    inputs: None,
-                    outputs: None,
-                    depends_on: None,
-                    acceptance: None,
                 },
             ],
         };
@@ -4211,15 +4109,8 @@ mod tests {
                 "Investigate failures under {note_url} immediately."
             )),
             plan: vec![PlanItemArg {
-                id: None,
                 step: format!("Validate callbacks under {step_url} before rollout."),
                 status: StepStatus::InProgress,
-                path: None,
-                details: None,
-                inputs: None,
-                outputs: None,
-                depends_on: None,
-                acceptance: None,
             }],
         };
 
@@ -4241,71 +4132,6 @@ mod tests {
                 .count(),
             1,
             "expected full step URL-like token in one rendered line, got: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn plan_update_renders_structured_metadata() {
-        let update = UpdatePlanArgs {
-            explanation: Some("Restored active plan".to_string()),
-            plan: vec![PlanItemArg {
-                id: Some("plan-01".to_string()),
-                step: "Implement active plan replay".to_string(),
-                status: StepStatus::InProgress,
-                path: Some("codex-rs/tui/src/history_cell.rs".to_string()),
-                details: Some("keep metadata visible during resume".to_string()),
-                inputs: Some(vec!["resume payload".to_string()]),
-                outputs: Some(vec!["history rows".to_string()]),
-                depends_on: Some(vec!["plan-00".to_string()]),
-                acceptance: Some("resume shows current plan".to_string()),
-            }],
-        };
-
-        let cell = new_plan_update(update);
-        let rendered = render_lines(&cell.display_lines(42)).join("\n");
-
-        assert!(rendered.contains("path: codex-rs/tui/src/history_cell.rs"));
-        assert!(rendered.contains("details: keep metadata visible"));
-        assert!(rendered.contains("inputs: resume payload"));
-        assert!(rendered.contains("outputs: history rows"));
-        assert!(rendered.contains("dependsOn: plan-00"));
-        assert!(rendered.contains("acceptance: resume shows"));
-    }
-
-    #[test]
-    fn plan_update_wraps_long_path_metadata_in_narrow_width() {
-        let long_path =
-            "codex-rs/tui/src/features/plans/replay/history/very_long_component_name.rs";
-        let update = UpdatePlanArgs {
-            explanation: Some("Restored active plan".to_string()),
-            plan: vec![PlanItemArg {
-                id: Some("plan-01".to_string()),
-                step: "Render replayed plan metadata".to_string(),
-                status: StepStatus::InProgress,
-                path: Some(long_path.to_string()),
-                details: Some("keep long paths readable".to_string()),
-                inputs: None,
-                outputs: None,
-                depends_on: None,
-                acceptance: None,
-            }],
-        };
-
-        let cell = new_plan_update(update);
-        let rendered = render_lines(&cell.display_lines(28));
-        let rendered_blob = rendered.join("\n");
-        let path_lines = rendered
-            .iter()
-            .filter(|line| line.contains("path: ") || line.contains("history/"))
-            .count();
-
-        assert!(
-            path_lines >= 2,
-            "expected long path metadata to wrap across multiple lines, got:\n{rendered_blob}"
-        );
-        assert!(
-            !rendered.iter().any(|line| line.contains(long_path)),
-            "expected narrow rendering to wrap long path instead of keeping it on one line: {rendered_blob}"
         );
     }
 

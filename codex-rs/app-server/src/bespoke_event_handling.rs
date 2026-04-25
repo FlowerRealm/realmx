@@ -1,5 +1,4 @@
 use crate::codex_message_processor::ApiVersion;
-use crate::codex_message_processor::active_plan_from_state_db;
 use crate::codex_message_processor::read_rollout_items_from_rollout;
 use crate::codex_message_processor::read_summary_from_rollout;
 use crate::codex_message_processor::summary_to_thread;
@@ -111,7 +110,6 @@ use codex_core::ThreadManager;
 use codex_core::find_thread_name_by_id;
 use codex_core::review_format::format_review_findings_block;
 use codex_core::review_prompts;
-use codex_core::state_db_bridge::open_if_present;
 use codex_protocol::ThreadId;
 use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse;
@@ -1811,11 +1809,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await
                 {
                     Ok(summary) => {
-                        let state_db_ctx = if let Some(state_db_ctx) = conversation.state_db() {
-                            Some(state_db_ctx)
-                        } else {
-                            open_if_present(codex_home, fallback_model_provider.as_str()).await
-                        };
                         let mut thread = summary_to_thread(summary);
                         match read_rollout_items_from_rollout(rollout_path.as_path()).await {
                             Ok(items) => {
@@ -1823,11 +1816,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                                 thread.status = thread_watch_manager
                                     .loaded_status_for_thread(&thread.id)
                                     .await;
-                                thread.active_plan = active_plan_from_state_db(
-                                    state_db_ctx.as_ref(),
-                                    conversation_id,
-                                )
-                                .await;
                                 match find_thread_name_by_id(codex_home, &conversation_id).await {
                                     Ok(name) => {
                                         thread.name = name;
@@ -3423,26 +3411,12 @@ mod tests {
             explanation: Some("need plan".to_string()),
             plan: vec![
                 PlanItemArg {
-                    id: Some("plan-01".to_string()),
                     step: "first".to_string(),
                     status: StepStatus::Pending,
-                    path: None,
-                    details: None,
-                    inputs: Some(vec!["prompt".to_string()]),
-                    outputs: Some(vec!["draft plan".to_string()]),
-                    depends_on: None,
-                    acceptance: Some("draft exists".to_string()),
                 },
                 PlanItemArg {
-                    id: Some("plan-02".to_string()),
                     step: "second".to_string(),
                     status: StepStatus::Completed,
-                    path: None,
-                    details: None,
-                    inputs: Some(vec!["draft plan".to_string()]),
-                    outputs: Some(vec!["final plan".to_string()]),
-                    depends_on: Some(vec!["plan-01".to_string()]),
-                    acceptance: Some("final plan emitted".to_string()),
                 },
             ],
         };
@@ -3467,11 +3441,8 @@ mod tests {
                 assert_eq!(n.plan.len(), 2);
                 assert_eq!(n.plan[0].step, "first");
                 assert_eq!(n.plan[0].status, TurnPlanStepStatus::Pending);
-                assert_eq!(n.plan[0].inputs, Some(vec!["prompt".to_string()]));
-                assert_eq!(n.plan[0].acceptance.as_deref(), Some("draft exists"));
                 assert_eq!(n.plan[1].step, "second");
                 assert_eq!(n.plan[1].status, TurnPlanStepStatus::Completed);
-                assert_eq!(n.plan[1].depends_on, Some(vec!["plan-01".to_string()]));
             }
             other => bail!("unexpected message: {other:?}"),
         }

@@ -110,16 +110,8 @@ pub fn write_schema_fixtures_with_options(
 
 fn ensure_empty_dir(dir: &Path) -> Result<()> {
     if dir.exists() {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
-                std::fs::remove_dir_all(dir)
-                    .with_context(|| format!("failed to remove {}", dir.display()))?;
-            }
-            Err(err) => {
-                return Err(err).with_context(|| format!("failed to remove {}", dir.display()));
-            }
-        }
+        std::fs::remove_dir_all(dir)
+            .with_context(|| format!("failed to remove {}", dir.display()))?;
     }
     std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     Ok(())
